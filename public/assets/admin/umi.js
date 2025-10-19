@@ -100724,7 +100724,8 @@
                 block_ip: "\u7981\u6b62\u8bbf\u95ee(IP\u76ee\u6807)",
                 dns: "\u6307\u5b9aDNS\u670d\u52a1\u5668\u8fdb\u884c\u89e3\u6790",
                 route: "\u6307\u5b9a\u51fa\u7ad9\u670d\u52a1\u5668(\u57df\u540d\u76ee\u6807)",
-                route_ip: "\u6307\u5b9a\u51fa\u7ad9\u670d\u52a1\u5668(IP\u76ee\u6807)"
+                route_ip: "\u6307\u5b9a\u51fa\u7ad9\u670d\u52a1\u5668(IP\u76ee\u6807)",
+                default_out: "\u81ea\u5b9a\u4e49\u9ed8\u8ba4\u51fa\u7ad9"
             }
         }
     },
@@ -105966,7 +105967,7 @@
             }
             save() {
                 var e = this.state.server;
-                e.network_settings = e.network_settings ? "string" === typeof e.network_settings && JSON.parse(e.network_settings) : null,
+                e.network_settings = e.network_settings ? ("string" === typeof e.network_settings ? JSON.parse(e.network_settings) : e.network_settings) : null,
                 this.props.dispatch({
                     type: "serverV2node/save",
                     params: e,
@@ -111126,7 +111127,14 @@
             }
             save() {
                 var e = u()({}, this.state.route);
-                "object" === typeof e.match ? e.match = e.match.filter(e=>!!e) : e.match = e.match.split(",").filter(e=>!!e),
+                // 规范化 match：如果是数组则过滤空值；如果是字符串则分割后过滤；null/undefined/空值统一为空数组
+                if (Array.isArray(e.match)) {
+                    e.match = e.match.filter(e=>!!e);
+                } else if (e.match && "string" === typeof e.match) {
+                    e.match = e.match.split(",").filter(e=>!!e);
+                } else {
+                    e.match = [];
+                }
                 this.props.dispatch({
                     type: "serverRoute/save",
                     params: e,
@@ -111168,7 +111176,7 @@
                             })
                         })
                     }
-                })), f.a.createElement("div", {
+                })), "default_out" != this.state.route.action && f.a.createElement("div", {
                     className: "form-group"
                 }, f.a.createElement("label", {
                     for: "example-text-input-alt"
@@ -111213,7 +111221,9 @@
                     value: "route"
                 }, b["a"].routeActionText["route"]), f.a.createElement(v["a"].Option, {
                     value: "route_ip"
-                }, b["a"].routeActionText["route_ip"])))), "dns" === this.state.route.action && f.a.createElement("div", {
+                }, b["a"].routeActionText["route_ip"]), f.a.createElement(v["a"].Option, {
+                    value: "default_out"
+                }, b["a"].routeActionText["default_out"])))), "dns" === this.state.route.action && f.a.createElement("div", {
                     className: "form-group"
                 }, f.a.createElement("label", {
                     for: "example-text-input-alt"
@@ -111227,7 +111237,7 @@
                             })
                         })
                     }
-                })), ("route" === this.state.route.action || "route_ip"=== this.state.route.action)&& f.a.createElement("div", {
+                })), ("route" === this.state.route.action || "route_ip"=== this.state.route.action || "default_out"=== this.state.route.action) && f.a.createElement("div", {
                     className: "form-group"
                 }, f.a.createElement("label", {
                     for: "example-text-input-alt"
