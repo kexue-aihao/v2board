@@ -106473,6 +106473,8 @@
                 }, "aes-192-gcm"), y.a.createElement(N["a"].Option, {
                     value: "aes-256-gcm"
                 }, "aes-256-gcm"), y.a.createElement(N["a"].Option, {
+                    value: "chacha20-ietf-poly1305"
+                }, "chacha20-ietf-poly1305"), y.a.createElement(N["a"].Option, {
                     value: "2022-blake3-aes-128-gcm"
                 }, "2022-blake3-aes-128-gcm"), y.a.createElement(N["a"].Option, {
                     value: "2022-blake3-aes-256-gcm"
