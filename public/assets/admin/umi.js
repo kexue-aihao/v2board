@@ -100722,7 +100722,7 @@
             routeActionText: {
                 block: "\u7981\u6b62\u8bbf\u95ee(\u57df\u540d\u76ee\u6807)",
                 block_ip: "\u7981\u6b62\u8bbf\u95ee(IP\u76ee\u6807)",
-                block_protocol: "\u7981\u6b62\u8bbf\u95ee(\u534f\u8bae)",
+                protocol: "\u7981\u6b62\u8bbf\u95ee(\u534f\u8bae)",
                 dns: "\u6307\u5b9aDNS\u670d\u52a1\u5668\u8fdb\u884c\u89e3\u6790",
                 route: "\u6307\u5b9a\u51fa\u7ad9\u670d\u52a1\u5668(\u57df\u540d\u76ee\u6807)",
                 route_ip: "\u6307\u5b9a\u51fa\u7ad9\u670d\u52a1\u5668(IP\u76ee\u6807)",
@@ -111191,7 +111191,7 @@
                     rows: 5,
                     placeholder: (()=> {
                         const action = this.state.route.action;
-                        if (action === "block_protocol") {
+                        if (action === "protocol") {
                             return "http\ntls\nquic\nbittorrent";
                         }
                         if (["route_ip", "block_ip"].includes(action)) {
@@ -111228,8 +111228,8 @@
                 }, b["a"].routeActionText["block"]), f.a.createElement(v["a"].Option, {
                     value: "block_ip"
                 }, b["a"].routeActionText["block_ip"]), f.a.createElement(v["a"].Option, {
-                    value: "block_protocol"
-                }, b["a"].routeActionText["block_protocol"]), f.a.createElement(v["a"].Option, {
+                    value: "protocol"
+                }, b["a"].routeActionText["protocol"]), f.a.createElement(v["a"].Option, {
                     value: "dns"
                 }, b["a"].routeActionText["dns"]), f.a.createElement(v["a"].Option, {
                     value: "route"
