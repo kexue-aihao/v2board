@@ -105967,7 +105967,7 @@
                 }
             }
             save() {
-                var e = this.state.server;
+                e = JSON.parse(JSON.stringify(this.state.server));
                 e.network_settings = e.network_settings ? ("string" === typeof e.network_settings ? JSON.parse(e.network_settings) : e.network_settings) : null;
                 delete e.install_command;
                 this.props.dispatch({
