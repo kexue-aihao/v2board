@@ -100722,6 +100722,7 @@
             routeActionText: {
                 block: "\u7981\u6b62\u8bbf\u95ee(\u57df\u540d\u76ee\u6807)",
                 block_ip: "\u7981\u6b62\u8bbf\u95ee(IP\u76ee\u6807)",
+                block_protocol: "\u7981\u6b62\u8bbf\u95ee(\u534f\u8bae)",
                 dns: "\u6307\u5b9aDNS\u670d\u52a1\u5668\u8fdb\u884c\u89e3\u6790",
                 route: "\u6307\u5b9a\u51fa\u7ad9\u670d\u52a1\u5668(\u57df\u540d\u76ee\u6807)",
                 route_ip: "\u6307\u5b9a\u51fa\u7ad9\u670d\u52a1\u5668(IP\u76ee\u6807)",
@@ -105967,7 +105968,8 @@
             }
             save() {
                 var e = this.state.server;
-                e.network_settings = e.network_settings ? ("string" === typeof e.network_settings ? JSON.parse(e.network_settings) : e.network_settings) : null,
+                e.network_settings = e.network_settings ? ("string" === typeof e.network_settings ? JSON.parse(e.network_settings) : e.network_settings) : null;
+                delete e.install_command;
                 this.props.dispatch({
                     type: "serverV2node/save",
                     params: e,
@@ -111129,7 +111131,6 @@
             }
             save() {
                 var e = u()({}, this.state.route);
-                // 规范化 match：如果是数组则过滤空值；如果是字符串则分割后过滤；null/undefined/空值统一为空数组
                 if (Array.isArray(e.match)) {
                     e.match = e.match.filter(e=>!!e);
                 } else if (e.match && "string" === typeof e.match) {
@@ -111188,7 +111189,16 @@
                         type: "link"
                     }), "\u586b\u5199\u53c2\u8003")), f.a.createElement(y["a"].TextArea, {
                     rows: 5,
-                    placeholder: "route_ip" !== this.state.route.action && "block_ip" !== this.state.route.action ? "example.com(\u5173\u952e\u5b57\u5339\u914d)\ndomain:example.com(\u5b50\u57df\u540d\u5339\u914d)\ngeosite:netflix(\u9884\u5b9a\u4e49\u57df\u540d\u5217\u8868)" : "127.0.0.1(\u5355\u4e00\u5339\u914d)\n10.0.0.0/8(\u8303\u56f4\u5339\u914d)\ngeoip:cn(\u9884\u5b9a\u4e49\u5217\u8868\u5339\u914d)",
+                    placeholder: (()=> {
+                        const action = this.state.route.action;
+                        if (action === "block_protocol") {
+                            return "http\ntls\nquic\nbittorrent";
+                        }
+                        if (["route_ip", "block_ip"].includes(action)) {
+                            return "127.0.0.1(\u5355\u4e00\u5339\u914d)\n10.0.0.0/8(\u8303\u56f4\u5339\u914d)\ngeoip:cn(\u9884\u5b9a\u4e49\u5217\u8868\u5339\u914d)";
+                        }
+                        return "example.com(\u5173\u952e\u5b57\u5339\u914d)\ndomain:example.com(\u5b50\u57df\u540d\u5339\u914d)\ngeosite:netflix(\u9884\u5b9a\u4e49\u57df\u540d\u5217\u8868)";
+                    })(),
                     value: "object" === typeof this.state.route.match ? null === (e = this.state.route.match) || void 0 === e ? void 0 : e.join("\n") : null === (t = this.state.route.match) || void 0 === t ? void 0 : null === (n = t.split(",")) || void 0 === n ? void 0 : n.join("\n"),
                     onChange: e=>{
                         var t;
@@ -111218,6 +111228,8 @@
                 }, b["a"].routeActionText["block"]), f.a.createElement(v["a"].Option, {
                     value: "block_ip"
                 }, b["a"].routeActionText["block_ip"]), f.a.createElement(v["a"].Option, {
+                    value: "block_protocol"
+                }, b["a"].routeActionText["block_protocol"]), f.a.createElement(v["a"].Option, {
                     value: "dns"
                 }, b["a"].routeActionText["dns"]), f.a.createElement(v["a"].Option, {
                     value: "route"
@@ -111249,7 +111261,19 @@
                         type: "link"
                     }), "\u586b\u5199\u53c2\u8003")), f.a.createElement(y["a"].TextArea, {
                     rows: 8,
-                    placeholder: "",
+                    placeholder: JSON.stringify({
+                        tag: "ss_out",
+                        sendThrough: "0.0.0.0",
+                        protocol: "shadowsocks",
+                        settings: {
+                            email: "love@xray.com",
+                            address: "8.8.8.8",
+                            port: 5555,
+                            method: "chacha20-ietf-poly1305",
+                            password: "abcdefghijklmnopqrstuvwxyz",
+                            level: 0
+                        }
+                    }, null, 4),
                     value: this.state.route.action_value,
                     onChange: e=>{
                         this.setState({
@@ -111314,7 +111338,7 @@
                     key: "match",
                     render: e=>{
                         var t;
-                        return "\u5339\u914d ".concat("string" === typeof e ? null === (t = e.split(",").filter(e=>!!e)) || void 0 === t ? void 0 : t.length : e.length, " \u6761\u89c4\u5219")
+                        return e.length == 0 ? "\u65e0\u89c4\u5219\u65f6\u9ed8\u8ba4" : "\u5339\u914d ".concat("string" === typeof e ? null === (t = e.split(",").filter(e=>!!e)) || void 0 === t ? void 0 : t.length : e.length, " \u6761\u89c4\u5219")
                     }
                 }, {
                     title: "\u52a8\u4f5c",
