@@ -104697,7 +104697,9 @@
                     value: "http"
                 }, "HTTP\u7533\u8bf7"), y.a.createElement(N["a"].Option, {
                     value: "dns"
-                }, "DNS\u7533\u8bf7"))), e.cert_mode == "dns" && cert_apply && y.a.createElement("div", {
+                }, "DNS\u7533\u8bf7"), y.a.createElement(N["a"].Option, {
+                    value: "none"
+                }, "\u65e0\u8bc1\u4e66(\u5173\u95edTLS)"))), e.cert_mode == "dns" && cert_apply && y.a.createElement("div", {
                     className: "form-group"
                 }, y.a.createElement("label", null, "DNS\u89e3\u6790\u63d0\u4f9b\u5546Provider ", y.a.createElement("a", {
                     target: "_blank",
@@ -104714,6 +104716,18 @@
                     value: e.dns_env,
                     onChange: e=>this.change("dns_env", e.target.value),
                     placeholder: "\u4e66\u5199\u683c\u5f0fCF_DNS_API_TOKEN=xxxxxxx\u5982\u6709\u591a\u6761\u4f7f\u7528\u9017\u53f7\u002c\u5206\u9694"
+                })), e.cert_mode != "none" && cert_apply && y.a.createElement("div", {
+                    className: "form-group"
+                }, y.a.createElement("label", null, "\u8bc1\u4e66\u516c\u94a5\u6587\u4ef6\u5730\u5740Cert File Path"), y.a.createElement(s["a"], {
+                    value: e.cert_file,
+                    onChange: e=>this.change("cert_file", e.target.value),
+                    placeholder: "\u7559\u7a7a\u5728/etc/v2node/\u76ee\u5f55\u81ea\u52a8\u751f\u6210"
+                })), e.cert_mode != "none" && cert_apply && y.a.createElement("div", {
+                    className: "form-group"
+                }, y.a.createElement("label", null, "\u8bc1\u4e66\u79c1\u94a5\u6587\u4ef6\u5730\u5740Key File Path"), y.a.createElement(s["a"], {
+                    value: e.key_file,
+                    onChange: e=>this.change("key_file", e.target.value),
+                    placeholder: "\u7559\u7a7a\u5728/etc/v2node/\u76ee\u5f55\u81ea\u52a8\u751f\u6210"
                 })), tls == 2 && y.a.createElement("div", {
                     className: "form-group"
                 }, y.a.createElement("label", null, "Server Address"), y.a.createElement(s["a"], {
