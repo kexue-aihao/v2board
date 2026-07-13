@@ -129,6 +129,11 @@ class UniProxyController extends Controller
         if (empty($data)) {
             $data = $_POST;
         }
+        if (empty($data)) {
+            return response([
+                'data' => true
+            ]);
+        }
         if (!is_array($data)) {
             return response([
                 'error' => 'Invalid online data format'
@@ -144,6 +149,13 @@ class UniProxyController extends Controller
             $cacheKeys[] = $key;
             $keyMap[$uid] = $key;
         }
+
+        if (empty($cacheKeys)) {
+            return response([
+                'data' => true
+            ]);
+        }
+
         $cachedData = Cache::many($cacheKeys);
         $updates = [];
 
