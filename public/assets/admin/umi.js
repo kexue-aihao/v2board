@@ -26351,6 +26351,62 @@
         n("3S7+")), c = (n("Pwec"),
         n("CtXQ")), u = n("wd/R"), h = n.n(u), f = (n("Y2fQ"),
         n("NfUx")), d = n.n(f), p = n("CgOb"), m = n("X0q5");
+        function y(e) {
+            var t = String(null == e ? "" : e)
+              , n = /(https?:\/\/[^\s<>"']+)/gi
+              , r = []
+              , i = 0
+              , a = 0
+              , s = function(e) {
+                e.split(/\r?\n/).forEach(function(e, t, n) {
+                    e && r.push(o.a.createElement("span", {
+                        key: "text-" + a++
+                    }, e)),
+                    t < n.length - 1 && r.push(o.a.createElement("br", {
+                        key: "br-" + a++
+                    }))
+                })
+            };
+            return t.replace(n, function(e, n) {
+                var u = e.replace(/[.,!?;:，。！？；：）\]}》]+$/g, "")
+                  , l = /\.(?:jpe?g|png|gif|webp|svg)(?:[?#].*)?$/i.test(u)
+                  , c = a++;
+                return s(t.slice(i, n)),
+                l ? r.push(o.a.createElement("span", {
+                    className: "v2-ticket-inline-image",
+                    key: "image-" + c
+                }, o.a.createElement("img", {
+                    className: "v2-ticket-message-image",
+                    src: u,
+                    alt: "工单图片",
+                    loading: "lazy",
+                    decoding: "async",
+                    referrerPolicy: "no-referrer",
+                    onError: function(e) {
+                        e.currentTarget.style.display = "none";
+                        var t = e.currentTarget.nextSibling;
+                        t && (t.style.display = "inline")
+                    }
+                }), o.a.createElement("a", {
+                    href: u,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    style: {
+                        display: "none"
+                    }
+                }, u))) : r.push(o.a.createElement("a", {
+                    href: u,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    key: "link-" + c
+                }, u)),
+                u.length < e.length && s(e.slice(u.length)),
+                i = n + e.length,
+                e
+            }),
+            s(t.slice(i)),
+            r
+        }
         class g extends o.a.Component {
             constructor() {
                 super(...arguments),
@@ -26403,13 +26459,13 @@
                         className: "text-right ml-4"
                     }, o.a.createElement("div", {
                         className: "d-inline-block bg-gray-lighter px-3 py-2 mb-2 mw-100 rounded text-left"
-                    }, e.message))) : o.a.createElement("div", null, o.a.createElement("div", {
+                    }, y(e.message)))) : o.a.createElement("div", null, o.a.createElement("div", {
                         className: "font-size-sm text-muted my-2"
                     }, h()(1e3 * e.created_at).format("YYYY/MM/DD HH:mm")), o.a.createElement("div", {
                         className: "mr-4"
                     }, o.a.createElement("div", {
                         className: "d-inline-block bg-success-lighter px-3 py-2 mb-2 mw-100 rounded text-left"
-                    }, e.message)))
+                    }, y(e.message))))
                 }
                 )), o.a.createElement("div", {
                     className: "js-chat-form block-content p-2 bg-body-dark ".concat(d.a.input)
@@ -41094,6 +41150,70 @@
           , g = n("wd/R")
           , v = n.n(g)
           , y = n("v32e");
+        function w(e) {
+            var t = String(null == e ? "" : e)
+              , n = /(https?:\/\/[^\s<>"']+)/gi
+              , r = []
+              , i = 0
+              , o = 0
+              , a = function(e) {
+                e.split(/\r?\n/).forEach(function(e, t, n) {
+                    e && r.push(d.a.createElement("span", {
+                        key: "text-" + o++
+                    }, e)),
+                    t < n.length - 1 && r.push(d.a.createElement("br", {
+                        key: "br-" + o++
+                    }))
+                })
+            }
+              , s = function(e) {
+                var t = e.replace(/[.,!?;:，。！？；：）\]}》]+$/g, "");
+                return t || e
+            }
+              , l = function(e, t) {
+                var n = s(e)
+                  , r = /\.(?:jpe?g|png|gif|webp|svg)(?:[?#].*)?$/i.test(n);
+                return r ? d.a.createElement("span", {
+                    className: "v2-ticket-inline-image",
+                    key: "image-" + t
+                }, d.a.createElement("img", {
+                    className: "v2-ticket-message-image",
+                    src: n,
+                    alt: "工单图片",
+                    loading: "lazy",
+                    decoding: "async",
+                    referrerPolicy: "no-referrer",
+                    onError: function(e) {
+                        e.currentTarget.style.display = "none";
+                        var t = e.currentTarget.nextSibling;
+                        t && (t.style.display = "inline")
+                    }
+                }), d.a.createElement("a", {
+                    href: n,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    style: {
+                        display: "none"
+                    }
+                }, n)) : d.a.createElement("a", {
+                    href: n,
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    key: "link-" + t
+                }, n)
+            };
+            return t.replace(n, function(e, n) {
+                var u = e.replace(/[.,!?;:，。！？；：）\]}》]+$/g, "")
+                  , s = l(u, o++);
+                return a(t.slice(i, n)),
+                r.push(s),
+                u.length < e.length && a(e.slice(u.length)),
+                i = n + e.length,
+                e
+            }),
+            a(t.slice(i)),
+            r
+        }
         class b extends d.a.Component {
             constructor(e) {
                 super(e),
@@ -41101,19 +41221,48 @@
                     visible: !1,
                     submit: {
                         level: 1
-                    }
+                    },
+                    selectedTicketId: null,
+                    message: ""
                 },
-                this.onSearchTimeout = void 0
+                this.onSearchTimeout = void 0,
+                this.ticketCheckTimer = void 0,
+                this.embeddedChatCount = 0
             }
             componentDidMount() {
                 this.props.dispatch({
                     type: "ticket/fetch"
                 })
             }
+            componentDidUpdate(e, t) {
+                this.state.selectedTicketId !== t.selectedTicketId && (clearTimeout(this.ticketCheckTimer),
+                this.state.selectedTicketId && this.checkSelectedTicket()),
+                this.refs.embeddedChat && this.props.ticket.ticket && this.props.ticket.ticket.message && this.embeddedChatCount !== this.props.ticket.ticket.message.length && (this.embeddedChatCount = this.props.ticket.ticket.message.length,
+                this.refs.embeddedChat.scrollTop = this.refs.embeddedChat.scrollHeight)
+            }
+            componentWillUnmount() {
+                clearTimeout(this.ticketCheckTimer),
+                clearTimeout(this.onSearchTimeout)
+            }
+            checkSelectedTicket() {
+                var e = this.state.selectedTicketId;
+                clearTimeout(this.ticketCheckTimer),
+                e && (this.ticketCheckTimer = setTimeout(()=>{
+                    this.state.selectedTicketId === e && (this.props.dispatch({
+                        type: "ticket/fetchById",
+                        id: e
+                    }),
+                    this.checkSelectedTicket())
+                }, 5e3))
+            }
             close(e) {
                 this.props.dispatch({
                     type: "ticket/close",
                     id: e
+                }),
+                String(this.state.selectedTicketId) === String(e) && this.setState({
+                    selectedTicketId: null,
+                    message: ""
                 })
             }
             tableOnChange(e, t, n) {
@@ -41136,8 +41285,94 @@
                 })
             }
             toChat(e) {
-                var t = window.location.origin + window.location.pathname + "#/ticket/" + e;
-                -1 === window.navigator.userAgent.toLowerCase().indexOf("mobile") && -1 === window.navigator.userAgent.toLowerCase().indexOf("ipad") ? window.open(t, "_blank", "height=600,width=800,top=0,left=0,toolbar=no,menubar=no,scrollbars=no,resizable=no,location=no,status=no") : window.location.href = t
+                this.setState({
+                    selectedTicketId: e,
+                    message: ""
+                }),
+                this.embeddedChatCount = 0,
+                this.props.dispatch({
+                    type: "ticket/fetchById",
+                    id: e
+                })
+            }
+            replyTicket() {
+                var e = (this.state.message || "").trim()
+                  , t = this.props.ticket
+                  , n = t.ticket && String(t.ticket.id) === String(this.state.selectedTicketId) ? t.ticket : null;
+                e && this.state.selectedTicketId && !t.replyLoading && (!n || 1 !== n.status) && this.props.dispatch({
+                    type: "ticket/reply",
+                    id: this.state.selectedTicketId,
+                    msg: e,
+                    callback: ()=>this.setState({
+                        message: ""
+                    })
+                })
+            }
+            renderTicketDetail(e) {
+                var t = this.props.ticket
+                  , n = t.ticket
+                  , r = t.replyLoading;
+                if (!e)
+                    return d.a.createElement("div", {
+                        className: "v2-ticket-detail-empty"
+                    }, d.a.createElement("span", {
+                        className: "v2-ticket-detail-empty-icon"
+                    }, "?"), d.a.createElement("strong", null, "选择一条工单"), d.a.createElement("span", null, "工单详情和回复内容将在这里显示"));
+                if (!n || String(n.id) !== String(e))
+                    return d.a.createElement("div", {
+                        className: "v2-ticket-detail-empty is-loading"
+                    }, "正在加载工单...");
+                var i = 1 === n.status ? "已关闭" : n.reply_status ? "已回复" : "待回复";
+                return d.a.createElement("div", {
+                    className: "v2-ticket-detail-shell"
+                }, d.a.createElement("header", {
+                    className: "v2-ticket-detail-header"
+                }, d.a.createElement("button", {
+                    type: "button",
+                    className: "v2-ticket-back",
+                    onClick: ()=>this.setState({
+                        selectedTicketId: null,
+                        message: ""
+                    })
+                }, "返回列表"), d.a.createElement("div", {
+                    className: "v2-ticket-detail-heading"
+                }, d.a.createElement("strong", null, n.subject), d.a.createElement("span", null, "工单 #" + n.id + " · 用户 #" + n.user_id)), d.a.createElement("span", {
+                    className: "v2-ticket-detail-status " + (1 === n.status ? "is-closed" : n.reply_status ? "is-replied" : "is-pending")
+                }, i), d.a.createElement("button", {
+                    type: "button",
+                    className: "v2-ticket-close",
+                    disabled: 1 === n.status,
+                    onClick: ()=>this.close(n.id)
+                }, "关闭工单")), d.a.createElement("div", {
+                    className: "v2-ticket-detail-messages js-chat-messages",
+                    ref: "embeddedChat"
+                }, (n.message || []).map((e, t)=>d.a.createElement("div", {
+                    className: "v2-ticket-message " + (e.is_me ? "is-admin" : "is-user"),
+                    key: e.id || t
+                }, d.a.createElement("div", {
+                    className: "v2-ticket-message-meta"
+                }, v()(1e3 * e.created_at).format("YYYY/MM/DD HH:mm")), d.a.createElement("div", {
+                    className: "v2-ticket-bubble"
+                }, w(e.message)))), d.a.createElement("div", {
+                    className: "v2-ticket-composer"
+                }, d.a.createElement("textarea", {
+                    className: "v2-ticket-composer-input",
+                    value: this.state.message || "",
+                    disabled: 1 === n.status || r,
+                    placeholder: 1 === n.status ? "工单已关闭" : "输入内容回复工单...",
+                    onChange: e=>this.setState({
+                        message: e.target.value
+                    }),
+                    onKeyDown: e=>{
+                        13 === e.keyCode && !e.shiftKey && (e.preventDefault(),
+                        this.replyTicket())
+                    }
+                }), d.a.createElement("button", {
+                    type: "button",
+                    className: "v2-ticket-send",
+                    disabled: 1 === n.status || r || !(this.state.message || "").trim(),
+                    onClick: ()=>this.replyTicket()
+                }, r ? "发送中..." : "发送回复"))))
             }
             onSearch(e, t) {
                 clearTimeout(this.onSearchTimeout),
@@ -41233,6 +41468,10 @@
                 }), d.a.createElement(y["a"], {
                     loading: n
                 }, d.a.createElement("div", {
+                    className: "v2-ticket-workspace " + (this.state.selectedTicketId ? "has-selection" : "")
+                }, d.a.createElement("div", {
+                    className: "v2-ticket-list-pane"
+                }, d.a.createElement("div", {
                     className: "block border-bottom"
                 }, d.a.createElement("div", {
                     className: "bg-white"
@@ -41263,7 +41502,9 @@
                         x: 900
                     },
                     onChange: (e,t,n)=>this.tableOnChange(e, n, t)
-                })))))
+                })))), d.a.createElement("aside", {
+                    className: "v2-ticket-detail-pane " + (this.state.selectedTicketId ? "has-selection" : "is-empty")
+                }, this.renderTicketDetail(this.state.selectedTicketId)))))
             }
         }
         t["default"] = Object(m["c"])(e=>{
