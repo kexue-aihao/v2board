@@ -1,4 +1,5 @@
 /node_modules
+/theme-src/modern/node_modules
 /config/v2board.php
 /public/hot
 /public/storage

@@ -1,0 +1,49 @@
+{
+    "name": "modern",
+    "description": "多端现代化用户主题",
+    "version": "1.0.0",
+    "images": "",
+    "configs": [{
+        "label": "主题色",
+        "placeholder": "请选择主题颜色",
+        "field_name": "theme_color",
+        "field_type": "select",
+        "select_options": {
+            "default": "青绿色",
+            "green": "青绿色",
+            "black": "石墨色",
+            "darkblue": "深蓝色"
+        },
+        "default_value": "default"
+    }, {
+        "label": "背景",
+        "placeholder": "可选背景图片 URL",
+        "field_name": "background_url",
+        "field_type": "input"
+    }, {
+        "label": "边栏风格",
+        "placeholder": "请选择边栏风格",
+        "field_name": "theme_sidebar",
+        "field_type": "select",
+        "select_options": {
+            "light": "亮",
+            "dark": "暗"
+        },
+        "default_value": "light"
+    }, {
+        "label": "顶部风格",
+        "placeholder": "请选择顶部风格",
+        "field_name": "theme_header",
+        "field_type": "select",
+        "select_options": {
+            "light": "亮",
+            "dark": "暗"
+        },
+        "default_value": "light"
+    }, {
+        "label": "自定义页脚 HTML",
+        "placeholder": "可以加入客服或统计代码",
+        "field_name": "custom_html",
+        "field_type": "textarea"
+    }]
+}
