@@ -966,3 +966,494 @@ textarea.ant-input {
     padding: 30px 18px 24px;
   }
 }
+
+/* Admin console UI system: dense, calm and data-first. */
+#page-container:not(:has(.v2board-auth-box)) {
+  --admin-bg: #f5f7fa;
+  --admin-surface: #fff;
+  --admin-surface-subtle: #f8fafc;
+  --admin-ink: #111827;
+  --admin-ink-soft: #344054;
+  --admin-muted: #667085;
+  --admin-border: #e4e7ec;
+  --admin-border-strong: #cfd4dc;
+  --admin-primary: #2563eb;
+  --admin-primary-soft: #eff6ff;
+  --admin-accent: #b5893f;
+  --admin-success: #067647;
+  --admin-success-soft: #ecfdf3;
+  --admin-warning: #b54708;
+  --admin-warning-soft: #fffaeb;
+  --admin-danger: #b42318;
+  --admin-danger-soft: #fef3f2;
+  --admin-radius-sm: 6px;
+  --admin-radius-md: 10px;
+  --admin-radius-lg: 12px;
+  --admin-shadow-sm: 0 1px 2px rgb(16 24 40 / 5%);
+  --admin-shadow-md: 0 8px 22px rgb(16 24 40 / 7%);
+  --admin-motion: 180ms ease-out;
+}
+
+#page-container:not(:has(.v2board-auth-box)),
+#page-container:not(:has(.v2board-auth-box)) #main-container {
+  background: var(--admin-bg) !important;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container {
+  min-height: 100vh;
+  color: var(--admin-ink);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .content {
+  width: min(100%, 1600px);
+  margin: 0 auto;
+  padding: 24px 28px 40px;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .content > .row {
+  row-gap: 16px;
+}
+
+/* Sidebar */
+#page-container:not(:has(.v2board-auth-box)) #sidebar {
+  width: 240px;
+  border-right: 1px solid rgb(255 255 255 / 7%);
+  background: var(--admin-ink) !important;
+  box-shadow: 8px 0 24px rgb(16 24 40 / 8%);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .content-header {
+  min-height: 64px;
+  padding: 0 22px;
+  border-bottom: 1px solid rgb(255 255 255 / 9%);
+  background: var(--admin-ink) !important;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .link-fx {
+  color: #f8fafc !important;
+  font-size: 16px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .content-side {
+  padding: 14px 0 20px;
+  background: var(--admin-ink) !important;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-heading {
+  margin: 20px 18px 7px;
+  padding: 0 10px 0;
+  color: rgb(255 255 255 / 42%);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-item {
+  margin: 2px 10px;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link {
+  position: relative;
+  min-height: 44px;
+  gap: 10px;
+  padding: 11px 12px;
+  border-radius: var(--admin-radius-sm);
+  color: rgb(255 255 255 / 68%) !important;
+  transition: color var(--admin-motion), background-color var(--admin-motion), box-shadow var(--admin-motion);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link:hover {
+  color: #fff !important;
+  background: rgb(255 255 255 / 7%) !important;
+  transform: none;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link.active {
+  color: #fff !important;
+  background: rgb(181 137 63 / 16%) !important;
+  box-shadow: inset 3px 0 0 var(--admin-accent);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link-icon {
+  width: 20px;
+  color: rgb(255 255 255 / 46%);
+  font-size: 17px;
+  text-align: center;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link:hover .nav-main-link-icon,
+#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link.active .nav-main-link-icon {
+  color: #e5c98d;
+}
+
+/* Header */
+#page-container:not(:has(.v2board-auth-box)) #page-header {
+  min-height: 64px;
+  border-bottom: 1px solid var(--admin-border);
+  background: rgb(255 255 255 / 94%) !important;
+  box-shadow: 0 1px 10px rgb(16 24 40 / 4%);
+  backdrop-filter: blur(12px);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #page-header .content-header {
+  min-height: 64px;
+  padding: 12px 28px;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #page-header .btn,
+#page-container:not(:has(.v2board-auth-box)) #page-header .ant-btn,
+#page-container:not(:has(.v2board-auth-box)) #page-header a[role="button"] {
+  min-width: 40px;
+  min-height: 40px;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #page-header .text-muted,
+#page-container:not(:has(.v2board-auth-box)) #page-header .text-body-color,
+#page-container:not(:has(.v2board-auth-box)) #page-header .text-black-50 {
+  color: var(--admin-muted) !important;
+}
+
+/* Sections and cards */
+#page-container:not(:has(.v2board-auth-box)) #main-container .block {
+  margin-bottom: 16px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-lg);
+  background: var(--admin-surface);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .block:hover {
+  box-shadow: var(--admin-shadow-md);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .block-header {
+  min-height: 54px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--admin-border);
+  background: var(--admin-surface);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .block-title,
+#page-container:not(:has(.v2board-auth-box)) #main-container .block-header h1,
+#page-container:not(:has(.v2board-auth-box)) #main-container .block-header h2,
+#page-container:not(:has(.v2board-auth-box)) #main-container .block-header h3,
+#page-container:not(:has(.v2board-auth-box)) #main-container .block-header h4 {
+  color: var(--admin-ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .block-content,
+#page-container:not(:has(.v2board-auth-box)) #main-container .block-content-full {
+  padding: 20px;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .content-heading {
+  margin-bottom: 20px;
+  color: var(--admin-ink);
+  font-size: 22px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .content-heading small,
+#page-container:not(:has(.v2board-auth-box)) #main-container .text-muted,
+#page-container:not(:has(.v2board-auth-box)) #main-container .text-black-50,
+#page-container:not(:has(.v2board-auth-box)) #main-container .text-body-color {
+  color: var(--admin-muted) !important;
+}
+
+/* Metrics and dashboard data */
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-statistic,
+#page-container:not(:has(.v2board-auth-box)) #main-container [class*="stat"] {
+  color: var(--admin-ink);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-statistic-title {
+  margin-bottom: 8px;
+  color: var(--admin-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-statistic-content,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-statistic-content-value {
+  color: var(--admin-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container canvas {
+  max-width: 100%;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card-bordered {
+  border-color: var(--admin-border);
+  border-radius: var(--admin-radius-lg);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card-head {
+  min-height: 54px;
+  padding: 0 20px;
+  border-bottom-color: var(--admin-border);
+  color: var(--admin-ink);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card-head-title {
+  color: var(--admin-ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card-body {
+  padding: 20px;
+}
+
+/* Buttons and controls */
+#page-container:not(:has(.v2board-auth-box)) #main-container .btn,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn {
+  min-height: 40px;
+  border-radius: var(--admin-radius-sm) !important;
+  font-weight: 600;
+  transition: color var(--admin-motion), background-color var(--admin-motion), border-color var(--admin-motion), box-shadow var(--admin-motion), transform var(--admin-motion);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .btn:hover:not(:disabled),
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn:hover:not([disabled]) {
+  transform: translateY(-1px);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .btn-primary,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-primary {
+  border-color: var(--admin-primary) !important;
+  color: #fff !important;
+  background: var(--admin-primary) !important;
+  box-shadow: 0 3px 8px rgb(37 99 235 / 18%);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .btn-primary:hover:not(:disabled),
+#page-container:not(:has(.v2board-auth-box)) #main-container .btn-primary:focus:not(:disabled),
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-primary:hover:not([disabled]),
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-primary:focus:not([disabled]) {
+  border-color: #1d4ed8 !important;
+  background: #1d4ed8 !important;
+  box-shadow: 0 5px 12px rgb(37 99 235 / 24%);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .btn-light,
+#page-container:not(:has(.v2board-auth-box)) #main-container .btn-secondary,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-default {
+  border-color: var(--admin-border-strong) !important;
+  color: var(--admin-ink-soft) !important;
+  background: var(--admin-surface) !important;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .btn-light:hover:not(:disabled),
+#page-container:not(:has(.v2board-auth-box)) #main-container .btn-secondary:hover:not(:disabled),
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-default:hover:not([disabled]) {
+  border-color: #93b4f4 !important;
+  color: #1d4ed8 !important;
+  background: var(--admin-primary-soft) !important;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .form-control,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input-affix-wrapper,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-select-selection,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-picker,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input-number {
+  min-height: 40px;
+  border-color: var(--admin-border-strong) !important;
+  border-radius: var(--admin-radius-sm) !important;
+  color: var(--admin-ink) !important;
+  background: var(--admin-surface) !important;
+  box-shadow: none !important;
+  transition: border-color var(--admin-motion), box-shadow var(--admin-motion), background-color var(--admin-motion);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .form-control:focus,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input:focus,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input-affix-wrapper-focused,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-select-focused .ant-select-selection,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-picker-focused,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input-number-focused {
+  border-color: var(--admin-primary) !important;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 14%) !important;
+  outline: 0;
+}
+
+/* Tables, tags and feedback */
+#page-container:not(:has(.v2board-auth-box)) #main-container .table,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table {
+  color: var(--admin-ink-soft);
+  background: var(--admin-surface);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .table thead th,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-thead > tr > th {
+  height: 44px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--admin-border) !important;
+  color: var(--admin-muted);
+  background: var(--admin-surface-subtle) !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .table td,
+#page-container:not(:has(.v2board-auth-box)) #main-container .table th,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-tbody > tr > td {
+  min-height: 48px;
+  padding: 12px 14px;
+  border-top-color: var(--admin-border) !important;
+  vertical-align: middle;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .table-hover tbody tr:hover,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-tbody > tr:hover > td {
+  color: var(--admin-ink);
+  background: #f8fbff !important;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .badge,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag {
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .badge-success,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag-green {
+  border-color: #abefc6;
+  color: var(--admin-success);
+  background: var(--admin-success-soft);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .badge-warning,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag-orange,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag-gold {
+  border-color: #fedf89;
+  color: var(--admin-warning);
+  background: var(--admin-warning-soft);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .badge-danger,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag-red {
+  border-color: #fecdca;
+  color: var(--admin-danger);
+  background: var(--admin-danger-soft);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .alert,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-alert {
+  border-radius: var(--admin-radius-md);
+}
+
+/* Overlays and keyboard states */
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-modal-content,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-drawer-content,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-dropdown-menu,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-popover-inner {
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-lg);
+  box-shadow: 0 18px 48px rgb(16 24 40 / 14%);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-dropdown-menu-item:hover,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-dropdown-menu-submenu-title:hover {
+  color: #1d4ed8;
+  background: var(--admin-primary-soft);
+}
+
+#page-container:not(:has(.v2board-auth-box)) :focus-visible {
+  outline: 3px solid rgb(37 99 235 / 36%) !important;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #page-container:not(:has(.v2board-auth-box)) *,
+  #page-container:not(:has(.v2board-auth-box)) *::before,
+  #page-container:not(:has(.v2board-auth-box)) *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media (max-width: 1199.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .content {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+}
+
+@media (max-width: 991.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .content {
+    padding-top: 20px;
+    padding-bottom: 32px;
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content-full {
+    padding: 18px;
+  }
+}
+
+@media (max-width: 767.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .content {
+    padding: 16px 12px 28px;
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #page-header .content-header {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .block {
+    margin-bottom: 12px;
+    border-radius: var(--admin-radius-md);
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .block-header {
+    min-height: 50px;
+    padding: 14px 16px;
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content-full {
+    padding: 16px;
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .table-responsive,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-wrapper {
+    margin-right: -16px;
+    margin-left: -16px;
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+}
+
+@media (max-width: 420px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .content {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content-full {
+    padding: 14px;
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .btn,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn {
+    min-height: 44px;
+  }
+}
