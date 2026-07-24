@@ -618,6 +618,45 @@ CREATE TABLE `v2_subscription` (
                                   KEY `plan_id` (`plan_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+DROP TABLE IF EXISTS `v2_subscribe_request_log`;
+CREATE TABLE `v2_subscribe_request_log` (
+                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                  `user_id` int(11) NOT NULL,
+                                  `subscription_id` bigint(20) DEFAULT NULL,
+                                  `user_agent` varchar(1000) NOT NULL,
+                                  `ua_hash` char(64) NOT NULL,
+                                  `request_ip` varchar(45) NOT NULL,
+                                  `requested_at` bigint(20) NOT NULL,
+                                  `created_at` int(11) NOT NULL,
+                                  `updated_at` int(11) NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  KEY `user_subscription_requested_at` (`user_id`,`subscription_id`,`requested_at`),
+                                  KEY `subscription_requested_at` (`subscription_id`,`requested_at`),
+                                  KEY `subscription_ua_requested_at` (`subscription_id`,`ua_hash`,`requested_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_subscription_risk_cycle`;
+CREATE TABLE `v2_subscription_risk_cycle` (
+                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                  `user_id` int(11) NOT NULL,
+                                  `subscription_id` bigint(20) NOT NULL,
+                                  `cycle_start` bigint(20) NOT NULL,
+                                  `cycle_end` bigint(20) NOT NULL,
+                                  `transfer_enable` bigint(20) NOT NULL DEFAULT '0',
+                                  `used_traffic` bigint(20) NOT NULL DEFAULT '0',
+                                  `used_ratio` decimal(12,8) DEFAULT NULL,
+                                  `user_agent_count` int(11) NOT NULL DEFAULT '0',
+                                  `status` varchar(16) NOT NULL DEFAULT 'pending',
+                                  `risk_reasons` text DEFAULT NULL,
+                                  `evaluated_at` bigint(20) DEFAULT NULL,
+                                  `created_at` int(11) NOT NULL,
+                                  `updated_at` int(11) NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `subscription_cycle_start` (`subscription_id`,`cycle_start`),
+                                  KEY `user_cycle_end` (`user_id`,`cycle_end`),
+                                  KEY `status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 
 -- 2025-09-12 10:05:00
 

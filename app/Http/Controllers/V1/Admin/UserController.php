@@ -15,12 +15,15 @@ use App\Models\Plan;
 use App\Models\TicketMessage;
 use App\Models\User;
 use App\Models\Subscription;
+use App\Models\SubscribeRequestLog;
 use App\Services\AuthService;
 use App\Services\SubscriptionService;
+use App\Services\SubscriptionRiskService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 
 class UserController extends Controller
 {
@@ -85,6 +88,7 @@ class UserController extends Controller
         $res = $userModel->forPage($current, $pageSize)
             ->get();
         $plan = Plan::get();
+        $riskService = new SubscriptionRiskService();
         for ($i = 0; $i < count($res); $i++) {
             for ($k = 0; $k < count($plan); $k++) {
                 if ($plan[$k]['id'] == $res[$i]['plan_id']) {
@@ -109,6 +113,7 @@ class UserController extends Controller
             $res[$i]['alive_ip'] = $countalive;
             $res[$i]['ips'] = implode(', ', $ips);
             $res[$i]['subscribe_url'] = Helper::getSubscribeUrl($res[$i]['token']);
+            $res[$i]['risk'] = $riskService->summaryForUser((int)$res[$i]['id']);
         }
         return response([
             'data' => $res,
@@ -131,6 +136,7 @@ class UserController extends Controller
             $subscription['subscribe_url'] = Helper::getSubscribeUrl($subscription->token, $subscription);
             return $subscription->makeHidden(['token', 'uuid']);
         })->values();
+        $user['risk'] = (new SubscriptionRiskService())->summaryForUser((int)$user->id);
         return response([
             'data' => $user
         ]);
@@ -215,6 +221,90 @@ class UserController extends Controller
         if (!$subscription) abort(404, '订阅不存在');
         (new SubscriptionService())->revoke($user, $subscription);
         return response(['data' => true]);
+    }
+
+    public function subscribeRequests(Request $request)
+    {
+        $userId = (int)$request->input('user_id');
+        if (!$userId || !User::where('id', $userId)->exists()) {
+            abort(404, '用户不存在');
+        }
+        $subscriptionId = $request->input('subscription_id') ? (int)$request->input('subscription_id') : null;
+        if ($subscriptionId && !Schema::hasTable('v2_subscription')) {
+            abort(404, '订阅不存在');
+        }
+        if ($subscriptionId && !Subscription::where('id', $subscriptionId)->where('user_id', $userId)->exists()) {
+            abort(404, '订阅不存在');
+        }
+        if (!Schema::hasTable('v2_subscribe_request_log')) {
+            return response(['data' => [], 'total' => 0]);
+        }
+
+        $query = SubscribeRequestLog::where('user_id', $userId)->orderByDesc('requested_at');
+        if ($subscriptionId) $query->where('subscription_id', $subscriptionId);
+        if ($request->filled('user_agent')) $query->where('user_agent', 'like', '%' . $request->input('user_agent') . '%');
+        if ($request->filled('request_ip')) $query->where('request_ip', 'like', '%' . $request->input('request_ip') . '%');
+        if ($request->filled('cycle_start')) $query->where('requested_at', '>=', (int)$request->input('cycle_start'));
+        if ($request->filled('cycle_end')) $query->where('requested_at', '<', (int)$request->input('cycle_end'));
+
+        $page = max(1, (int)($request->input('page') ?: $request->input('current') ?: 1));
+        $pageSize = min(100, max(10, (int)($request->input('pageSize') ?: 20)));
+        $total = $query->count();
+        $uaCount = (int)(clone $query)->reorder()->selectRaw('COUNT(DISTINCT ua_hash) AS count')->value('count');
+        $uaSummary = (clone $query)->reorder()
+            ->select('ua_hash', 'user_agent')
+            ->selectRaw('COUNT(*) AS request_count, MIN(requested_at) AS first_requested_at, MAX(requested_at) AS last_requested_at')
+            ->groupBy('ua_hash', 'user_agent')
+            ->orderByDesc('request_count')
+            ->limit(100)
+            ->get();
+        $records = $query->forPage($page, $pageSize)->get();
+        $subscriptionIds = $records->pluck('subscription_id')->filter()->unique()->values();
+        $subscriptions = Schema::hasTable('v2_subscription') && $subscriptionIds->count()
+            ? Subscription::with('plan')->whereIn('id', $subscriptionIds)->get()->keyBy('id')
+            : collect();
+        $records->each(function ($record) use ($subscriptions) {
+            $record['subscription_name'] = optional(optional($subscriptions->get($record->subscription_id))->plan)->name;
+        });
+        return response([
+            'data' => $records,
+            'total' => $total,
+            'summary' => [
+                'request_count' => $total,
+                'user_agent_count' => $uaCount,
+                'user_agents' => $uaSummary
+            ],
+            'risk' => (new SubscriptionRiskService())->summaryForUser($userId)
+        ]);
+    }
+
+    public function subscriptionRisk(Request $request)
+    {
+        $userId = (int)$request->input('user_id');
+        $user = User::find($userId);
+        if (!$user) abort(404, '用户不存在');
+        $subscriptionId = $request->input('subscription_id') ? (int)$request->input('subscription_id') : null;
+        if ($subscriptionId) {
+            if (!Schema::hasTable('v2_subscription')) abort(404, '订阅不存在');
+            $subscription = Subscription::where('id', $subscriptionId)->where('user_id', $userId)->first();
+            if (!$subscription) abort(404, '订阅不存在');
+            (new SubscriptionRiskService())->evaluateCompletedCycles($subscription);
+        } else {
+            $service = new SubscriptionService();
+            if ($service->available()) {
+                $riskService = new SubscriptionRiskService();
+                foreach ($service->forUser($user) as $subscription) {
+                    $riskService->evaluateCompletedCycles($subscription);
+                }
+            }
+        }
+        $riskService = new SubscriptionRiskService();
+        return response([
+            'data' => [
+                'summary' => $riskService->summaryForUser($userId),
+                'cycles' => $riskService->cyclesForUser($userId, $subscriptionId, $request->input('cycle_start') ? (int)$request->input('cycle_start') : null)
+            ]
+        ]);
     }
 
     public function dumpCSV(Request $request)
@@ -390,6 +480,12 @@ class UserController extends Controller
                     TicketMessage::where('ticket_id', $ticket->id)->delete();
                 }
                 Ticket::where('user_id', $user->id)->delete();
+                if (Schema::hasTable('v2_subscribe_request_log')) {
+                    SubscribeRequestLog::where('user_id', $user->id)->delete();
+                }
+                if (Schema::hasTable('v2_subscription_risk_cycle')) {
+                    \App\Models\SubscriptionRiskCycle::where('user_id', $user->id)->delete();
+                }
                 User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
             });
             $builder->delete();
@@ -423,6 +519,12 @@ class UserController extends Controller
                 TicketMessage::where('ticket_id', $ticket->id)->delete();
             }
             Ticket::where('user_id', $request->input('id'))->delete();
+            if (Schema::hasTable('v2_subscribe_request_log')) {
+                SubscribeRequestLog::where('user_id', $request->input('id'))->delete();
+            }
+            if (Schema::hasTable('v2_subscription_risk_cycle')) {
+                \App\Models\SubscriptionRiskCycle::where('user_id', $request->input('id'))->delete();
+            }
     
             $user->delete();
             DB::commit();

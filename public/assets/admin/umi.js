@@ -71407,6 +71407,43 @@
                     cancelText: "\u53d6\u6d88"
                 })
             }
+            subscribeRequests(e) {
+                var t = this;
+                Object(a["a"])("/" + window.settings.secure_path + "/user/subscribe-requests", {
+                    user_id: e.id,
+                    page: 1,
+                    pageSize: 100
+                }).then(function(n) {
+                    if (200 !== n.code) return;
+                    var r = n.data || [];
+                    var i = n.risk || {}, o = "suspicious" === i.status ? "疑似内鬼" : "normal" === i.status ? "正常" : "待观察";
+                    var s = n.summary || {}, l = "请求次数：" + (s.request_count || 0) + "，UA种类：" + (s.user_agent_count || 0);
+                    p["a"].info({
+                        title: "历史订阅 User-Agent - " + e.email + "（风险：" + o + "，" + l + "）",
+                        width: 960,
+                        content: g.a.createElement("div", {
+                            style: {
+                                maxHeight: "60vh",
+                                overflowY: "auto"
+                            }
+                        }, r.length ? r.map(function(e, t) {
+                            return g.a.createElement("div", {
+                                key: e.id || t,
+                                style: {
+                                    borderBottom: "1px solid #f0f0f0",
+                                    padding: "10px 0",
+                                    wordBreak: "break-all"
+                                }
+                            }, g.a.createElement("div", null, "订阅：", e.subscription_name || (e.subscription_id ? "#" + e.subscription_id : "主订阅")), g.a.createElement("div", null, "User-Agent：", e.user_agent), g.a.createElement("div", null, "请求IP：", e.request_ip), g.a.createElement("div", null, "请求时间：", e.requested_at ? w()(1e3 * e.requested_at).format("YYYY-MM-DD HH:mm:ss") : "-"))
+                        }) : "暂无历史订阅请求记录")
+                    })
+                }).catch(function() {
+                    p["a"].error({
+                        title: "请求失败",
+                        content: "历史订阅请求加载失败，请稍后重试"
+                    })
+                })
+            }
             delUser(e) {
                 var t = this;
                 p["a"].confirm({
@@ -71449,6 +71486,19 @@
                         return g.a.createElement(h["a"], {
                             color: e ? "red" : "green"
                         }, e ? "\u5c01\u7981" : "\u6b63\u5e38")
+                    }
+                }, {
+                    title: "风险",
+                    dataIndex: "risk",
+                    key: "risk",
+                    render: e=>{
+                        var t = e && e.status,
+                            n = "suspicious" === t ? "red" : "normal" === t ? "green" : "orange",
+                            r = "suspicious" === t ? "疑似内鬼" : "normal" === t ? "正常" : "待观察";
+                        return g.a.createElement(h["a"], {
+                            color: n,
+                            title: e && e.reasons && e.reasons.length ? e.reasons.join("；") : ""
+                        }, r)
                     }
                 }, {
                     title: "\u8ba2\u9605",
@@ -71545,6 +71595,13 @@
                             }, g.a.createElement("a", null, g.a.createElement(u["a"], {
                                 type: "edit"
                             }), " \u7f16\u8f91"))), g.a.createElement(c["a"].Item, {
+                                onClick: ()=>this.subscribeRequests(t),
+                                onContextMenu: e=>{
+                                    e.stopPropagation()
+                                }
+                            }, g.a.createElement("a", null, g.a.createElement(u["a"], {
+                                type: "history"
+                            }), " 历史订阅 User-Agent")), g.a.createElement(c["a"].Item, {
                                 onContextMenu: e=>{
                                     e.stopPropagation()
                                 }

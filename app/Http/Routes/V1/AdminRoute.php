@@ -123,6 +123,8 @@ class AdminRoute
             $router->post('/user/setInviteUser', 'V1\\Admin\\UserController@setInviteUser');
             $router->post('/user/subscription/set-primary', 'V1\\Admin\\UserController@setPrimarySubscription');
             $router->post('/user/subscription/revoke', 'V1\\Admin\\UserController@revokeSubscription');
+            $router->get ('/user/subscribe-requests', 'V1\\Admin\\UserController@subscribeRequests');
+            $router->get ('/user/risk', 'V1\\Admin\\UserController@subscriptionRisk');
             // Stat
             $router->get ('/stat/getStat', 'V1\\Admin\\StatController@getStat');
             $router->get ('/stat/getOverride', 'V1\\Admin\\StatController@getOverride');

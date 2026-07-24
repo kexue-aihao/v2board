@@ -31,6 +31,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('traffic:update')->everyMinute()->withoutOverlapping();
         // v2board
         $schedule->command('v2board:statistics')->dailyAt('0:10');
+        $schedule->command('subscription:risk')->dailyAt('0:20')->withoutOverlapping();
         // check
         $schedule->command('check:order')->everyMinute()->withoutOverlapping();
         $schedule->command('check:commission')->everyFifteenMinutes();
