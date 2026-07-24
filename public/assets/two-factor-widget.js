@@ -53,6 +53,7 @@
         var style = document.createElement('style');
         style.id = 'v2board-2fa-style';
         style.textContent = '.v2b-2fa-trigger{position:fixed;right:24px;bottom:24px;z-index:1000;border:0;border-radius:999px;padding:11px 16px;background:#1f7a70;color:#fff;box-shadow:0 8px 24px #153c3940;cursor:pointer;font-size:14px}.v2b-2fa-mask{position:fixed;inset:0;z-index:1100;background:#0e1d1c80;display:flex;align-items:center;justify-content:center;padding:16px}.v2b-2fa-modal{width:min(460px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:14px;padding:24px;box-shadow:0 20px 60px #13242240;color:#1b2927;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}.v2b-2fa-modal h2{margin:0 0 6px;font-size:21px}.v2b-2fa-modal p{color:#667773;margin:8px 0 16px}.v2b-2fa-qr{display:block;width:220px;height:220px;margin:12px auto;border:1px solid #dbe7e3}.v2b-2fa-field{display:block;margin:12px 0}.v2b-2fa-field span{display:block;margin-bottom:5px;font-weight:600}.v2b-2fa-field input{box-sizing:border-box;width:100%;min-height:40px;border:1px solid #cbd9d5;border-radius:8px;padding:8px 10px;font:inherit}.v2b-2fa-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.v2b-2fa-actions button{border:0;border-radius:8px;padding:10px 13px;cursor:pointer;background:#1f7a70;color:#fff}.v2b-2fa-actions button.alt{background:#edf4f1;color:#22534d}.v2b-2fa-actions button.danger{background:#a83e43}.v2b-2fa-codes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:12px 0}.v2b-2fa-codes code{padding:7px;background:#f0f5f3;border-radius:6px;text-align:center}.v2b-2fa-status{display:inline-block;padding:4px 8px;border-radius:999px;background:#e7f5ee;color:#187247}.v2b-2fa-error{color:#a83e43;background:#fff0f0;border-radius:7px;padding:8px;margin:8px 0}.v2b-2fa-force{display:flex;align-items:center;gap:8px;padding:10px 0}.v2b-2fa-force input{width:18px;height:18px}@media(max-width:600px){.v2b-2fa-trigger{right:14px;bottom:14px}.v2b-2fa-modal{padding:18px}.v2b-2fa-qr{width:190px;height:190px}}';
+        style.textContent += '.v2b-2fa-inline-help{margin:0 0 12px;color:#667773}.v2b-2fa-inline-account{margin:12px 0;color:#667773}.v2b-2fa-inline-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.v2b-2fa-inline-actions .btn{min-height:38px}.v2b-2fa-inline-actions .btn:disabled{cursor:not-allowed;opacity:.55}.v2b-2fa-inline-recovery{margin-top:18px;padding:14px;background:#f0f5f3;border:1px solid #dbe7e3;border-radius:4px}.v2b-2fa-inline-recovery p{margin:6px 0 10px;color:#667773}.v2b-2fa-inline-codes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.v2b-2fa-inline-codes code{padding:7px;background:#fff;border-radius:4px;text-align:center}.v2b-2fa-inline-error{color:#a83e43;background:#fff0f0;border-radius:4px;padding:8px;margin:8px 0}.v2b-2fa-inline .v2b-2fa-qr{margin:12px 0;width:210px;height:210px}.v2b-2fa-inline .v2b-2fa-field{max-width:480px}.v2b-2fa-inline .v2b-2fa-field input{max-width:480px}@media(max-width:600px){.v2b-2fa-inline .v2b-2fa-qr{width:180px;height:180px}.v2b-2fa-inline-actions .btn{flex:1 1 auto}.v2b-2fa-inline-codes{grid-template-columns:1fr}}';
         document.head.appendChild(style);
     }
 
@@ -160,6 +161,152 @@
         }).catch(function (error) { errorMessage(root, error); });
     }
 
+    function inlineError(root, error) {
+        var box = root.querySelector('.v2b-2fa-inline-error');
+        if (box) {
+            box.textContent = error && error.message || '操作失败，请稍后重试';
+            box.hidden = false;
+        }
+    }
+
+    function inlineSetBusy(root, busy) {
+        var buttons = root.querySelectorAll('button');
+        for (var i = 0; i < buttons.length; i++) buttons[i].disabled = busy;
+    }
+
+    function renderInlineRecovery(root, codes) {
+        if (!codes || !codes.length) return;
+        var panel = document.createElement('div');
+        panel.className = 'v2b-2fa-inline-recovery';
+        panel.innerHTML = '<strong>请立即保存恢复码</strong><p>恢复码只显示这一次，每个恢复码只能使用一次。</p><div class="v2b-2fa-inline-codes"></div>';
+        var codeBox = panel.querySelector('.v2b-2fa-inline-codes');
+        for (var i = 0; i < codes.length; i++) {
+            var code = document.createElement('code');
+            code.textContent = codes[i];
+            codeBox.appendChild(code);
+        }
+        root.appendChild(panel);
+    }
+
+    function renderInlineStatus(root, status) {
+        currentStatus = status || {};
+        var enabled = Boolean(currentStatus.enabled);
+        root.innerHTML = '<p class="v2b-2fa-inline-help">支持 Google Authenticator、Microsoft Authenticator 及其他标准 TOTP 验证器。</p>' +
+            '<span class="v2b-2fa-status">' + (enabled ? '已启用' : '未启用') + '</span>' +
+            '<div class="v2b-2fa-inline-error" hidden></div>' +
+            (enabled ? '<div class="v2b-2fa-inline-secure"><label class="v2b-2fa-field"><span>当前密码</span><input name="inline_current_password" type="password" autocomplete="current-password"></label><label class="v2b-2fa-field"><span>验证器验证码或恢复码</span><input name="inline_code" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="000000 或 XXXX-XXXX-XXXX"></label><div class="v2b-2fa-inline-actions"><button type="button" class="btn btn-alt-secondary" data-inline-action="regenerate">重新生成恢复码</button><button type="button" class="btn btn-danger" data-inline-action="disable">关闭二步验证</button></div></div>' :
+                '<div class="v2b-2fa-inline-actions"><button type="button" class="btn btn-primary" data-inline-action="setup">开始绑定</button></div>');
+        var setupButton = root.querySelector('[data-inline-action="setup"]');
+        if (setupButton) setupButton.onclick = function () { beginInlineSetup(root); };
+        var regenerateButton = root.querySelector('[data-inline-action="regenerate"]');
+        if (regenerateButton) regenerateButton.onclick = function () { secureInlineAction(root, '/recovery-codes/regenerate'); };
+        var disableButton = root.querySelector('[data-inline-action="disable"]');
+        if (disableButton) disableButton.onclick = function () { secureInlineAction(root, '/disable'); };
+    }
+
+    function renderInlineSetup(root, data) {
+        root.innerHTML = '<p class="v2b-2fa-inline-help">请使用验证器扫描二维码，或手动输入密钥添加账户。</p>' +
+            setupQrMarkup(data) +
+            '<p class="v2b-2fa-inline-account"><strong>' + escapeText(data.issuer) + '</strong><br>' + escapeText(data.account) + '</p>' +
+            field('手动密钥', 'text', 'inline_manual_key', '') +
+            field('验证器验证码', 'text', 'inline_setup_code', '000000') +
+            '<div class="v2b-2fa-inline-error" hidden></div><div class="v2b-2fa-inline-actions"><button type="button" class="btn btn-primary" data-inline-action="confirm">确认绑定</button><button type="button" class="btn btn-alt-secondary" data-inline-action="cancel">取消</button></div>';
+        var manualKey = root.querySelector('[name="inline_manual_key"]');
+        if (manualKey) {
+            manualKey.value = data.manual_key || '';
+            manualKey.readOnly = true;
+        }
+        var qr = root.querySelector('.v2b-2fa-qr');
+        if (qr) qr.addEventListener('error', function () {
+            var fallback = document.createElement('p');
+            fallback.className = 'v2b-2fa-inline-error';
+            fallback.textContent = '二维码加载失败，请使用下方手动密钥添加账户。';
+            qr.replaceWith(fallback);
+        });
+        root.querySelector('[data-inline-action="confirm"]').onclick = function () {
+            var code = root.querySelector('[name="inline_setup_code"]').value || '';
+            if (!/^\d{6}$/.test(code)) {
+                inlineError(root, new Error('请输入六位验证器验证码'));
+                return;
+            }
+            inlineSetBusy(root, true);
+            request('/confirm', { method: 'POST', body: { code: code } }).then(function (result) {
+                inlineSetBusy(root, false);
+                renderInlineStatus(root, { enabled: true });
+                renderInlineRecovery(root, result.recovery_codes || []);
+            }).catch(function (error) {
+                inlineSetBusy(root, false);
+                inlineError(root, error);
+            });
+        };
+        root.querySelector('[data-inline-action="cancel"]').onclick = function () {
+            renderInlineStatus(root, currentStatus || { enabled: false });
+        };
+    }
+
+    function beginInlineSetup(root) {
+        inlineSetBusy(root, true);
+        request('/setup', { method: 'POST', body: {} }).then(function (data) {
+            renderInlineSetup(root, data);
+        }).catch(function (error) {
+            inlineSetBusy(root, false);
+            inlineError(root, error);
+        });
+    }
+
+    function secureInlineAction(root, path) {
+        var password = root.querySelector('[name="inline_current_password"]');
+        var code = root.querySelector('[name="inline_code"]');
+        var codeValue = code && code.value || '';
+        if (!password || !password.value || !codeValue) {
+            inlineError(root, new Error('请输入当前密码以及验证器验证码或恢复码'));
+            return;
+        }
+        var payload = {
+            current_password: password.value,
+            code: /^\d{6}$/.test(codeValue) ? codeValue : '',
+            recovery_code: /^\d{6}$/.test(codeValue) ? '' : codeValue
+        };
+        inlineSetBusy(root, true);
+        request(path, { method: 'POST', body: payload }).then(function (result) {
+            if (path === '/disable') {
+                localStorage.removeItem('authorization');
+                window.location.hash = '/login';
+                return;
+            }
+            renderInlineStatus(root, { enabled: true });
+            renderInlineRecovery(root, result.recovery_codes || []);
+        }).catch(function (error) {
+            inlineSetBusy(root, false);
+            inlineError(root, error);
+        });
+    }
+
+    function mountInline() {
+        var root = document.getElementById('v2board-2fa-inline');
+        if (!root || root.getAttribute('data-loaded')) return;
+        addStyle();
+        root.setAttribute('data-loaded', '1');
+        root.innerHTML = '<p class="v2b-2fa-inline-help">正在读取二步验证状态...</p>';
+        requestStaffFallback('/status').then(function (status) {
+            renderInlineStatus(root, status);
+        }).catch(function (error) {
+            root.innerHTML = '<div class="v2b-2fa-inline-error">无法读取二步验证状态，请稍后重试。</div><div class="v2b-2fa-inline-actions"><button type="button" class="btn btn-primary" data-inline-action="retry">重新加载</button></div>';
+            root.querySelector('[data-inline-action="retry"]').onclick = function () {
+                root.removeAttribute('data-loaded');
+                mountInline();
+            };
+        });
+    }
+
+    var inlineObserver;
+
+    function watchInline() {
+        if (!window.__v2board2faInline || inlineObserver || !document.body || !window.MutationObserver) return;
+        inlineObserver = new MutationObserver(mountInline);
+        inlineObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
     function hasAuthorization() {
         try {
             return Boolean(localStorage.getItem('authorization'));
@@ -170,6 +317,7 @@
 
     function mountTrigger() {
         if (!document.body || document.getElementById('v2board-2fa-trigger')) return;
+        if (!isAdmin && window.__v2board2faInline) return;
         if (isAdmin && (!hasAuthorization() || /#\/login(?:[/?]|$)/.test(window.location.hash))) return;
         if (!isAdmin && !/\/(profile)(?:[/?]|$)/.test(window.location.hash)) return;
         addStyle();
@@ -179,7 +327,10 @@
     }
 
     function mount() {
+        if (window.__v2board2faInline) addStyle();
+        watchInline();
         mountTrigger();
+        mountInline();
         if (isAdmin && hasAuthorization()) {
             request('/config/fetch?key=safe', { base: '/api/v1/' + String(window.settings.secure_path).replace(/^\/+|\/+$/g, '') }).then(function (data) {
                 window.__v2board2faForce = Boolean(data && data.safe && Number(data.safe.admin_2fa_force_enable));
@@ -202,7 +353,7 @@
         return true;
     };
 
-    window.addEventListener('hashchange', function () { var old = document.getElementById('v2board-2fa-trigger'); if (old) old.remove(); mountTrigger(); });
+    window.addEventListener('hashchange', function () { var old = document.getElementById('v2board-2fa-trigger'); if (old) old.remove(); mountTrigger(); mountInline(); });
     document.addEventListener('DOMContentLoaded', mount);
     setTimeout(mount, 700);
     setTimeout(mount, 1800);

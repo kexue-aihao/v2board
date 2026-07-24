@@ -16096,6 +16096,20 @@
                 }, l.a.createElement("div", {
                     className: "col-md-12"
                 }, l.a.createElement("div", {
+                    className: "block block-rounded"
+                }, l.a.createElement("div", {
+                    className: "block-header block-header-default"
+                }, l.a.createElement("h3", {
+                    className: "block-title"
+                }, "\u4e8c\u6b65\u9a8c\u8bc1")), l.a.createElement("div", {
+                    className: "block-content"
+                }, l.a.createElement("div", {
+                    id: "v2board-2fa-inline"
+                }))))), l.a.createElement("div", {
+                    className: "row mb-3 mb-md-0"
+                }, l.a.createElement("div", {
+                    className: "col-md-12"
+                }, l.a.createElement("div", {
                     className: "block block-rounded "
                 }, l.a.createElement("div", {
                     className: "block-header block-header-default"

@@ -43,6 +43,7 @@
             ],
             logo: '{{$logo}}'
         }
+        window.__v2board2faInline = true;
     </script>
     <script src="/theme/{{$theme}}/assets/i18n/zh-CN.js?v={{$version}}"></script>
     <script src="/theme/{{$theme}}/assets/i18n/zh-TW.js?v={{$version}}"></script>
