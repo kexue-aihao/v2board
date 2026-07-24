@@ -5603,6 +5603,302 @@
                 }, this.props.children))
             }
         }
+        class A extends f.a.Component {
+            constructor(e) {
+                super(e),
+                this.state = {
+                    loading: !0,
+                    status: null,
+                    error: "",
+                    modal: null,
+                    setup: null,
+                    code: "",
+                    password: "",
+                    recoveryCodes: [],
+                    actionLoading: !1
+                }
+            }
+            componentDidMount() {
+                this.fetchStatus()
+            }
+            base() {
+                return "/api/v1/" + String(window.settings && window.settings.secure_path || "").replace(/^\/+|\/+$/g, "") + "/2fa"
+            }
+            request(e, t) {
+                var n = t || {}
+                  , r = {
+                    Accept: "application/json",
+                    "Content-Type": "application/json"
+                }
+                  , i = localStorage.getItem("authorization");
+                i && (r.Authorization = i);
+                return fetch(this.base() + e, {
+                    method: n.method || "GET",
+                    headers: r,
+                    body: n.body ? JSON.stringify(n.body) : void 0
+                }).then(function(e) {
+                    return e.json().then(function(t) {
+                        if (!e.ok) {
+                            var n = new Error(t && (t.message || t.error) || "\u8bf7\u6c42\u5931\u8d25");
+                            throw n.status = e.status,
+                            n
+                        }
+                        return void 0 !== t.data ? t.data : t
+                    })
+                })
+            }
+            fetchStatus() {
+                var e = this;
+                this.setState({
+                    loading: !0,
+                    error: ""
+                }),
+                this.request("/status").then(function(t) {
+                    e.setState({
+                        loading: !1,
+                        status: t
+                    })
+                }).catch(function(t) {
+                    e.setState({
+                        loading: !1,
+                        error: t.message || "\u65e0\u6cd5\u8bfb\u53d6\u4e8c\u6b65\u9a8c\u8bc1\u72b6\u6001"
+                    })
+                })
+            }
+            startSetup() {
+                var e = this;
+                this.setState({
+                    actionLoading: !0,
+                    error: ""
+                }),
+                this.request("/setup", {
+                    method: "POST",
+                    body: {}
+                }).then(function(t) {
+                    e.setState({
+                        actionLoading: !1,
+                        modal: "setup",
+                        setup: t,
+                        code: ""
+                    })
+                }).catch(function(t) {
+                    e.setState({
+                        actionLoading: !1,
+                        error: t.message || "\u5f00\u59cb\u7ed1\u5b9a\u5931\u8d25"
+                    })
+                })
+            }
+            confirmSetup() {
+                var e = this
+                , t = this.state.code;
+                if (!/^\d{6}$/.test(t)) return void this.setState({
+                    error: "\u8bf7\u8f93\u5165\u9a8c\u8bc1\u5668\u4e2d\u7684 6 \u4f4d\u6570\u5b57\u9a8c\u8bc1\u7801"
+                });
+                this.setState({
+                    actionLoading: !0,
+                    error: ""
+                }),
+                this.request("/confirm", {
+                    method: "POST",
+                    body: {
+                        code: t
+                    }
+                }).then(function(t) {
+                    e.setState({
+                        actionLoading: !1,
+                        modal: "recovery",
+                        recoveryCodes: t.recovery_codes || [],
+                        status: {
+                            enabled: !0
+                        },
+                        code: ""
+                    })
+                }).catch(function(t) {
+                    e.setState({
+                        actionLoading: !1,
+                        error: t.message || "\u9a8c\u8bc1\u5931\u8d25"
+                    })
+                })
+            }
+            secureAction(e) {
+                var t = this
+                  , n = this.state
+                  , r = n.password
+                  , i = n.code;
+                if (!r || !i) return void this.setState({
+                    error: "\u8bf7\u540c\u65f6\u8f93\u5165\u5f53\u524d\u5bc6\u7801\u548c\u9a8c\u8bc1\u7801"
+                });
+                var o = /^\d{6}$/.test(i) ? {
+                    current_password: r,
+                    code: i
+                } : {
+                    current_password: r,
+                    recovery_code: i
+                };
+                this.setState({
+                    actionLoading: !0,
+                    error: ""
+                }),
+                this.request(e, {
+                    method: "POST",
+                    body: o
+                }).then(function(n) {
+                    "/recovery-codes/regenerate" === e ? t.setState({
+                        actionLoading: !1,
+                        modal: "recovery",
+                        recoveryCodes: n.recovery_codes || [],
+                        code: ""
+                    }) : (localStorage.removeItem("authorization"),
+                    window.location.hash = "/login")
+                }).catch(function(e) {
+                    t.setState({
+                        actionLoading: !1,
+                        error: e.message || "\u64cd\u4f5c\u5931\u8d25"
+                    })
+                })
+            }
+            renderModal() {
+                var e = this
+                  , t = this.state
+                  , n = t.modal;
+                if (!n) return null;
+                var r = "setup" === n && t.setup
+                  , i = "recovery" === n
+                  , o = "disable" === n
+                  , a = r ? t.setup : null;
+                return f.a.createElement("div", {
+                    className: "modal d-block",
+                    style: {
+                        backgroundColor: "rgba(0,0,0,.45)"
+                    },
+                    role: "dialog",
+                    "aria-modal": "true"
+                }, f.a.createElement("div", {
+                    className: "modal-dialog modal-dialog-centered"
+                }, f.a.createElement("div", {
+                    className: "modal-content"
+                }, f.a.createElement("div", {
+                    className: "modal-header"
+                }, f.a.createElement("h5", {
+                    className: "modal-title"
+                }, r ? "\u7ed1\u5b9a\u7ba1\u7406\u5458\u4e8c\u6b65\u9a8c\u8bc1" : i ? "\u4fdd\u5b58\u6062\u590d\u7801" : "\u7ba1\u7406\u5458\u4e8c\u6b65\u9a8c\u8bc1"), f.a.createElement("button", {
+                    type: "button",
+                    className: "close",
+                    onClick: ()=>this.setState({
+                        modal: null,
+                        error: ""
+                    })
+                }, "\u00d7")), f.a.createElement("div", {
+                    className: "modal-body"
+                }, t.error && f.a.createElement("div", {
+                    className: "alert alert-danger"
+                }, t.error), r && f.a.createElement(f.a.Fragment, null, f.a.createElement("p", null, "\u8bf7\u4f7f\u7528 Google Authenticator \u6216 Microsoft Authenticator \u626b\u63cf\u4e8c\u7ef4\u7801\uff0c\u4e5f\u53ef\u624b\u52a8\u5f55\u5165\u5bc6\u94a5\u3002"), a.qr_code && f.a.createElement("img", {
+                    src: a.qr_code,
+                    alt: "\u4e8c\u6b65\u9a8c\u8bc1\u4e8c\u7ef4\u7801",
+                    style: {
+                        display: "block",
+                        width: 220,
+                        height: 220,
+                        margin: "12px auto",
+                        objectFit: "contain"
+                    }
+                }), f.a.createElement("p", {
+                    className: "text-center"
+                }, f.a.createElement("strong", null, a.issuer || window.settings.title || "V2Board"), f.a.createElement("br", null), a.account || "", f.a.createElement("br", null), f.a.createElement("code", null, a.manual_key || "")), f.a.createElement("div", {
+                    className: "form-group"
+                }, f.a.createElement("label", null, "\u9a8c\u8bc1\u5668\u52a8\u6001\u9a8c\u8bc1\u7801"), f.a.createElement("input", {
+                    className: "form-control",
+                    inputMode: "numeric",
+                    maxLength: 6,
+                    value: t.code,
+                    onChange: e=>this.setState({
+                        code: e.target.value.replace(/\D/g, "").slice(0, 6)
+                    }),
+                    placeholder: "000000"
+                }))), o && f.a.createElement(f.a.Fragment, null, f.a.createElement("p", null, "\u5173\u95ed\u4e8c\u6b65\u9a8c\u8bc1\u540e\uff0c\u5f53\u524d\u767b\u5f55\u4f1a\u8bdd\u5c06\u88ab\u64a4\u9500\u3002"), f.a.createElement("div", {
+                    className: "form-group"
+                }, f.a.createElement("label", null, "\u5f53\u524d\u5bc6\u7801"), f.a.createElement("input", {
+                    type: "password",
+                    className: "form-control",
+                    value: t.password,
+                    onChange: e=>this.setState({
+                        password: e.target.value
+                    }),
+                    autoComplete: "current-password"
+                })), f.a.createElement("div", {
+                    className: "form-group"
+                }, f.a.createElement("label", null, "\u9a8c\u8bc1\u5668\u6216\u6062\u590d\u7801"), f.a.createElement("input", {
+                    className: "form-control",
+                    value: t.code,
+                    onChange: e=>this.setState({
+                        code: e.target.value
+                    }),
+                    placeholder: "000000 \u6216 XXXX-XXXX-XXXX"
+                }))), i && f.a.createElement(f.a.Fragment, null, f.a.createElement("p", {
+                    className: "alert alert-warning"
+                }, "\u6062\u590d\u7801\u53ea\u663e\u793a\u4e00\u6b21\uff0c\u8bf7\u7acb\u5373\u4fdd\u5b58\u3002"), f.a.createElement("pre", {
+                    style: {
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-all"
+                    }
+                }, t.recoveryCodes.join("\n"))), f.a.createElement("div", {
+                    className: "modal-footer"
+                }, f.a.createElement("button", {
+                    type: "button",
+                    className: "btn btn-secondary",
+                    onClick: ()=>this.setState({
+                        modal: null,
+                        error: ""
+                    })
+                }, i ? "\u5173\u95ed" : "\u53d6\u6d88"), r && f.a.createElement("button", {
+                    type: "button",
+                    className: "btn btn-primary",
+                    disabled: t.actionLoading,
+                    onClick: ()=>this.confirmSetup()
+                }, t.actionLoading ? "\u5904\u7406\u4e2d..." : "\u786e\u8ba4\u7ed1\u5b9a"), o && f.a.createElement("button", {
+                    type: "button",
+                    className: "btn btn-danger",
+                    disabled: t.actionLoading,
+                    onClick: ()=>this.secureAction("/disable")
+                }, t.actionLoading ? "\u5904\u7406\u4e2d..." : "\u5173\u95ed\u4e8c\u6b65\u9a8c\u8bc1"), o && f.a.createElement("button", {
+                    type: "button",
+                    className: "btn btn-outline-secondary",
+                    disabled: t.actionLoading,
+                    onClick: ()=>this.secureAction("/recovery-codes/regenerate")
+                }, t.actionLoading ? "\u5904\u7406\u4e2d..." : "\u91cd\u65b0\u751f\u6210\u6062\u590d\u7801"), "recovery" === n && !t.recoveryCodes.length && f.a.createElement("span", {
+                    className: "text-muted"
+                }, "\u8bf7\u5148\u5b8c\u6210\u64cd\u4f5c"))))))
+            }
+            render() {
+                var e = this
+                  , t = this.state
+                  , n = t.status
+                  , r = t.loading ? "\u52a0\u8f7d\u4e2d..." : t.error && !n ? "\u8bf7\u6c42\u5931\u8d25" : n && n.enabled ? "\u5df2\u542f\u7528" : "\u672a\u542f\u7528";
+                return f.a.createElement(f.a.Fragment, null, f.a.createElement("span", {
+                    className: "mr-2 " + (n && n.enabled ? "text-success" : "text-muted")
+                }, r), !t.loading && f.a.createElement("button", {
+                    type: "button",
+                    className: "btn btn-sm btn-primary",
+                    disabled: t.actionLoading,
+                    onClick: ()=>n && n.enabled ? this.setState({
+                        modal: "disable",
+                        error: "",
+                        code: "",
+                        password: ""
+                    }) : this.startSetup()
+                }, n && n.enabled ? "\u5173\u95ed\u4e8c\u6b65\u9a8c\u8bc1" : "\u5f00\u59cb\u7ed1\u5b9a"), n && n.enabled && f.a.createElement("button", {
+                    type: "button",
+                    className: "btn btn-sm btn-outline-secondary ml-2",
+                    disabled: t.actionLoading,
+                    onClick: ()=>this.setState({
+                        modal: "disable",
+                        error: "",
+                        code: "",
+                        password: ""
+                    })
+                }, "\u91cd\u65b0\u751f\u6210\u6062\u590d\u7801"), this.renderModal())
+            }
+        }
         class g extends f.a.Component {
             componentDidMount() {
                 this.props.dispatch({
@@ -5813,6 +6109,15 @@
                 }, f.a.createElement(l["a"], {
                     checked: parseInt(_.safe_mode_enable),
                     onChange: e=>this.set("safe", "safe_mode_enable", e ? 1 : 0)
+                })), f.a.createElement(m, {
+                    title: "\u7ba1\u7406\u5458\u4e8c\u6b65\u9a8c\u8bc1",
+                    description: "\u517c\u5bb9 Google Authenticator \u548c Microsoft Authenticator\uff0c\u7ed1\u5b9a\u540e\u767b\u5f55\u9700\u8981\u52a8\u6001\u9a8c\u8bc1\u7801\u3002"
+                }, f.a.createElement(A, null)), f.a.createElement(m, {
+                    title: "\u5f3a\u5236\u7ba1\u7406\u5458\u548c\u5458\u5de5\u4f7f\u7528\u4e8c\u6b65\u9a8c\u8bc1",
+                    description: "\u5f00\u542f\u524d\u8bf7\u786e\u4fdd\u6240\u6709\u7ba1\u7406\u5458\u548c\u5458\u5de5\u90fd\u5df2\u5b8c\u6210\u7ed1\u5b9a\u3002"
+                }, f.a.createElement(l["a"], {
+                    checked: parseInt(_.admin_2fa_force_enable),
+                    onChange: e=>this.set("safe", "admin_2fa_force_enable", e ? 1 : 0)
                 })), f.a.createElement(m, {
                     title: "\u540e\u53f0\u8def\u5f84",
                     description: "\u540e\u53f0\u7ba1\u7406\u8def\u5f84\uff0c\u4fee\u6539\u540e\u5c06\u4f1a\u6539\u53d8\u539f\u6709\u7684admin\u8def\u5f84"
@@ -115758,11 +116063,157 @@
 });
 
 (function () {
-    window.__v2board2fa = function (data, redirect) {
-        if (window.__v2board2faChallenge) return window.__v2board2faChallenge(data, redirect);
-        var post = function (url, payload) { return fetch('/api/v1' + url, { method: 'POST', headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then(function (response) { return response.json(); }); };
-        var finish = function (body) { var auth = body && body.data && body.data.auth_data; if (auth) { localStorage.setItem('authorization', auth); window.location.hash = '/' + String(redirect || 'dashboard').replace(/^\//, ''); } return body; };
-        if (data.two_factor_setup_required) return post('/passport/auth/2fa/setup', { setup_token: data.challenge }).then(function (body) { var setup = body && body.data; if (!setup) return body; var popup = window.open('', 'v2board-2fa-setup', 'width=420,height=560'); if (popup) { popup.document.title = setup.issuer || 'Authenticator setup'; var image = popup.document.createElement('img'); image.src = setup.qr_code; image.alt = 'Authenticator QR code'; image.style.width = '280px'; var label = popup.document.createElement('p'); label.textContent = (setup.issuer || '') + ' / ' + (setup.account || '') + ' Manual key: ' + (setup.manual_key || ''); popup.document.body.appendChild(image); popup.document.body.appendChild(label); } var code = window.prompt('Scan the QR code, then enter the six-digit code'); return post('/passport/auth/2fa/confirm', { setup_token: data.challenge, code: code || '' }).then(finish); });
-        var value = window.prompt('Enter your authenticator code or recovery code'); var payload = { challenge: data.challenge }; if (/^\\d{6}$/.test(value || '')) payload.code = value; else payload.recovery_code = value || ''; return post('/passport/auth/verify2fa', payload).then(finish);
-    };
+    var overlay;
+    function close() {
+        overlay && overlay.remove();
+        overlay = null;
+    }
+    function post(url, payload) {
+        return fetch('/api/v1' + url, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload || {})
+        }).then(function (response) {
+            return response.json().then(function (body) {
+                if (!response.ok) throw new Error(body && (body.message || body.error) || '\u8bf7\u6c42\u5931\u8d25');
+                return body && body.data !== undefined ? body.data : body;
+            });
+        });
+    }
+    function open(data, redirect) {
+        close();
+        overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px;';
+        var panel = document.createElement('div');
+        panel.style.cssText = 'width:min(460px,100%);max-height:92vh;overflow:auto;background:#fff;border-radius:4px;box-shadow:0 12px 40px rgba(0,0,0,.25);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#495057;';
+        var header = document.createElement('div');
+        header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:15px;border-bottom:1px solid #e8e8e8;';
+        var title = document.createElement('strong');
+        title.textContent = data.two_factor_setup_required ? '\u8bbe\u7f6e\u7ba1\u7406\u5458\u4e8c\u6b65\u9a8c\u8bc1' : '\u5b8c\u6210\u4e8c\u6b65\u9a8c\u8bc1';
+        var closeButton = document.createElement('button');
+        closeButton.type = 'button';
+        closeButton.textContent = '\u00d7';
+        closeButton.style.cssText = 'border:0;background:transparent;font-size:24px;line-height:1;color:#6c757d;cursor:pointer;';
+        closeButton.onclick = close;
+        header.appendChild(title);
+        header.appendChild(closeButton);
+        var body = document.createElement('div');
+        body.style.cssText = 'padding:15px;';
+        var error = document.createElement('div');
+        error.style.cssText = 'display:none;padding:8px 10px;margin-bottom:12px;background:#fbe9e7;color:#b42318;border-radius:3px;';
+        var footer = document.createElement('div');
+        footer.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;padding:10px 15px;border-top:1px solid #e8e8e8;';
+        var cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.textContent = '\u53d6\u6d88';
+        cancel.className = 'btn btn-secondary';
+        cancel.onclick = close;
+        footer.appendChild(cancel);
+        panel.appendChild(header);
+        panel.appendChild(body);
+        panel.appendChild(error);
+        panel.appendChild(footer);
+        overlay.appendChild(panel);
+        document.body.appendChild(overlay);
+        function showError(value) {
+            error.textContent = value && value.message || '\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5';
+            error.style.display = 'block';
+        }
+        function finish(auth) {
+            if (!auth) return showError(new Error('\u767b\u5f55\u51ed\u8bc1\u65e0\u6548'));
+            localStorage.setItem('authorization', auth);
+            close();
+            window.location.hash = '/' + String(redirect || 'dashboard').replace(/^\//, '');
+        }
+        function input(placeholder) {
+            var field = document.createElement('input');
+            field.className = 'form-control';
+            field.placeholder = placeholder;
+            field.autocomplete = 'one-time-code';
+            field.inputMode = 'numeric';
+            field.style.cssText = 'display:block;width:100%;padding:7px 10px;border:1px solid #d4dcec;border-radius:3px;';
+            return field;
+        }
+        function action(label, handler) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-primary';
+            button.textContent = label;
+            button.onclick = function () {
+                button.disabled = true;
+                handler().catch(showError).finally(function () { button.disabled = false; });
+            };
+            footer.appendChild(button);
+            return button;
+        }
+        if (data.two_factor_setup_required) {
+            body.textContent = '\u6b63\u5728\u52a0\u8f7d\u7ed1\u5b9a\u4fe1\u606f...';
+            post('/passport/auth/2fa/setup', { setup_token: data.challenge }).then(function (setup) {
+                body.innerHTML = '';
+                var guide = document.createElement('p');
+                guide.textContent = '\u8bf7\u4f7f\u7528 Google Authenticator \u6216 Microsoft Authenticator \u626b\u63cf\u4e8c\u7ef4\u7801\uff0c\u4e5f\u53ef\u4f7f\u7528\u624b\u52a8\u5bc6\u94a5\u3002';
+                body.appendChild(guide);
+                if (setup.qr_code) {
+                    var image = document.createElement('img');
+                    image.src = setup.qr_code;
+                    image.alt = '\u4e8c\u6b65\u9a8c\u8bc1\u4e8c\u7ef4\u7801';
+                    image.style.cssText = 'display:block;width:220px;height:220px;object-fit:contain;margin:12px auto;';
+                    body.appendChild(image);
+                }
+                var identity = document.createElement('p');
+                var issuer = document.createElement('strong');
+                issuer.textContent = setup.issuer || '';
+                var account = document.createElement('span');
+                account.textContent = setup.account || '';
+                var manualKey = document.createElement('code');
+                manualKey.textContent = setup.manual_key || '';
+                identity.appendChild(issuer);
+                identity.appendChild(document.createElement('br'));
+                identity.appendChild(account);
+                identity.appendChild(document.createElement('br'));
+                identity.appendChild(manualKey);
+                body.appendChild(identity);
+                var code = input('000000');
+                body.appendChild(code);
+                action('\u786e\u8ba4\u5e76\u767b\u5f55', function () {
+                    return post('/passport/auth/2fa/confirm', { setup_token: data.challenge, code: code.value }).then(function (result) {
+                        if (!result.auth_data) throw new Error('\u767b\u5f55\u51ed\u8bc1\u65e0\u6548');
+                        body.innerHTML = '';
+                        var warning = document.createElement('p');
+                        warning.textContent = '\u4ee5\u4e0b\u6062\u590d\u7801\u53ea\u663e\u793a\u4e00\u6b21\uff0c\u8bf7\u7acb\u5373\u4fdd\u5b58\u3002';
+                        warning.style.cssText = 'color:#856404;background:#fff3cd;padding:10px;border-radius:3px;';
+                        var recovery = document.createElement('pre');
+                        recovery.textContent = (result.recovery_codes || []).join('\n');
+                        recovery.style.cssText = 'white-space:pre-wrap;word-break:break-all;';
+                        body.appendChild(warning);
+                        body.appendChild(recovery);
+                        while (footer.firstChild) footer.removeChild(footer.firstChild);
+                        var done = document.createElement('button');
+                        done.className = 'btn btn-primary';
+                        done.textContent = '\u5b8c\u6210\u767b\u5f55';
+                        done.onclick = function () { finish(result.auth_data); };
+                        footer.appendChild(done);
+                    });
+                });
+            }).catch(showError);
+        } else {
+            var hint = document.createElement('p');
+            hint.textContent = '\u8bf7\u8f93\u5165\u9a8c\u8bc1\u5668\u7684 6 \u4f4d\u52a8\u6001\u9a8c\u8bc1\u7801\u6216\u4e00\u6b21\u6027\u6062\u590d\u7801\u3002';
+            body.appendChild(hint);
+            var value = input('000000 \u6216 XXXX-XXXX-XXXX');
+            value.autocomplete = 'one-time-code';
+            body.appendChild(value);
+            action('\u9a8c\u8bc1\u5e76\u7ee7\u7eed', function () {
+                var payload = { challenge: data.challenge };
+                if (/^\d{6}$/.test(value.value)) payload.code = value.value;
+                else payload.recovery_code = value.value;
+                return post('/passport/auth/verify2fa', payload).then(function (result) { finish(result.auth_data); });
+            });
+        }
+    }
+    window.__v2board2faChallenge = open;
+    window.__v2board2fa = open;
 })();
