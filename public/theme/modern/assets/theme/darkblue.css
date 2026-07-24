@@ -1,0 +1,46 @@
+:root {
+  --accent: #3b5998;
+  --accent-strong: #2d4373;
+  --accent-soft: #e2e8f7;
+  --accent-shadow: 0 5px 14px rgba(59, 89, 152, .25);
+  --accent-button-shadow: 0 6px 14px rgba(45, 67, 115, .16);
+  --accent-card-shadow: 0 12px 30px rgba(59, 89, 152, .12);
+  --brand-showcase: #2d4373;
+  --brand-showcase-eyebrow: #b7c8f0;
+  --brand-showcase-emphasis: #e1e9ff;
+  --brand-showcase-text: #f1f5ff;
+  --brand-showcase-muted: rgba(241, 245, 255, .67);
+  --brand-showcase-note: rgba(241, 245, 255, .65);
+}
+
+:root[data-theme='dark'] {
+  --accent: #7393cf;
+  --accent-strong: #2f4f8e;
+  --accent-soft: #293a60;
+  --accent-shadow: 0 5px 14px rgba(115, 147, 207, .22);
+  --accent-button-shadow: 0 6px 14px rgba(47, 79, 142, .2);
+  --accent-card-shadow: 0 12px 30px rgba(115, 147, 207, .16);
+  --brand-showcase: #2f4f8e;
+  --brand-showcase-eyebrow: #c0d1f4;
+  --brand-showcase-emphasis: #e5edff;
+  --brand-showcase-text: #f3f6ff;
+  --brand-showcase-muted: rgba(243, 246, 255, .67);
+  --brand-showcase-note: rgba(243, 246, 255, .65);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme='system'] {
+    --accent: #7393cf;
+    --accent-strong: #2f4f8e;
+    --accent-soft: #293a60;
+    --accent-shadow: 0 5px 14px rgba(115, 147, 207, .22);
+    --accent-button-shadow: 0 6px 14px rgba(47, 79, 142, .2);
+    --accent-card-shadow: 0 12px 30px rgba(115, 147, 207, .16);
+    --brand-showcase: #2f4f8e;
+    --brand-showcase-eyebrow: #c0d1f4;
+    --brand-showcase-emphasis: #e5edff;
+    --brand-showcase-text: #f3f6ff;
+    --brand-showcase-muted: rgba(243, 246, 255, .67);
+    --brand-showcase-note: rgba(243, 246, 255, .65);
+  }
+}

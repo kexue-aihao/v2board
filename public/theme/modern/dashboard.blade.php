@@ -3,12 +3,30 @@
 <head>
     @php
         $modernAssetPath = public_path("theme/{$theme}/assets/index.js");
-        $modernAssetVersion = is_file($modernAssetPath) ? filemtime($modernAssetPath) : $version;
+        $modernThemeColors = [
+            'default' => '#0665d0',
+            'green' => '#319795',
+            'black' => '#343a40',
+            'darkblue' => '#3b5998'
+        ];
+        $modernThemeColor = $theme_config['theme_color'] ?? 'default';
+        if (!array_key_exists($modernThemeColor, $modernThemeColors)) {
+            $modernThemeColor = 'default';
+        }
+        $modernPalettePath = public_path("theme/{$theme}/assets/theme/{$modernThemeColor}.css");
+        $modernAssetVersions = array_filter([
+            is_file($modernAssetPath) ? filemtime($modernAssetPath) : null,
+            is_file($modernPalettePath) ? filemtime($modernPalettePath) : null
+        ]);
+        $modernAssetVersion = $modernAssetVersions ? max($modernAssetVersions) : $version;
     @endphp
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-    <meta name="theme-color" content="#f4f7f5">
+    <meta name="theme-color" content="{{$modernThemeColors[$modernThemeColor]}}">
     <link rel="stylesheet" href="/theme/{{$theme}}/assets/index.css?v={{$modernAssetVersion}}">
+    @if (is_file($modernPalettePath))
+        <link rel="stylesheet" href="/theme/{{$theme}}/assets/theme/{{$modernThemeColor}}.css?v={{$modernAssetVersion}}">
+    @endif
     <title>{{$title}}</title>
     <script>window.routerBase = "/";</script>
     <script>
