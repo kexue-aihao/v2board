@@ -153,8 +153,17 @@
         }).catch(function (error) { errorMessage(root, error); });
     }
 
+    function hasAuthorization() {
+        try {
+            return Boolean(localStorage.getItem('authorization'));
+        } catch (error) {
+            return false;
+        }
+    }
+
     function mountTrigger() {
         if (!document.body || document.getElementById('v2board-2fa-trigger')) return;
+        if (isAdmin && (!hasAuthorization() || /#\/login(?:[/?]|$)/.test(window.location.hash))) return;
         if (!isAdmin && !/\/(profile)(?:[/?]|$)/.test(window.location.hash)) return;
         addStyle();
         var button = document.createElement('button');
@@ -164,7 +173,7 @@
 
     function mount() {
         mountTrigger();
-        if (isAdmin) {
+        if (isAdmin && hasAuthorization()) {
             request('/config/fetch?key=safe', { base: '/api/v1/' + String(window.settings.secure_path).replace(/^\/+|\/+$/g, '') }).then(function (data) {
                 window.__v2board2faForce = Boolean(data && data.safe && Number(data.safe.admin_2fa_force_enable));
             }).catch(function () {});
