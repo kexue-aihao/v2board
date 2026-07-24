@@ -23,7 +23,7 @@ class TwoFactorService
     {
         $this->google2fa = new Google2FA();
         $this->google2fa->setWindow(1);
-        $this->google2fa->setPeriod(self::CODE_STEP);
+        $this->google2fa->setKeyRegeneration(self::CODE_STEP);
         $this->google2fa->setOneTimePasswordLength(6);
     }
 
