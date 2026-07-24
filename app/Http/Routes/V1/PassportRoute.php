@@ -13,6 +13,9 @@ class PassportRoute
             // Auth
             $router->post('/auth/register', 'V1\\Passport\\AuthController@register');
             $router->post('/auth/login', 'V1\\Passport\\AuthController@login');
+            $router->post('/auth/verify2fa', 'V1\\Passport\\AuthController@verify2fa');
+            $router->post('/auth/2fa/setup', 'V1\\Passport\\AuthController@setup2fa');
+            $router->post('/auth/2fa/confirm', 'V1\\Passport\\AuthController@confirmSetup2fa');
             $router->get ('/auth/token2Login', 'V1\\Passport\\AuthController@token2Login');
             $router->post('/auth/forget', 'V1\\Passport\\AuthController@forget');
             $router->post('/auth/getQuickLoginUrl', 'V1\\Passport\\AuthController@getQuickLoginUrl');

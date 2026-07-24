@@ -5,6 +5,8 @@ namespace App\Http\Controllers\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ConfigSave;
 use App\Jobs\SendEmailJob;
+use App\Models\User;
+use App\Models\UserTwoFactor;
 use App\Services\TelegramService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
@@ -170,7 +172,8 @@ class ConfigController extends Controller
                 'register_limit_expire' => config('v2board.register_limit_expire', 60),
                 'password_limit_enable' => (int)config('v2board.password_limit_enable', 1),
                 'password_limit_count' => config('v2board.password_limit_count', 5),
-                'password_limit_expire' => config('v2board.password_limit_expire', 60)
+                'password_limit_expire' => config('v2board.password_limit_expire', 60),
+                'admin_2fa_force_enable' => (int)config('v2board.admin_2fa_force_enable', 0)
             ]
         ];
         if ($key && isset($data[$key])) {
@@ -189,6 +192,14 @@ class ConfigController extends Controller
     public function save(ConfigSave $request)
     {
         $data = $request->validated();
+        if ((int)($data['admin_2fa_force_enable'] ?? config('v2board.admin_2fa_force_enable', 0)) === 1) {
+            $hasUnprotectedStaff = User::where(function ($query) {
+                $query->where('is_admin', 1)->orWhere('is_staff', 1);
+            })->whereNotIn('id', UserTwoFactor::where('enabled', 1)->pluck('user_id'))->exists();
+            if ($hasUnprotectedStaff) {
+                abort(422, '请先为全部管理员和员工绑定二步验证');
+            }
+        }
         $config = config('v2board');
         foreach (ConfigSave::RULES as $k => $v) {
             if (!in_array($k, array_keys(ConfigSave::RULES))) {

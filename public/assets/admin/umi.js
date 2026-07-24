@@ -71980,7 +71980,7 @@
                                     Object(o["b"])("/passport/auth/login", n);
                                 case 4:
                                     return t = e.sent,
-                                    e.next = 7,
+                                    t.data && (t.data.two_factor_required || t.data.two_factor_setup_required) ? e.abrupt("return", window.__v2board2fa(t.data, "/dashboard")) : e.next = 7,
                                     r({
                                         type: "save",
                                         payload: {
@@ -109241,7 +109241,7 @@
                                     });
                                 case 4:
                                     return t = e.sent,
-                                    e.next = 7,
+                                    t.data && (t.data.two_factor_required || t.data.two_factor_setup_required) ? e.abrupt("return", window.__v2board2fa(t.data, "/dashboard")) : e.next = 7,
                                     i({
                                         type: "save",
                                         payload: {
@@ -115756,3 +115756,13 @@
         }
     }
 });
+
+(function () {
+    window.__v2board2fa = function (data, redirect) {
+        if (window.__v2board2faChallenge) return window.__v2board2faChallenge(data, redirect);
+        var post = function (url, payload) { return fetch('/api/v1' + url, { method: 'POST', headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then(function (response) { return response.json(); }); };
+        var finish = function (body) { var auth = body && body.data && body.data.auth_data; if (auth) { localStorage.setItem('authorization', auth); window.location.hash = '/' + String(redirect || 'dashboard').replace(/^\//, ''); } return body; };
+        if (data.two_factor_setup_required) return post('/passport/auth/2fa/setup', { setup_token: data.challenge }).then(function (body) { var setup = body && body.data; if (!setup) return body; var popup = window.open('', 'v2board-2fa-setup', 'width=420,height=560'); if (popup) { popup.document.title = setup.issuer || 'Authenticator setup'; var image = popup.document.createElement('img'); image.src = setup.qr_code; image.alt = 'Authenticator QR code'; image.style.width = '280px'; var label = popup.document.createElement('p'); label.textContent = (setup.issuer || '') + ' / ' + (setup.account || '') + ' Manual key: ' + (setup.manual_key || ''); popup.document.body.appendChild(image); popup.document.body.appendChild(label); } var code = window.prompt('Scan the QR code, then enter the six-digit code'); return post('/passport/auth/2fa/confirm', { setup_token: data.challenge, code: code || '' }).then(finish); });
+        var value = window.prompt('Enter your authenticator code or recovery code'); var payload = { challenge: data.challenge }; if (/^\\d{6}$/.test(value || '')) payload.code = value; else payload.recovery_code = value || ''; return post('/passport/auth/verify2fa', payload).then(finish);
+    };
+})();

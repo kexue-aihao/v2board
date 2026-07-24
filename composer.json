@@ -21,6 +21,8 @@
         "laravel/tinker": "^2.5",
         "linfo/linfo": "^4.0",
         "paragonie/sodium_compat": "^1.20",
+        "pragmarx/google2fa": "^8.0",
+        "chillerlan/php-qrcode": "^3.4",
         "php-curl-class/php-curl-class": "^8.6",
         "rybakit/msgpack": "^0.9.1",
         "stripe/stripe-php": "^v14.9.0",

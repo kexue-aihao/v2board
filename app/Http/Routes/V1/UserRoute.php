@@ -22,6 +22,11 @@ class UserRoute
             $router->get ('/getSubscribe', 'V1\\User\\UserController@getSubscribe');
             $router->get ('/getStat', 'V1\\User\\UserController@getStat');
             $router->get ('/checkLogin', 'V1\\User\\UserController@checkLogin');
+            $router->get ('/2fa/status', 'V1\\User\\TwoFactorController@status');
+            $router->post('/2fa/setup', 'V1\\User\\TwoFactorController@setup');
+            $router->post('/2fa/confirm', 'V1\\User\\TwoFactorController@confirm');
+            $router->post('/2fa/disable', 'V1\\User\\TwoFactorController@disable');
+            $router->post('/2fa/recovery-codes/regenerate', 'V1\\User\\TwoFactorController@regenerateRecoveryCodes');
             $router->post('/transfer', 'V1\\User\\UserController@transfer');
             $router->post('/getQuickLoginUrl', 'V1\\User\\UserController@getQuickLoginUrl');
             $router->get ('/getActiveSession', 'V1\\User\\UserController@getActiveSession');

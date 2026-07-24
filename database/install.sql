@@ -587,3 +587,32 @@ CREATE TABLE `v2_user` (
 
 
 -- 2025-09-12 10:05:00
+
+CREATE TABLE `v2_user_two_factor` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NOT NULL,
+    `secret_encrypted` text DEFAULT NULL,
+    `pending_secret_encrypted` text DEFAULT NULL,
+    `enabled` tinyint(1) NOT NULL DEFAULT '0',
+    `confirmed_at` int(11) DEFAULT NULL,
+    `recovery_codes` text DEFAULT NULL,
+    `last_used_step` bigint(20) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_two_factor_audit` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NOT NULL,
+    `actor_user_id` int(11) DEFAULT NULL,
+    `action` varchar(64) NOT NULL,
+    `ip` varchar(64) DEFAULT NULL,
+    `user_agent` varchar(500) DEFAULT NULL,
+    `metadata` text DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `user_id` (`user_id`),
+    KEY `action` (`action`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

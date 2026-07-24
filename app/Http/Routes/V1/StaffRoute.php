@@ -11,6 +11,12 @@ class StaffRoute
             'prefix' => 'staff',
             'middleware' => 'staff'
         ], function ($router) {
+            // Two-factor protection for the current staff account.
+            $router->get ('/2fa/status', 'V1\\User\\TwoFactorController@status');
+            $router->post('/2fa/setup', 'V1\\User\\TwoFactorController@setup');
+            $router->post('/2fa/confirm', 'V1\\User\\TwoFactorController@confirm');
+            $router->post('/2fa/disable', 'V1\\User\\TwoFactorController@disable');
+            $router->post('/2fa/recovery-codes/regenerate', 'V1\\User\\TwoFactorController@regenerateRecoveryCodes');
             // Ticket
             $router->get ('/ticket/fetch', 'V1\\Staff\\TicketController@fetch');
             $router->post('/ticket/reply', 'V1\\Staff\\TicketController@reply');

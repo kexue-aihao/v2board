@@ -11,6 +11,7 @@ use App\Models\InviteCode;
 use App\Models\Plan;
 use App\Models\User;
 use App\Services\AuthService;
+use App\Services\TwoFactorService;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
@@ -175,9 +176,55 @@ class AuthController extends Controller
         }
 
         $authService = new AuthService($user);
+        $twoFactor = (new TwoFactorService())->issueLoginResult($user, $request);
+        if ($twoFactor) {
+            return response(['data' => $twoFactor]);
+        }
         return response([
             'data' => $authService->generateAuthData($request)
         ]);
+    }
+
+    public function verify2fa(Request $request)
+    {
+        $service = new TwoFactorService();
+        $user = $service->verifyLogin(
+            $request->input('challenge'),
+            $request->input('code'),
+            $request->input('recovery_code'),
+            $request
+        );
+        return response([
+            'data' => (new AuthService($user))->generateAuthData($request, true)
+        ]);
+    }
+
+    public function setup2fa(Request $request)
+    {
+        $service = new TwoFactorService();
+        $setupToken = $request->input('setup_token');
+        $challenge = $service->getChallenge($setupToken, 'setup');
+        if (!$challenge || empty($challenge['user_id'])) abort(500, '二步验证设置请求已过期，请重新登录');
+        $user = User::find($challenge['user_id']);
+        if (!$user || !($user->is_admin || $user->is_staff) || !$service->requiresSetup($user)) abort(403, '无权执行二步验证设置');
+        $data = $service->beginSetup($user);
+        $data['setup_token'] = $setupToken;
+        return response(['data' => $data]);
+    }
+
+    public function confirmSetup2fa(Request $request)
+    {
+        $service = new TwoFactorService();
+        $setupToken = $request->input('setup_token');
+        $challenge = $service->getChallenge($setupToken, 'setup');
+        if (!$challenge || empty($challenge['user_id'])) abort(500, '二步验证设置请求已过期，请重新登录');
+        $user = User::find($challenge['user_id']);
+        if (!$user || !($user->is_admin || $user->is_staff) || !$service->requiresSetup($user)) abort(403, '无权执行二步验证设置');
+        $codes = $service->confirmSetup($user, $request->input('code'), $request, $setupToken);
+        $service->forgetChallenge($setupToken, 'setup');
+        $authData = (new AuthService($user))->generateAuthData($request, true);
+        $authData['recovery_codes'] = $codes;
+        return response(['data' => $authData]);
     }
 
     public function token2Login(Request $request)
@@ -207,6 +254,10 @@ class AuthController extends Controller
             }
             Cache::forget($key);
             $authService = new AuthService($user);
+            $twoFactor = (new TwoFactorService())->issueLoginResult($user, $request);
+            if ($twoFactor) {
+                return response(['data' => $twoFactor]);
+            }
             return response([
                 'data' => $authService->generateAuthData($request)
             ]);

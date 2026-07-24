@@ -104,6 +104,7 @@ class ConfigSave extends FormRequest
         'password_limit_enable' => 'in:0,1',
         'password_limit_count' => 'integer',
         'password_limit_expire' => 'integer',
+        'admin_2fa_force_enable' => 'in:0,1',
     ];
     /**
      * Get the validation rules that apply to the request.

@@ -18,6 +18,11 @@ class AdminRoute
             $router->get ('/config/getThemeTemplate', 'V1\\Admin\\ConfigController@getThemeTemplate');
             $router->post('/config/setTelegramWebhook', 'V1\\Admin\\ConfigController@setTelegramWebhook');
             $router->post('/config/testSendMail', 'V1\\Admin\\ConfigController@testSendMail');
+            $router->get ('/2fa/status', 'V1\\User\\TwoFactorController@status');
+            $router->post('/2fa/setup', 'V1\\User\\TwoFactorController@setup');
+            $router->post('/2fa/confirm', 'V1\\User\\TwoFactorController@confirm');
+            $router->post('/2fa/disable', 'V1\\User\\TwoFactorController@disable');
+            $router->post('/2fa/recovery-codes/regenerate', 'V1\\User\\TwoFactorController@regenerateRecoveryCodes');
             // Plan
             $router->get ('/plan/fetch', 'V1\\Admin\\PlanController@fetch');
             $router->post('/plan/save', 'V1\\Admin\\PlanController@save');
