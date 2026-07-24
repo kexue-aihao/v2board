@@ -66,6 +66,13 @@
         return '<label class="v2b-2fa-field"><span>' + label + '</span><input name="' + name + '" type="' + (type || 'text') + '" autocomplete="off" placeholder="' + (placeholder || '') + '"></label>';
     }
 
+    function setupQrMarkup(data) {
+        if (data && data.qr_code) {
+            return '<img class="v2b-2fa-qr" alt="二步验证二维码" src="' + escapeText(data.qr_code) + '">';
+        }
+        return '<p class="v2b-2fa-error">二维码暂时不可用，请使用下方手动密钥在验证器中添加账户。</p>';
+    }
+
     function showModal(title, content, onReady) {
         closeModal();
         addStyle();
@@ -121,7 +128,7 @@
     function beginSetup() {
         requestStaffFallback('/setup', { method: 'POST' }).then(function (data) {
             setupData = data;
-            var content = '<p>请使用验证器扫描二维码，或手动输入密钥。</p><img class="v2b-2fa-qr" alt="二步验证二维码" src="' + escapeText(data.qr_code) + '"><p><strong>' + escapeText(data.issuer) + '</strong><br>' + escapeText(data.account) + '</p>' + field('手动密钥', 'text', 'manual_key') + field('验证器验证码', 'text', 'code', '000000');
+            var content = '<p>请使用验证器扫描二维码，或手动输入密钥。</p>' + setupQrMarkup(data) + '<p><strong>' + escapeText(data.issuer) + '</strong><br>' + escapeText(data.account) + '</p>' + field('手动密钥', 'text', 'manual_key') + field('验证器验证码', 'text', 'code', '000000');
             showModal('绑定二步验证', content, function (root) {
                 root.querySelector('[name="manual_key"]').value = data.manual_key || '';
                 var actions = root.querySelector('.v2b-2fa-actions');
@@ -185,7 +192,7 @@
         showModal(data.two_factor_setup_required ? '保护管理员账户' : '完成二步验证', content, function (root) {
             if (data.two_factor_setup_required) {
                 request('/passport/auth/2fa/setup', { method: 'POST', base: '/api/v1', body: { setup_token: data.challenge } }).then(function (result) {
-                    var body = root.querySelector('.v2b-2fa-body'); body.innerHTML = '<p>请扫描二维码，然后输入验证码。</p><img class="v2b-2fa-qr" alt="二步验证二维码" src="' + escapeText(result.qr_code) + '"><p><strong>' + escapeText(result.issuer) + '</strong><br>' + escapeText(result.account) + '<br>手动密钥：' + escapeText(result.manual_key) + '</p>' + field('验证码', 'text', 'code', '000000');
+                    var body = root.querySelector('.v2b-2fa-body'); body.innerHTML = '<p>请扫描二维码，然后输入验证码。</p>' + setupQrMarkup(result) + '<p><strong>' + escapeText(result.issuer) + '</strong><br>' + escapeText(result.account) + '<br>手动密钥：' + escapeText(result.manual_key) + '</p>' + field('验证码', 'text', 'code', '000000');
                     var button = document.createElement('button'); button.textContent = '确认并登录'; root.querySelector('.v2b-2fa-actions').insertBefore(button, root.querySelector('.v2b-2fa-close')); button.onclick = function () { request('/passport/auth/2fa/confirm', { method: 'POST', base: '/api/v1', body: { setup_token: data.challenge, code: root.querySelector('[name="code"]').value } }).then(function (value) { localStorage.setItem('authorization', value.auth_data); closeModal(); window.location.hash = '/' + String(redirect || 'dashboard').replace(/^\//, ''); }).catch(function (error) { errorMessage(root, error); }); };
                 }).catch(function (error) { errorMessage(root, error); });
             } else {

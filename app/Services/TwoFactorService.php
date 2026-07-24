@@ -134,17 +134,28 @@ class TwoFactorService
 
         $issuer = (string)config('v2board.app_name', 'V2Board');
         $uri = $this->google2fa->getQRCodeUrl($issuer, $user->email, $secret);
-        $options = new QROptions([
-            'outputType' => QRCode::OUTPUT_MARKUP_SVG,
-            'eccLevel' => QRCode::ECC_L
-        ]);
-        $svg = (new QRCode($options))->render($uri);
+        $qrCode = null;
+        try {
+            if (class_exists(QROptions::class) && class_exists(QRCode::class)) {
+                $options = new QROptions([
+                    'outputType' => QRCode::OUTPUT_MARKUP_SVG,
+                    'eccLevel' => QRCode::ECC_L
+                ]);
+                $svg = (new QRCode($options))->render($uri);
+                if (is_string($svg) && $svg !== '') {
+                    $qrCode = 'data:image/svg+xml;base64,' . base64_encode($svg);
+                }
+            }
+        } catch (\Throwable $exception) {
+            // Keep setup usable with the manual key when the optional QR renderer is unavailable.
+        }
 
         return [
             'issuer' => $issuer,
             'account' => $user->email,
             'manual_key' => $secret,
-            'qr_code' => 'data:image/svg+xml;base64,' . base64_encode($svg)
+            'otpauth_uri' => $uri,
+            'qr_code' => $qrCode
         ];
     }
 
