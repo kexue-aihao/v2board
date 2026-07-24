@@ -133,7 +133,7 @@ class OrderService
             $order->type = 9;
         } else if ($order->period === 'reset_price') {
             $order->type = 4;
-        } else if ($this->newSubscription) {
+        } else if ($this->newSubscription && (new SubscriptionService())->multiEnabled()) {
             $order->type = 1;
         } else if ($order->subscription_id) {
             $order->type = 2;
@@ -416,6 +416,7 @@ class OrderService
             abort(500, __('Subscription plan does not exist'));
         }
         $subscriptionService = new SubscriptionService();
+        $multiEnabled = $subscriptionService->multiEnabled();
         $target = null;
         if ($order->subscription_id) {
             $target = Subscription::where('id', $order->subscription_id)
@@ -427,7 +428,7 @@ class OrderService
                 abort(403, __('Subscription does not belong to the user'));
             }
         }
-        if (!$target && in_array((int)$order->type, [2, 3], true)) {
+        if (!$target && (!$multiEnabled || in_array((int)$order->type, [2, 3], true))) {
             $target = $subscriptionService->primary($this->user);
         }
         if ($order->period === 'reset_price') {
@@ -435,7 +436,7 @@ class OrderService
             if (!$target) abort(422, __('No active subscription'));
             return $subscriptionService->reset($target);
         }
-        if ($target && in_array((int)$order->type, [2, 3], true)) {
+        if ($target && (!$multiEnabled || in_array((int)$order->type, [2, 3], true))) {
             return $subscriptionService->renew($target, $plan, $order->period);
         }
         return $subscriptionService->create($this->user, $plan, $order->period);

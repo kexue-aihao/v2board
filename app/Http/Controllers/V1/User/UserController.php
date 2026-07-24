@@ -327,6 +327,7 @@ class UserController extends Controller
                 $user['subscribe_url'] = Helper::getSubscribeUrl($subscription->token, $subscription);
                 $user['reset_day'] = (new UserService())->getResetDay($user);
                 $user['allow_new_period'] = config('v2board.allow_new_period', 0);
+                $user['multi_subscription_enable'] = (int)config('v2board.multi_subscription_enable', 0);
                 return response(['data' => $user]);
             }
         }
@@ -366,6 +367,7 @@ class UserController extends Controller
         $userService = new UserService();
         $user['reset_day'] = $userService->getResetDay($user);
         $user['allow_new_period'] = config('v2board.allow_new_period', 0);
+        $user['multi_subscription_enable'] = (int)config('v2board.multi_subscription_enable', 0);
         return response([
             'data' => $user
         ]);

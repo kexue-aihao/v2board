@@ -6264,6 +6264,12 @@
                     checked: parseInt(r.allow_new_period),
                     onChange: e=>this.set("subscribe", "allow_new_period", e ? 1 : 0)
                 })), f.a.createElement(m, {
+                    title: "\u5141\u8bb8\u5355\u8d26\u6237\u591a\u8ba2\u9605",
+                    description: "\u5f00\u542f\u540e\uff0c\u540c\u4e00\u8d26\u6237\u53ef\u4ee5\u62e5\u6709\u591a\u4e2a\u72ec\u7acb\u8ba2\u9605\uff0c\u6bcf\u4e2a\u8ba2\u9605\u62e5\u6709\u72ec\u7acb\u6d41\u91cf\u3001\u5230\u671f\u65f6\u95f4\u3001\u8282\u70b9\u8303\u56f4\u548c\u8ba2\u9605\u5730\u5740\u3002"
+                }, f.a.createElement(l["a"], {
+                    checked: parseInt(r.multi_subscription_enable),
+                    onChange: e=>this.set("subscribe", "multi_subscription_enable", e ? 1 : 0)
+                })), f.a.createElement(m, {
                     title: "\u5f53\u8ba2\u9605\u65b0\u8d2d\u65f6\u89e6\u53d1\u4e8b\u4ef6",
                     description: "\u65b0\u8d2d\u8ba2\u9605\u5b8c\u6210\u65f6\u5c06\u89e6\u53d1\u8be5\u4efb\u52a1\u3002"
                 }, f.a.createElement("select", {

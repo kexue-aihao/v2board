@@ -160,6 +160,7 @@ class OrderController extends Controller
         $order->trade_no = Helper::generateOrderNo();
         $order->total_amount = $plan[$request->input('period')];
         if (Schema::hasTable('v2_subscription')) {
+            $subscriptionService = new \App\Services\SubscriptionService();
             $subscriptionId = $request->input('subscription_id');
             if ($subscriptionId) {
                 $target = Subscription::where('id', $subscriptionId)
@@ -171,7 +172,9 @@ class OrderController extends Controller
                 }
                 $order->subscription_id = $target->id;
             }
-            $orderService->newSubscription = (bool)$request->input('new_subscription');
+            $orderService->newSubscription = !$subscriptionId
+                && (bool)$request->input('new_subscription')
+                && $subscriptionService->multiEnabled();
         }
 
         if ($request->input('coupon_code')) {

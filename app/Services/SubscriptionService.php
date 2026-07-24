@@ -18,6 +18,11 @@ class SubscriptionService
         return Schema::hasTable('v2_subscription');
     }
 
+    public function multiEnabled(): bool
+    {
+        return $this->available() && (int)config('v2board.multi_subscription_enable', 0) === 1;
+    }
+
     public function primary(User $user): ?Subscription
     {
         if (!$this->available()) return null;
