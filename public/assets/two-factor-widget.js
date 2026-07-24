@@ -126,7 +126,7 @@
     }
 
     function beginSetup() {
-        requestStaffFallback('/setup', { method: 'POST' }).then(function (data) {
+        requestStaffFallback('/setup', { method: 'POST', body: {} }).then(function (data) {
             setupData = data;
             var content = '<p>请使用验证器扫描二维码，或手动输入密钥。</p>' + setupQrMarkup(data) + '<p><strong>' + escapeText(data.issuer) + '</strong><br>' + escapeText(data.account) + '</p>' + field('手动密钥', 'text', 'manual_key') + field('验证器验证码', 'text', 'code', '000000');
             showModal('绑定二步验证', content, function (root) {
