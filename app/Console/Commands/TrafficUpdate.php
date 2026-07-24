@@ -4,8 +4,10 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\User;
+use App\Models\Subscription;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Schema;
 
 class TrafficUpdate extends Command
 {
@@ -52,27 +54,30 @@ class TrafficUpdate extends Command
             return;
         }
 
-        $users = User::whereIn('id', array_keys($downloads))->get(['id', 'u', 'd']);
-        $time = time();
-        $casesU = [];
-        $casesD = [];
-        $idList = [];
-
-        foreach ($users as $user) {
-            $upload = $uploads[$user->id] ?? 0;
-            $download = $downloads[$user->id] ?? 0;
-
-            $casesU[] = "WHEN {$user->id} THEN " . ($user->u + $upload);
-            $casesD[] = "WHEN {$user->id} THEN " . ($user->d + $download);
-            $idList[] = $user->id;
-        }
-        $idListStr = implode(',', $idList);
-        $casesUStr = implode(' ', $casesU);
-        $casesDStr = implode(' ', $casesD);
-        $sql = "UPDATE v2_user SET u = CASE id {$casesUStr} END, d = CASE id {$casesDStr} END, t = {$time}, updated_at = {$time} WHERE id IN ({$idListStr})";
         try {
             DB::beginTransaction();
-            DB::statement($sql);
+            $keys = array_unique(array_map('intval', array_merge(array_keys($uploads), array_keys($downloads))));
+            $subscriptions = Schema::hasTable('v2_subscription')
+                ? Subscription::whereIn('node_user_id', $keys)->get()->keyBy('node_user_id')
+                : collect();
+            $legacyIds = array_values(array_diff($keys, $subscriptions->keys()->map('intval')->all()));
+            $users = User::whereIn('id', $legacyIds)->get()->keyBy('id');
+            $time = time();
+            foreach ($subscriptions as $subscription) {
+                $key = (string)$subscription->node_user_id;
+                $subscription->u += (int)($uploads[$key] ?? 0);
+                $subscription->d += (int)($downloads[$key] ?? 0);
+                $subscription->updated_at = $time;
+                $subscription->save();
+            }
+            foreach ($users as $user) {
+                $key = (string)$user->id;
+                $user->u += (int)($uploads[$key] ?? 0);
+                $user->d += (int)($downloads[$key] ?? 0);
+                $user->t = $time;
+                $user->updated_at = $time;
+                $user->save();
+            }
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();

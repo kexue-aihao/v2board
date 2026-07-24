@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Services\AuthService;
 use App\Services\OrderService;
 use App\Services\UserService;
+use App\Services\SubscriptionService;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -313,6 +314,22 @@ class UserController extends Controller
 
     public function getSubscribe(Request $request)
     {
+        $baseUser = User::find($request->user['id']);
+        $subscriptionService = new SubscriptionService();
+        if ($baseUser && $subscriptionService->available()) {
+            $subscription = $subscriptionService->ensurePrimary($baseUser);
+            if ($subscription) {
+                $user = $subscriptionService->context($baseUser, $subscription);
+                $user['email'] = $baseUser->email;
+                $user['plan'] = Plan::find($subscription->plan_id);
+                if (!$user['plan']) abort(500, __('Subscription plan does not exist'));
+                $user['alive_ip'] = (Cache::get('ALIVE_IP_USER_' . $subscription->node_user_id)['alive_ip'] ?? 0);
+                $user['subscribe_url'] = Helper::getSubscribeUrl($subscription->token, $subscription);
+                $user['reset_day'] = (new UserService())->getResetDay($user);
+                $user['allow_new_period'] = config('v2board.allow_new_period', 0);
+                return response(['data' => $user]);
+            }
+        }
         $user = User::where('id', $request->user['id'])
             ->select([
                 'plan_id',
@@ -379,6 +396,13 @@ class UserController extends Controller
         if (!$user->save()) {
             abort(500, __('Reset failed'));
         }
+        $subscriptionService = new SubscriptionService();
+        $primary = $subscriptionService->primary($user);
+        if ($primary) {
+            $primary->uuid = $user->uuid;
+            $primary->token = $user->token;
+            $primary->save();
+        }
         return response([
             'data' => Helper::getSubscribeUrl($user['token'])
         ]);
@@ -398,6 +422,11 @@ class UserController extends Controller
         }
         try {
             $user->update($updateData);
+            $primary = (new SubscriptionService())->primary($user);
+            if ($primary && array_key_exists('auto_renewal', $updateData)) {
+                $primary->auto_renewal = $updateData['auto_renewal'];
+                $primary->save();
+            }
         } catch (\Exception $e) {
             abort(500, __('Save failed'));
         }

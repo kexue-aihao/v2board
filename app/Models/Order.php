@@ -14,4 +14,9 @@ class Order extends Model
         'updated_at' => 'timestamp',
         'surplus_order_ids' => 'array'
     ];
+
+    public function subscription()
+    {
+        return $this->belongsTo(\App\Models\Subscription::class, 'subscription_id');
+    }
 }

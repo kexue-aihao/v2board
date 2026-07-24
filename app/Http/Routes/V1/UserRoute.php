@@ -20,6 +20,9 @@ class UserRoute
             $router->post('/changePassword', 'V1\\User\\UserController@changePassword');
             $router->post('/update', 'V1\\User\\UserController@update');
             $router->get ('/getSubscribe', 'V1\\User\\UserController@getSubscribe');
+            $router->get ('/subscription/fetch', 'V1\\User\\SubscriptionController@fetch');
+            $router->post('/subscription/set-primary', 'V1\\User\\SubscriptionController@setPrimary');
+            $router->post('/subscription/revoke', 'V1\\User\\SubscriptionController@revoke');
             $router->get ('/getStat', 'V1\\User\\UserController@getStat');
             $router->get ('/checkLogin', 'V1\\User\\UserController@checkLogin');
             $router->get ('/2fa/status', 'V1\\User\\TwoFactorController@status');

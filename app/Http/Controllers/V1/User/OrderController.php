@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Plan;
 use App\Models\User;
+use App\Models\Subscription;
 use App\Services\CouponService;
 use App\Services\OrderService;
 use App\Services\PaymentService;
@@ -16,6 +17,7 @@ use App\Services\UserService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class OrderController extends Controller
 {
@@ -157,6 +159,20 @@ class OrderController extends Controller
         $order->period = $request->input('period');
         $order->trade_no = Helper::generateOrderNo();
         $order->total_amount = $plan[$request->input('period')];
+        if (Schema::hasTable('v2_subscription')) {
+            $subscriptionId = $request->input('subscription_id');
+            if ($subscriptionId) {
+                $target = Subscription::where('id', $subscriptionId)
+                    ->where('user_id', $user->id)
+                    ->first();
+                if (!$target) {
+                    DB::rollBack();
+                    abort(403, __('Subscription does not belong to the user'));
+                }
+                $order->subscription_id = $target->id;
+            }
+            $orderService->newSubscription = (bool)$request->input('new_subscription');
+        }
 
         if ($request->input('coupon_code')) {
             $couponService = new CouponService($request->input('coupon_code'));

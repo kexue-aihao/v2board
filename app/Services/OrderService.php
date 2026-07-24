@@ -5,8 +5,10 @@ namespace App\Services;
 use App\Jobs\OrderHandleJob;
 use App\Models\Order;
 use App\Models\Plan;
+use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class OrderService
 {
@@ -20,6 +22,7 @@ class OrderService
     ];
     public $order;
     public $user;
+    public $newSubscription = false;
 
     public function __construct(Order $order)
     {
@@ -29,6 +32,7 @@ class OrderService
     public function open()
     {
         $order = $this->order;
+        if ((int)$order->status === 3) return true;
         $this->user = User::find($order->user_id);
         if ($order->type == 9) {
             DB::beginTransaction();
@@ -48,6 +52,26 @@ class OrderService
         }
 
         $plan = Plan::find($order->plan_id);
+
+        if ($this->useSubscriptions()) {
+            DB::beginTransaction();
+            try {
+                $subscription = $this->openSubscription($order, $plan);
+                $eventId = (int)$order->type === 1
+                    ? config('v2board.new_order_event_id', 0)
+                    : config('v2board.renew_order_event_id', 0);
+                if ((int)$eventId === 1) {
+                    (new SubscriptionService())->reset($subscription);
+                }
+                $order->status = 3;
+                $order->save();
+                DB::commit();
+                return $subscription;
+            } catch (\Throwable $e) {
+                DB::rollBack();
+                throw $e;
+            }
+        }
 
         if ($order->refund_amount) {
             $this->user->balance = $this->user->balance + $order->refund_amount;
@@ -109,6 +133,10 @@ class OrderService
             $order->type = 9;
         } else if ($order->period === 'reset_price') {
             $order->type = 4;
+        } else if ($this->newSubscription) {
+            $order->type = 1;
+        } else if ($order->subscription_id) {
+            $order->type = 2;
         } else if ($user->plan_id !== NULL && $order->plan_id !== $user->plan_id && ($user->expired_at > time() || $user->expired_at === NULL)) {
             if (!(int)config('v2board.plan_change_enable', 1)) abort(500, '目前不允许更改订阅，请联系客服或提交工单操作');
             $order->type = 3;
@@ -375,6 +403,42 @@ class OrderService
                 $this->buyByResetTraffic();
                 break;
         }
+    }
+
+    private function useSubscriptions(): bool
+    {
+        return Schema::hasTable('v2_subscription') && $this->order->plan_id > 0;
+    }
+
+    private function openSubscription(Order $order, Plan $plan): Subscription
+    {
+        if (!$plan) {
+            abort(500, __('Subscription plan does not exist'));
+        }
+        $subscriptionService = new SubscriptionService();
+        $target = null;
+        if ($order->subscription_id) {
+            $target = Subscription::where('id', $order->subscription_id)
+                ->where('user_id', $order->user_id)
+                ->where('status', '!=', 'revoked')
+                ->lockForUpdate()
+                ->first();
+            if (!$target) {
+                abort(403, __('Subscription does not belong to the user'));
+            }
+        }
+        if (!$target && in_array((int)$order->type, [2, 3], true)) {
+            $target = $subscriptionService->primary($this->user);
+        }
+        if ($order->period === 'reset_price') {
+            if (!$target) $target = $subscriptionService->primary($this->user);
+            if (!$target) abort(422, __('No active subscription'));
+            return $subscriptionService->reset($target);
+        }
+        if ($target && in_array((int)$order->type, [2, 3], true)) {
+            return $subscriptionService->renew($target, $plan, $order->period);
+        }
+        return $subscriptionService->create($this->user, $plan, $order->period);
     }
 
     private function getbounus($total_amount) {

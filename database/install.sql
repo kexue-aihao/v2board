@@ -149,6 +149,7 @@ CREATE TABLE `v2_order` (
                             `invite_user_id` int(11) DEFAULT NULL,
                             `user_id` int(11) NOT NULL,
                             `plan_id` int(11) NOT NULL,
+                            `subscription_id` bigint(20) DEFAULT NULL,
                             `coupon_id` int(11) DEFAULT NULL,
                             `payment_id` int(11) DEFAULT NULL,
                             `type` int(11) NOT NULL COMMENT '1新购2续费3升级',
@@ -503,6 +504,7 @@ DROP TABLE IF EXISTS `v2_stat_user`;
 CREATE TABLE `v2_stat_user` (
                                 `id` int(11) NOT NULL AUTO_INCREMENT,
                                 `user_id` int(11) NOT NULL,
+                                `subscription_id` bigint(20) DEFAULT NULL,
                                 `server_rate` decimal(10,2) NOT NULL,
                                 `u` bigint(20) NOT NULL,
                                 `d` bigint(20) NOT NULL,
@@ -511,7 +513,7 @@ CREATE TABLE `v2_stat_user` (
                                 `created_at` int(11) NOT NULL,
                                 `updated_at` int(11) NOT NULL,
                                 PRIMARY KEY (`id`),
-                                UNIQUE KEY `server_rate_user_id_record_at` (`server_rate`,`user_id`,`record_at`),
+                                UNIQUE KEY `server_rate_user_id_subscription_record_at` (`server_rate`,`user_id`,`subscription_id`,`record_at`),
                                 KEY `user_id` (`user_id`),
                                 KEY `record_at` (`record_at`),
                                 KEY `server_rate` (`server_rate`)
@@ -584,6 +586,37 @@ CREATE TABLE `v2_user` (
                            UNIQUE KEY `email` (`email`),
                            UNIQUE KEY `token` (`token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+DROP TABLE IF EXISTS `v2_subscription`;
+CREATE TABLE `v2_subscription` (
+                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                  `user_id` int(11) NOT NULL,
+                                  `plan_id` int(11) NOT NULL,
+                                  `token` char(32) NOT NULL,
+                                  `uuid` varchar(36) NOT NULL,
+                                  `node_user_id` bigint(20) NOT NULL,
+                                  `group_id` int(11) DEFAULT NULL,
+                                  `speed_limit` int(11) DEFAULT NULL,
+                                  `device_limit` int(11) DEFAULT NULL,
+                                  `transfer_enable` bigint(20) NOT NULL DEFAULT '0',
+                                  `u` bigint(20) NOT NULL DEFAULT '0',
+                                  `d` bigint(20) NOT NULL DEFAULT '0',
+                                  `status` varchar(16) NOT NULL DEFAULT 'active',
+                                  `is_primary` tinyint(1) NOT NULL DEFAULT '0',
+                                  `auto_renewal` tinyint(1) NOT NULL DEFAULT '0',
+                                  `started_at` bigint(20) DEFAULT NULL,
+                                  `expired_at` bigint(20) DEFAULT NULL,
+                                  `last_reset_at` bigint(20) DEFAULT NULL,
+                                  `next_reset_at` bigint(20) DEFAULT NULL,
+                                  `created_at` int(11) NOT NULL,
+                                  `updated_at` int(11) NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `token` (`token`),
+                                  UNIQUE KEY `node_user_id` (`node_user_id`),
+                                  KEY `user_id_status` (`user_id`,`status`),
+                                  KEY `user_id_primary` (`user_id`,`is_primary`),
+                                  KEY `plan_id` (`plan_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
 -- 2025-09-12 10:05:00

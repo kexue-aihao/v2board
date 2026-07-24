@@ -8,8 +8,10 @@ use App\Services\OrderService;
 use Illuminate\Console\Command;
 use App\Models\User;
 use App\Models\Order;
+use App\Models\Subscription;
 use App\Utils\Helper;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 use Exception;
 
@@ -47,6 +49,10 @@ class CheckRenewal extends Command
     public function handle()
     {
         ini_set('memory_limit', -1);
+        if (Schema::hasTable('v2_subscription') && Subscription::exists()) {
+            $this->handleSubscriptions();
+            return;
+        }
         $users = User::all();
 
         //$mailService = new MailService();
@@ -108,6 +114,55 @@ class CheckRenewal extends Command
                         info('用户自动续费失败,调整设置失败', [$e->getMessage() , $user]);
                     };
                 }
+            }
+        }
+    }
+
+    private function handleSubscriptions(): void
+    {
+        $service = new \App\Services\SubscriptionService();
+        foreach (Subscription::where('status', 'active')->where('auto_renewal', 1)->get() as $subscription) {
+            if (!$subscription->expired_at || $subscription->expired_at <= time() || $subscription->expired_at - time() >= 86400 * 2) continue;
+            $user = User::find($subscription->user_id);
+            $latestOrder = Order::where(function ($query) use ($subscription) {
+                $query->where('subscription_id', $subscription->id)
+                    ->orWhere(function ($legacy) use ($subscription) {
+                        $legacy->whereNull('subscription_id')->where('user_id', $subscription->user_id)->where('plan_id', $subscription->plan_id);
+                    });
+            })
+                ->where('status', 3)
+                ->whereNotIn('period', ['reset_price', 'onetime_price', 'deposit'])
+                ->orderByDesc('created_at')->first();
+            if (!$user || !$latestOrder) continue;
+            $plan = (new PlanService($subscription->plan_id))->plan;
+            $period = $latestOrder->period;
+            if (!$plan || !$plan->renew || $plan[$period] === null || $user->balance < $plan[$period]) {
+                $subscription->auto_renewal = 0;
+                $subscription->save();
+                continue;
+            }
+            try {
+                DB::transaction(function () use ($service, $subscription, $user, $plan, $period) {
+                    $amount = (int)$plan[$period];
+                    $user->balance -= $amount;
+                    $user->save();
+                    $service->renew($subscription, $plan, $period);
+                    $order = new Order();
+                    $order->user_id = $user->id;
+                    $order->plan_id = $plan->id;
+                    $order->subscription_id = $subscription->id;
+                    $order->type = 2;
+                    $order->period = $period;
+                    $order->trade_no = Helper::generateOrderNo();
+                    $order->balance_amount = $amount;
+                    $order->total_amount = 0;
+                    $order->status = 3;
+                    $order->paid_at = time();
+                    $order->save();
+                });
+            } catch (Exception $e) {
+                $subscription->auto_renewal = 0;
+                $subscription->save();
             }
         }
     }

@@ -14,7 +14,9 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\TicketMessage;
 use App\Models\User;
+use App\Models\Subscription;
 use App\Services\AuthService;
+use App\Services\SubscriptionService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +30,12 @@ class UserController extends Controller
         if (!$user) abort(500, '用户不存在');
         $user->token = Helper::guid();
         $user->uuid = Helper::guid(true);
+        $primary = (new SubscriptionService())->primary($user);
+        if ($primary) {
+            $primary->token = $user->token;
+            $primary->uuid = $user->uuid;
+            $primary->save();
+        }
         return response([
             'data' => $user->save()
         ]);
@@ -117,6 +125,12 @@ class UserController extends Controller
         if ($user->invite_user_id) {
             $user['invite_user'] = User::find($user->invite_user_id);
         }
+        $service = new SubscriptionService();
+        $user['subscriptions'] = $service->forUser($user)->map(function ($subscription) {
+            $subscription['plan_name'] = optional($subscription->plan)->name;
+            $subscription['subscribe_url'] = Helper::getSubscribeUrl($subscription->token, $subscription);
+            return $subscription->makeHidden(['token', 'uuid']);
+        })->values();
         return response([
             'data' => $user
         ]);
@@ -163,12 +177,44 @@ class UserController extends Controller
 
         try {
             $user->update($params);
+            $primary = (new SubscriptionService())->primary($user);
+            if ($primary && isset($params['plan_id'])) {
+                $primary->plan_id = $user->plan_id;
+                $primary->group_id = $user->group_id;
+                $primary->transfer_enable = $user->transfer_enable;
+                $primary->device_limit = $user->device_limit;
+                $primary->speed_limit = $user->speed_limit;
+                $primary->expired_at = $user->expired_at;
+                $primary->u = $user->u;
+                $primary->d = $user->d;
+                $primary->save();
+            }
         } catch (\Exception $e) {
             abort(500, '保存失败');
         }
         return response([
             'data' => true
         ]);
+    }
+
+    public function setPrimarySubscription(Request $request)
+    {
+        $user = User::findOrFail($request->input('user_id'));
+        $subscription = Subscription::where('id', $request->input('subscription_id'))
+            ->where('user_id', $user->id)->first();
+        if (!$subscription) abort(404, '订阅不存在');
+        (new SubscriptionService())->setPrimary($user, $subscription);
+        return response(['data' => true]);
+    }
+
+    public function revokeSubscription(Request $request)
+    {
+        $user = User::findOrFail($request->input('user_id'));
+        $subscription = Subscription::where('id', $request->input('subscription_id'))
+            ->where('user_id', $user->id)->first();
+        if (!$subscription) abort(404, '订阅不存在');
+        (new SubscriptionService())->revoke($user, $subscription);
+        return response(['data' => true]);
     }
 
     public function dumpCSV(Request $request)

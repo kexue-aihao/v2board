@@ -888,3 +888,41 @@ CREATE TABLE IF NOT EXISTS `v2_two_factor_audit` (
 
 ALTER TABLE `v2_server_v2node`
 ADD `trusted_x_forwarded_for` varchar(255) COLLATE 'utf8mb4_general_ci' NULL COMMENT '信任的x-forwarded-for头部' AFTER `network_settings`;
+CREATE TABLE IF NOT EXISTS `v2_subscription` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NOT NULL,
+    `plan_id` int(11) NOT NULL,
+    `token` char(32) NOT NULL,
+    `uuid` varchar(36) NOT NULL,
+    `node_user_id` bigint(20) NOT NULL,
+    `group_id` int(11) DEFAULT NULL,
+    `speed_limit` int(11) DEFAULT NULL,
+    `device_limit` int(11) DEFAULT NULL,
+    `transfer_enable` bigint(20) NOT NULL DEFAULT '0',
+    `u` bigint(20) NOT NULL DEFAULT '0',
+    `d` bigint(20) NOT NULL DEFAULT '0',
+    `status` varchar(16) NOT NULL DEFAULT 'active',
+    `is_primary` tinyint(1) NOT NULL DEFAULT '0',
+    `auto_renewal` tinyint(1) NOT NULL DEFAULT '0',
+    `started_at` bigint(20) DEFAULT NULL,
+    `expired_at` bigint(20) DEFAULT NULL,
+    `last_reset_at` bigint(20) DEFAULT NULL,
+    `next_reset_at` bigint(20) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `token` (`token`),
+    UNIQUE KEY `node_user_id` (`node_user_id`),
+    KEY `user_id_status` (`user_id`,`status`),
+    KEY `user_id_primary` (`user_id`,`is_primary`),
+    KEY `plan_id` (`plan_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE `v2_order` ADD `subscription_id` bigint(20) NULL AFTER `plan_id`;
+ALTER TABLE `v2_stat_user` ADD `subscription_id` bigint(20) NULL AFTER `user_id`;
+ALTER TABLE `v2_stat_user` DROP INDEX `server_rate_user_id_record_at`, ADD UNIQUE KEY `server_rate_user_id_subscription_record_at` (`server_rate`,`user_id`,`subscription_id`,`record_at`);
+
+INSERT INTO `v2_subscription` (`user_id`,`plan_id`,`token`,`uuid`,`node_user_id`,`group_id`,`speed_limit`,`device_limit`,`transfer_enable`,`u`,`d`,`status`,`is_primary`,`auto_renewal`,`started_at`,`expired_at`,`created_at`,`updated_at`)
+SELECT u.`id`, u.`plan_id`, u.`token`, u.`uuid`, 2000000000 + u.`id`, u.`group_id`, u.`speed_limit`, u.`device_limit`, u.`transfer_enable`, u.`u`, u.`d`, IF(u.`expired_at` IS NULL OR u.`expired_at` = 0 OR u.`expired_at` >= UNIX_TIMESTAMP(), 'active', 'expired'), 1, u.`auto_renewal`, u.`created_at`, NULLIF(u.`expired_at`, 0), u.`created_at`, u.`updated_at`
+FROM `v2_user` u
+WHERE u.`plan_id` IS NOT NULL AND NOT EXISTS (SELECT 1 FROM `v2_subscription` s WHERE s.`user_id` = u.`id`);

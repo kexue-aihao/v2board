@@ -9,6 +9,7 @@ use App\Models\ServerShadowsocks;
 use App\Models\ServerVless;
 use App\Models\ServerV2node;
 use App\Models\User;
+use App\Models\Subscription;
 use App\Models\ServerVmess;
 use App\Models\ServerTrojan;
 use App\Models\ServerTuic;
@@ -16,6 +17,7 @@ use App\Models\ServerAnytls;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 
 class ServerService
 {
@@ -250,7 +252,7 @@ class ServerService
 
     public function getAvailableUsers($groupId)
     {
-        return User::whereIn('group_id', $groupId)
+        $legacy = User::whereIn('group_id', $groupId)
             ->whereRaw('u + d < transfer_enable')
             ->where(function ($query) {
                 $query->where('expired_at', '>=', time())
@@ -264,6 +266,27 @@ class ServerService
                 'device_limit'
             ])
             ->get();
+        if (!Schema::hasTable('v2_subscription')) return $legacy;
+
+        $subscriptions = Subscription::whereIn('group_id', $groupId)
+            ->where('status', 'active')
+            ->whereRaw('u + d < transfer_enable')
+            ->where(function ($query) {
+                $query->where('expired_at', '>=', time())->orWhereNull('expired_at');
+            })
+            ->whereHas('user', function ($query) {
+                $query->where('banned', 0);
+            })->get()->map(function (Subscription $subscription) {
+                $subscriptionId = $subscription->id;
+                $subscription->subscription_id = $subscriptionId;
+                $subscription->id = $subscription->node_user_id;
+                return $subscription;
+            });
+
+        $legacy = $legacy->filter(function ($user) {
+            return !Subscription::where('user_id', $user->id)->exists();
+        });
+        return $subscriptions->concat($legacy)->values();
     }
 
     public function log(int $userId, int $serverId, int $u, int $d, float $rate, string $method)

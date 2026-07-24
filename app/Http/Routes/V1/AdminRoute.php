@@ -121,6 +121,8 @@ class AdminRoute
             $router->post('/user/delUser', 'V1\\Admin\\UserController@delUser');
             $router->post('/user/allDel', 'V1\\Admin\\UserController@allDel');
             $router->post('/user/setInviteUser', 'V1\\Admin\\UserController@setInviteUser');
+            $router->post('/user/subscription/set-primary', 'V1\\Admin\\UserController@setPrimarySubscription');
+            $router->post('/user/subscription/revoke', 'V1\\Admin\\UserController@revokeSubscription');
             // Stat
             $router->get ('/stat/getStat', 'V1\\Admin\\StatController@getStat');
             $router->get ('/stat/getOverride', 'V1\\Admin\\StatController@getOverride');

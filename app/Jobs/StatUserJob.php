@@ -4,12 +4,14 @@ namespace App\Jobs;
 
 use App\Models\StatServer;
 use App\Models\StatUser;
+use App\Models\Subscription;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class StatUserJob implements ShouldQueue
 {
@@ -49,39 +51,39 @@ class StatUserJob implements ShouldQueue
         }
         $attempt = 0;
         $maxAttempts = 3;
-        $existingData = StatUser::where('record_at', $recordAt)
-        ->where('server_rate', $this->server['rate'])
-        ->whereIn('user_id', array_keys($this->data))
-        ->select(['user_id', 'id', 'u', 'd'])
-        ->get()
-        ->keyBy('user_id');
-
-        $insertData = [];
         while ($attempt < $maxAttempts) {
             try {
                 DB::beginTransaction();
-                foreach($this->data as $userId => $trafficData){
-                    if (isset($existingData[$userId])) {
-                        $userdata = StatUser::where('id', $existingData[$userId]['id'])->first();
-                        $userdata->update([
-                            'u' => $userdata['u'] + $trafficData[0],
-                            'd' => $userdata['d'] + $trafficData[1]
-                        ]);
-                    } else {
-                        $insertData[] = [
-                            'user_id' => $userId,
-                            'server_rate' => $this->server['rate'],
-                            'u' => $trafficData[0],
-                            'd' => $trafficData[1],
-                            'record_type' => $this->recordType,
-                            'record_at' => $recordAt
-                        ];
+                foreach ($this->data as $nodeUserId => $trafficData) {
+                    $subscription = Schema::hasTable('v2_subscription')
+                        ? Subscription::where('node_user_id', $nodeUserId)->first()
+                        : null;
+                    $userId = $subscription ? $subscription->user_id : $nodeUserId;
+                    $query = StatUser::where('record_at', $recordAt)
+                        ->where('server_rate', $this->server['rate'])
+                        ->where('user_id', $userId);
+                    if (Schema::hasColumn('v2_stat_user', 'subscription_id')) {
+                        $query->where('subscription_id', $subscription ? $subscription->id : null);
                     }
-                }
-                if (!empty($insertData)) {
-                    collect($insertData)->chunk(500)->each(function ($chunk) {
-                        StatUser::upsert($chunk->toArray(), ['user_id', 'server_rate', 'record_at']);
-                    });
+                    $userdata = $query->first();
+                    if ($userdata) {
+                        $userdata->u += $trafficData[0];
+                        $userdata->d += $trafficData[1];
+                        $userdata->save();
+                        continue;
+                    }
+                    $payload = [
+                        'user_id' => $userId,
+                        'server_rate' => $this->server['rate'],
+                        'u' => $trafficData[0],
+                        'd' => $trafficData[1],
+                        'record_type' => $this->recordType,
+                        'record_at' => $recordAt
+                    ];
+                    if (Schema::hasColumn('v2_stat_user', 'subscription_id')) {
+                        $payload['subscription_id'] = $subscription ? $subscription->id : null;
+                    }
+                    StatUser::create($payload);
                 }
                 DB::commit();
                 return;

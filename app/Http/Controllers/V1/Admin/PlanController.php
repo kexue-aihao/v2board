@@ -9,6 +9,7 @@ use App\Http\Requests\Admin\PlanUpdate;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
+use App\Models\Subscription;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -33,6 +34,9 @@ class PlanController extends Controller
     public function save(PlanSave $request)
     {
         $params = $request->validated();
+        if (\Illuminate\Support\Facades\Schema::hasTable('v2_subscription') && Subscription::where('plan_id', $request->input('id'))->exists()) {
+            abort(500, 'subscription records prevent plan deletion');
+        }
         if ($request->input('id')) {
             $plan = Plan::find($request->input('id'));
             if (!$plan) {

@@ -97,7 +97,7 @@ class Helper
         }
     }
 
-    public static function getSubscribeUrl($token)
+    public static function getSubscribeUrl($token, $subscription = null)
     {
         $submethod = (int)config('v2board.show_subscribe_method', 0);
         $path = config('v2board.subscribe_path', '/api/v1/client/subscribe');
@@ -132,8 +132,9 @@ class Helper
                 $counter = floor(time() / $timestep);
                 $counterBytes = pack('N*', 0) . pack('N*', $counter);
                 $hash = hash_hmac('sha1', $counterBytes, $token, false);
-                $user = User::where('token', $token)->select('id')->first();
-                $newtoken = self::base64EncodeUrlSafe("{$user->id}:{$hash}");
+                $userId = $subscription ? $subscription->user_id : optional(User::where('token', $token)->select('id')->first())->id;
+                if (!$userId) return null;
+                $newtoken = self::base64EncodeUrlSafe("{$userId}:{$hash}");
 
                 $path = "{$path}?token={$newtoken}";
                 if ($subscribeUrl) return $subscribeUrl . $path;

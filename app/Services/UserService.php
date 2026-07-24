@@ -8,6 +8,8 @@ use App\Jobs\TrafficFetchJob;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
+use App\Models\Subscription;
+use Illuminate\Support\Facades\Schema;
 
 class UserService
 {
@@ -164,7 +166,7 @@ class UserService
 
     public function getDeviceLimitedUsers()
     {
-        return User::whereRaw('u + d < transfer_enable')
+        $legacy = User::whereRaw('u + d < transfer_enable')
             ->where(function ($query) {
                 $query->where('expired_at', '>=', time())
                 ->orWhereNull('expired_at');
@@ -173,6 +175,22 @@ class UserService
             ->where('device_limit','>', 0)
             ->select('id')
             ->get();
+        if (!Schema::hasTable('v2_subscription')) return $legacy;
+        $subscriptions = Subscription::whereRaw('u + d < transfer_enable')
+            ->where(function ($query) {
+                $query->where('expired_at', '>=', time())->orWhereNull('expired_at');
+            })
+            ->where('status', 'active')
+            ->where('device_limit', '>', 0)
+            ->whereHas('user', function ($query) {
+                $query->where('banned', 0);
+            })
+            ->selectRaw('node_user_id as id')
+            ->get();
+        $legacy = $legacy->filter(function ($user) {
+            return !Subscription::where('user_id', $user->id)->exists();
+        });
+        return $subscriptions->concat($legacy)->values();
     }
 
     public function getUnAvailbaleUsers()

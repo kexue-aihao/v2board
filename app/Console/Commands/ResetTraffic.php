@@ -3,11 +3,13 @@
 namespace App\Console\Commands;
 
 use App\Models\Plan;
+use App\Models\Subscription;
 use Illuminate\Console\Command;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use App\Services\TelegramService;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Schema;
 
 class ResetTraffic extends Command
 {
@@ -47,6 +49,11 @@ class ResetTraffic extends Command
     {
         ini_set('memory_limit', -1);
         Redis::setex('traffic_reset_lock', 300, 1);
+        if (Schema::hasTable('v2_subscription') && Subscription::exists()) {
+            $this->resetSubscriptions();
+            Redis::del('traffic_reset_lock');
+            return;
+        }
         $resetMethods = Plan::select(
             DB::raw("GROUP_CONCAT(`id`) as plan_ids"),
             DB::raw("reset_traffic_method as method")
@@ -107,6 +114,35 @@ class ResetTraffic extends Command
             }
         }
         Redis::del('traffic_reset_lock');
+    }
+
+    private function resetSubscriptions(): void
+    {
+        $today = date('d');
+        $lastDay = date('t');
+        foreach (Subscription::where('status', 'active')->where('expired_at', '>', time())->get() as $subscription) {
+            $plan = Plan::find($subscription->plan_id);
+            if (!$plan) continue;
+            $method = $plan->reset_traffic_method === null ? (int)config('v2board.reset_traffic_method', 0) : (int)$plan->reset_traffic_method;
+            $shouldReset = $method === 0 && $today === '01';
+            if ($method === 1) {
+                $expireDay = date('d', $subscription->expired_at);
+                $shouldReset = $expireDay === $today || ($today === $lastDay && $expireDay >= $lastDay);
+            } elseif ($method === 3) {
+                $shouldReset = date('md') === '0101';
+            } elseif ($method === 4) {
+                $shouldReset = date('m-d') === date('m-d', $subscription->expired_at);
+            }
+            if ($shouldReset && (int)$subscription->last_reset_at < strtotime(date('Y-m-d'))) {
+                $subscription->u = 0;
+                $subscription->d = 0;
+                $subscription->last_reset_at = time();
+                $subscription->save();
+                if ($subscription->is_primary) {
+                    (new \App\Services\SubscriptionService())->ensurePrimary(\App\Models\User::find($subscription->user_id));
+                }
+            }
+        }
     }
 
     private function resetByExpireYear($builder): void
