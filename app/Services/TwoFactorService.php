@@ -143,7 +143,9 @@ class TwoFactorService
                 ]);
                 $svg = (new QRCode($options))->render($uri);
                 if (is_string($svg) && $svg !== '') {
-                    $qrCode = 'data:image/svg+xml;base64,' . base64_encode($svg);
+                    $qrCode = strpos($svg, 'data:image/') === 0
+                        ? $svg
+                        : 'data:image/svg+xml;base64,' . base64_encode($svg);
                 }
             }
         } catch (\Throwable $exception) {
