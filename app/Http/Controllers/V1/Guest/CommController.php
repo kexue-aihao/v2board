@@ -10,6 +10,19 @@ class CommController extends Controller
 {
     public function config()
     {
+        $theme = config('v2board.frontend_theme', 'default');
+        $themeConfig = [];
+        $themeConfigFile = base_path("config/theme/{$theme}.php");
+        if (is_file($themeConfigFile)) {
+            $loadedThemeConfig = require $themeConfigFile;
+            if (is_array($loadedThemeConfig)) {
+                $themeConfig = $loadedThemeConfig;
+            }
+        }
+        if (!$themeConfig) {
+            $themeConfig = config("theme.{$theme}", []);
+        }
+
         return response([
             'data' => [
                 'tos_url' => config('v2board.tos_url'),
@@ -23,8 +36,9 @@ class CommController extends Controller
                 'app_description' => config('v2board.app_description'),
                 'app_url' => config('v2board.app_url'),
                 'logo' => config('v2board.logo'),
+                'frontend_theme_color' => is_array($themeConfig) ? ($themeConfig['theme_color'] ?? 'default') : 'default'
             ]
-        ]);
+        ])->header('Cache-Control', 'no-store, no-cache, must-revalidate');
     }
 
     private function getEmailSuffix()

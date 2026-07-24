@@ -9,7 +9,7 @@
         "field_name": "theme_color",
         "field_type": "select",
         "select_options": {
-            "default": "青绿色",
+            "default": "默认蓝色",
             "green": "青绿色",
             "black": "石墨色",
             "darkblue": "深蓝色"
