@@ -646,6 +646,10 @@ CREATE TABLE `v2_subscription_risk_cycle` (
                                   `used_traffic` bigint(20) NOT NULL DEFAULT '0',
                                   `used_ratio` decimal(12,8) DEFAULT NULL,
                                   `user_agent_count` int(11) NOT NULL DEFAULT '0',
+                                  `distinct_ip_count` int(11) NOT NULL DEFAULT '0',
+                                  `city_count` int(11) NOT NULL DEFAULT '0',
+                                  `region_count` int(11) NOT NULL DEFAULT '0',
+                                  `country_count` int(11) NOT NULL DEFAULT '0',
                                   `status` varchar(16) NOT NULL DEFAULT 'pending',
                                   `risk_reasons` text DEFAULT NULL,
                                   `evaluated_at` bigint(20) DEFAULT NULL,
@@ -655,6 +659,33 @@ CREATE TABLE `v2_subscription_risk_cycle` (
                                   UNIQUE KEY `subscription_cycle_start` (`subscription_id`,`cycle_start`),
                                   KEY `user_cycle_end` (`user_id`,`cycle_end`),
                                   KEY `status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_ip_location_cache`;
+CREATE TABLE `v2_ip_location_cache` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `ip` varchar(45) NOT NULL,
+    `ip_version` tinyint(1) NOT NULL,
+    `country_code` varchar(8) NOT NULL DEFAULT '',
+    `country_name` varchar(128) NOT NULL DEFAULT '',
+    `region` varchar(128) NOT NULL DEFAULT '',
+    `province` varchar(128) NOT NULL DEFAULT '',
+    `city` varchar(128) NOT NULL DEFAULT '',
+    `district` varchar(128) NOT NULL DEFAULT '',
+    `isp` varchar(128) NOT NULL DEFAULT '',
+    `idc_vendor` varchar(128) NOT NULL DEFAULT '',
+    `location_key` varchar(384) NOT NULL DEFAULT '',
+    `latitude` decimal(10,6) DEFAULT NULL,
+    `longitude` decimal(10,6) DEFAULT NULL,
+    `source` varchar(64) NOT NULL DEFAULT '',
+    `status` varchar(16) NOT NULL DEFAULT 'unknown',
+    `resolved_at` bigint(20) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ip` (`ip`),
+    KEY `location_status` (`status`),
+    KEY `location_key` (`location_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 

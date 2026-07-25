@@ -42,18 +42,10 @@ class SubscribeAuditService
 
     public function resolveIp(Request $request): string
     {
-        foreach ([
-            $request->header('CF-Connecting-IP'),
-            $request->header('X-Real-IP'),
-            $request->header('X-Forwarded-For')
-        ] as $candidate) {
-            $candidate = trim(explode(',', (string)$candidate)[0]);
-            if (filter_var($candidate, FILTER_VALIDATE_IP)) {
-                return $candidate;
-            }
-        }
-
-        $address = $request->server('REMOTE_ADDR') ?: $request->ip();
+        // Subscription audit records the peer address seen by the application.
+        // Forwarding headers are client-controlled unless a separate trusted-proxy
+        // policy is configured, so they must not affect this audit trail.
+        $address = $request->server('REMOTE_ADDR');
         return filter_var($address, FILTER_VALIDATE_IP) ? $address : 'unknown';
     }
 }

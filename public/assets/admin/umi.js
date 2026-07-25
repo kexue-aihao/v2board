@@ -71417,7 +71417,7 @@
                     if (200 !== n.code) return;
                     var r = n.data || [];
                     var i = n.risk || {}, o = "suspicious" === i.status ? "疑似内鬼" : "normal" === i.status ? "正常" : "待观察";
-                    var s = n.summary || {}, l = "请求次数：" + (s.request_count || 0) + "，UA种类：" + (s.user_agent_count || 0);
+                    var s = n.summary || {}, l = "请求次数：" + (s.request_count || 0) + "，UA种类：" + (s.user_agent_count || 0) + "，IP数量：" + (s.distinct_ip_count || 0) + "，地区：" + (i.region_count || 0) + "，国家：" + (i.country_count || 0);
                     p["a"].info({
                         title: "历史订阅 User-Agent - " + e.email + "（风险：" + o + "，" + l + "）",
                         width: 960,
@@ -71434,7 +71434,17 @@
                                     padding: "10px 0",
                                     wordBreak: "break-all"
                                 }
-                            }, g.a.createElement("div", null, "订阅：", e.subscription_name || (e.subscription_id ? "#" + e.subscription_id : "主订阅")), g.a.createElement("div", null, "User-Agent：", e.user_agent), g.a.createElement("div", null, "请求IP：", e.request_ip), g.a.createElement("div", null, "请求时间：", e.requested_at ? w()(1e3 * e.requested_at).format("YYYY-MM-DD HH:mm:ss") : "-"))
+                            }, function() {
+                                var t = e.ip_location || {};
+                                return g.a.createElement(g.a.Fragment, null,
+                                    g.a.createElement("div", null, "订阅：", e.subscription_name || (e.subscription_id ? "#" + e.subscription_id : "主订阅")),
+                                    g.a.createElement("div", null, "User-Agent：", e.user_agent),
+                                    g.a.createElement("div", null, "请求IP：", e.request_ip, "（出现 ", e.ip_count || 0, " 次）"),
+                                    g.a.createElement("div", null, "归属地：", [t.country_name || t.country_code, t.province || t.region, t.city, t.district].filter(Boolean).join(" / ") || "未知"),
+                                    g.a.createElement("div", null, "运营商：", t.isp || "-", "；IDC/云厂商：", t.idc_vendor || "-"),
+                                    g.a.createElement("div", null, "请求时间：", e.requested_at ? w()(1e3 * e.requested_at).format("YYYY-MM-DD HH:mm:ss") : "-")
+                                )
+                            }())
                         }) : "暂无历史订阅请求记录")
                     })
                 }).catch(function() {

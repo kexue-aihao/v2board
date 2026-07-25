@@ -19,6 +19,7 @@ use App\Models\SubscribeRequestLog;
 use App\Services\AuthService;
 use App\Services\SubscriptionService;
 use App\Services\SubscriptionRiskService;
+use App\Services\IpLocationService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -259,12 +260,25 @@ class UserController extends Controller
             ->limit(100)
             ->get();
         $records = $query->forPage($page, $pageSize)->get();
+        $ipCountsQuery = SubscribeRequestLog::where('user_id', $userId)
+            ->select('subscription_id', 'request_ip')
+            ->selectRaw('COUNT(*) AS request_count')
+            ->groupBy('subscription_id', 'request_ip');
+        if ($subscriptionId) $ipCountsQuery->where('subscription_id', $subscriptionId);
+        $ipCounts = [];
+        foreach ($ipCountsQuery->get() as $ipCount) {
+            $ipCounts[(string)$ipCount->subscription_id . '|' . $ipCount->request_ip] = (int)$ipCount->request_count;
+        }
         $subscriptionIds = $records->pluck('subscription_id')->filter()->unique()->values();
         $subscriptions = Schema::hasTable('v2_subscription') && $subscriptionIds->count()
             ? Subscription::with('plan')->whereIn('id', $subscriptionIds)->get()->keyBy('id')
             : collect();
-        $records->each(function ($record) use ($subscriptions) {
+        $locationService = new IpLocationService();
+        $records->each(function ($record) use ($subscriptions, $ipCounts, $locationService, $userId) {
             $record['subscription_name'] = optional(optional($subscriptions->get($record->subscription_id))->plan)->name;
+            $record['ip_count'] = $ipCounts[(string)$record->subscription_id . '|' . $record->request_ip]
+                ?? (int)($ipCounts['|' . $record->request_ip] ?? 0);
+            $record['ip_location'] = $locationService->lookup($record->request_ip);
         });
         return response([
             'data' => $records,
@@ -272,6 +286,7 @@ class UserController extends Controller
             'summary' => [
                 'request_count' => $total,
                 'user_agent_count' => $uaCount,
+                'distinct_ip_count' => (int)(clone $query)->reorder()->select('request_ip')->distinct()->count('request_ip'),
                 'user_agents' => $uaSummary
             ],
             'risk' => (new SubscriptionRiskService())->summaryForUser($userId)

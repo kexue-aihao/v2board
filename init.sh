@@ -1,17 +1,24 @@
 #!/bin/bash
 
-rm -rf composer.phar
-wget https://github.com/composer/composer/releases/latest/download/composer.phar -O composer.phar
-php composer.phar install -vvv
+set -Eeuo pipefail
 
-php_main_version=$(php -v | head -n 1 | cut -d ' ' -f 2 | cut -d '.' -f 1)
-if [ $php_main_version -ge 8 ]; then
-    php composer.phar require joanhey/adapterman
-    php scripts/patch-adapterman.php
-fi
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/deploy-common.sh"
 
-php artisan v2board:install
+deploy_setup
+command -v git >/dev/null 2>&1 || {
+    echo "ERROR: Git is not installed." >&2
+    exit 1
+}
+deploy_check_runtime
+deploy_download_composer
+deploy_install_composer
+deploy_patch_adapterman
+deploy_check_mmdb
 
-if [ -f "/etc/init.d/bt" ]; then
-  chown -R www $(pwd);
-fi
+deploy_php artisan v2board:install
+deploy_php artisan optimize:clear
+deploy_chown
+
+echo "Installation completed."

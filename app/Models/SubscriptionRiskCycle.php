@@ -12,6 +12,10 @@ class SubscriptionRiskCycle extends Model
     public $timestamps = true;
 
     protected $casts = [
+        'distinct_ip_count' => 'integer',
+        'city_count' => 'integer',
+        'region_count' => 'integer',
+        'country_count' => 'integer',
         'cycle_start' => 'timestamp',
         'cycle_end' => 'timestamp',
         'evaluated_at' => 'timestamp',

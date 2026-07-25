@@ -1,35 +1,59 @@
 #!/bin/bash
 
-if [ ! -d ".git" ]; then
-  echo "Please deploy using Git."
-  exit 1
-fi
+set -Eeuo pipefail
 
-if ! command -v git &> /dev/null; then
-    echo "Git is not installed! Please install git and try again."
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+source "$ROOT_DIR/scripts/deploy-common.sh"
+
+WEBMAN_STOPPED=0
+WEBMAN_RESTARTED=0
+trap 'if [ "$WEBMAN_STOPPED" = 1 ] && [ "$WEBMAN_RESTARTED" = 0 ]; then deploy_start_webman || true; fi' EXIT
+
+[ -d .git ] || {
+    echo "ERROR: Please deploy using Git." >&2
     exit 1
-fi
+}
+command -v git >/dev/null 2>&1 || {
+    echo "ERROR: Git is not installed." >&2
+    exit 1
+}
+[ -f .env ] || {
+    echo "ERROR: .env is missing. Complete installation before upgrading." >&2
+    exit 1
+}
 
-git config --global --add safe.directory $(pwd)
-git fetch --all && git reset --hard origin/master && git pull origin master
-rm -rf composer.lock composer.phar
-wget https://github.com/composer/composer/releases/latest/download/composer.phar -O composer.phar
-php composer.phar update -vvv
+deploy_setup
+deploy_check_runtime
 
-php_main_version=$(php -v | head -n 1 | cut -d ' ' -f 2 | cut -d '.' -f 1)
-if [ $php_main_version -ge 8 ]; then
-    php composer.phar require joanhey/adapterman
-    php scripts/patch-adapterman.php
-    if ! php -m | grep -q "pcntl"; then
-        echo "Adding pcntl extension to cli-php.ini"
-        sed -i '/extension=redis.so/a extension=pcntl.so' cli-php.ini
-    fi
-    php -c cli-php.ini webman.php stop
-    echo "Webman stopped.Please restart it by yourself."
-fi
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-$(git symbolic-ref --quiet --short HEAD || true)}"
+[ -n "$DEPLOY_BRANCH" ] || {
+    echo "ERROR: Detached HEAD. Set DEPLOY_BRANCH explicitly." >&2
+    exit 1
+}
 
-php artisan v2board:update
+echo "Deploying branch: $DEPLOY_BRANCH"
+deploy_stop_webman
+git config --global --add safe.directory "$ROOT_DIR"
+git fetch origin "$DEPLOY_BRANCH"
+git show-ref --verify --quiet "refs/remotes/origin/$DEPLOY_BRANCH" || {
+    echo "ERROR: Remote branch not found: origin/$DEPLOY_BRANCH" >&2
+    exit 1
+}
+git reset --hard "origin/$DEPLOY_BRANCH"
 
-if [ -f "/etc/init.d/bt" ]; then
-  chown -R www $(pwd);
-fi
+deploy_setup
+deploy_check_runtime
+deploy_download_composer
+deploy_install_composer
+deploy_patch_adapterman
+deploy_check_mmdb
+
+deploy_php artisan v2board:update
+deploy_php artisan optimize:clear
+deploy_php artisan ip:clear-location-cache
+deploy_php artisan horizon:terminate || true
+deploy_start_webman
+deploy_chown
+
+echo "Upgrade completed."

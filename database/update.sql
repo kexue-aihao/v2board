@@ -963,3 +963,35 @@ CREATE TABLE IF NOT EXISTS `v2_subscription_risk_cycle` (
     KEY `user_cycle_end` (`user_id`,`cycle_end`),
     KEY `status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `v2_ip_location_cache` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `ip` varchar(45) NOT NULL,
+    `ip_version` tinyint(1) NOT NULL,
+    `country_code` varchar(8) NOT NULL DEFAULT '',
+    `country_name` varchar(128) NOT NULL DEFAULT '',
+    `region` varchar(128) NOT NULL DEFAULT '',
+    `province` varchar(128) NOT NULL DEFAULT '',
+    `city` varchar(128) NOT NULL DEFAULT '',
+    `district` varchar(128) NOT NULL DEFAULT '',
+    `isp` varchar(128) NOT NULL DEFAULT '',
+    `idc_vendor` varchar(128) NOT NULL DEFAULT '',
+    `location_key` varchar(384) NOT NULL DEFAULT '',
+    `latitude` decimal(10,6) DEFAULT NULL,
+    `longitude` decimal(10,6) DEFAULT NULL,
+    `source` varchar(64) NOT NULL DEFAULT '',
+    `status` varchar(16) NOT NULL DEFAULT 'unknown',
+    `resolved_at` bigint(20) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `ip` (`ip`),
+    KEY `location_status` (`status`),
+    KEY `location_key` (`location_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE `v2_subscription_risk_cycle`
+    ADD `distinct_ip_count` int(11) NOT NULL DEFAULT '0' AFTER `user_agent_count`,
+    ADD `city_count` int(11) NOT NULL DEFAULT '0' AFTER `distinct_ip_count`,
+    ADD `region_count` int(11) NOT NULL DEFAULT '0' AFTER `city_count`,
+    ADD `country_count` int(11) NOT NULL DEFAULT '0' AFTER `region_count`;
