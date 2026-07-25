@@ -4,7 +4,19 @@ deploy_setup() {
     ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
     cd "$ROOT_DIR"
 
+    if [ -z "${PHP_BIN:-}" ] && [ -x /www/server/php/85/bin/php ]; then
+        PHP_BIN=/www/server/php/85/bin/php
+    fi
     PHP_BIN="${PHP_BIN:-php}"
+
+    if [ -z "${PHP_INI:-}" ] && [[ "$PHP_BIN" == /www/server/php/*/bin/php ]]; then
+        AAPANEL_PHP_DIR="${PHP_BIN%/bin/php}"
+        if [ -f "$AAPANEL_PHP_DIR/etc/php.ini" ]; then
+            PHP_INI="$AAPANEL_PHP_DIR/etc/php.ini"
+        elif [ -f "$AAPANEL_PHP_DIR/etc/php-cli.ini" ]; then
+            PHP_INI="$AAPANEL_PHP_DIR/etc/php-cli.ini"
+        fi
+    fi
     PHP_INI="${PHP_INI:-cli-php.ini}"
     PHP_CMD=("$PHP_BIN" -c "$PHP_INI")
 
