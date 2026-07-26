@@ -111857,8 +111857,8 @@
                     for: "example-text-input-alt"
                 }, "\u5339\u914d\u503c", f.a.createElement("a", {
                         href: "https://xtls.github.io/config/routing.html#ruleobject"
-                    }, f.a.createElement(a["a"], {
-                        type: "link"
+                    }, f.a.createElement(s["a"], {
+                        type: "question-circle"
                     }), "\u586b\u5199\u53c2\u8003")), f.a.createElement(y["a"].TextArea, {
                     rows: 5,
                     placeholder: (()=> {
@@ -111934,8 +111934,8 @@
                     for: "example-text-input-alt"
                 }, "Xray\u51fa\u7ad9\u914d\u7f6e", f.a.createElement("a", {
                         href: "https://xtls.github.io/config/outbound.html"
-                    }, f.a.createElement(a["a"], {
-                        type: "link"
+                    }, f.a.createElement(s["a"], {
+                        type: "question-circle"
                     }), "\u586b\u5199\u53c2\u8003")), f.a.createElement(y["a"].TextArea, {
                     rows: 8,
                     placeholder: JSON.stringify({
