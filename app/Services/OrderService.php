@@ -24,6 +24,8 @@ class OrderService
     public $order;
     public $user;
     public $newSubscription = false;
+    // 零元单开通失败时的原因，供管理端提示使用；CLI 与支付回调仍以返回值判断成败。
+    public $lastError = null;
 
     public function __construct(Order $order)
     {
@@ -168,6 +170,7 @@ class OrderService
                 return (bool)$this->open();
             });
         } catch (\Throwable $e) {
+            $this->lastError = $e->getMessage();
             Log::error('Free order opening failed', [
                 'trade_no' => $this->order->trade_no,
                 'order_id' => $this->order->id,

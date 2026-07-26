@@ -89,7 +89,7 @@ class OrderController extends Controller
 
         $orderService = new OrderService($order);
         if (!$orderService->paid('manual_operation')) {
-            abort(500, '更新失败');
+            abort(500, $orderService->lastError ? '开通失败：' . $orderService->lastError : '更新失败');
         }
         return response([
             'data' => true

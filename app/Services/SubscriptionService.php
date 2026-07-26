@@ -80,6 +80,10 @@ class SubscriptionService
         $subscription->auto_renewal = false;
         $subscription->started_at = time();
         $this->applyPlan($subscription, $plan, $period, false);
+        // node_user_id 是 NOT NULL 且无默认值的唯一列，strict 模式下首次 INSERT 必须带值，
+        // 而正式值依赖自增 id，因此先占位再回写。本方法始终运行在调用方的事务内，
+        // 唯一索引上的行锁会让并发插入串行化，占位值不会引起 UNIQUE 冲突，失败也会随事务回滚。
+        $subscription->node_user_id = 0;
         $subscription->save();
         $subscription->node_user_id = self::NODE_ID_OFFSET + $subscription->id;
         $subscription->save();
