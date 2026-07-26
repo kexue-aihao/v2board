@@ -2,12 +2,13 @@
 
 namespace App\Console\Commands;
 
+use App\Services\SchemaUpgradeService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
 class V2boardUpdate extends Command
 {
-    protected $signature = 'v2board:update';
+    protected $signature = 'v2board:update {--legacy : Execute the historical database/update.sql file}';
     protected $description = 'v2board 更新';
 
     public function handle(): int
@@ -15,6 +16,17 @@ class V2boardUpdate extends Command
         try {
             \Artisan::call('config:cache');
             DB::connection()->getPdo();
+            if (!$this->option('legacy')) {
+                $this->info('Running idempotent schema migrations...');
+                foreach (app(SchemaUpgradeService::class)->run() as $migration) {
+                    $status = $migration['status'] === 'applied' ? 'applied' : 'already applied';
+                    $this->info("{$migration['version']}: {$status}");
+                }
+                $this->info('Database schema is up to date.');
+                return self::SUCCESS;
+            }
+
+            $this->warn('Legacy mode enabled: executing database/update.sql. Back up the database first.');
             $file = \File::get(base_path() . '/database/update.sql');
             if (!$file) {
                 $this->error('数据库文件不存在');

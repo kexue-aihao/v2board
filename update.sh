@@ -49,7 +49,11 @@ deploy_install_composer
 deploy_patch_adapterman
 deploy_check_mmdb
 
-deploy_php artisan v2board:update
+if [ "${LEGACY_DB_UPDATE:-0}" = "1" ]; then
+    deploy_php artisan v2board:update --legacy
+else
+    deploy_php artisan v2board:update
+fi
 deploy_php artisan optimize:clear
 deploy_php artisan ip:clear-location-cache
 deploy_php artisan horizon:terminate || true

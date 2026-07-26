@@ -688,6 +688,15 @@ CREATE TABLE `v2_ip_location_cache` (
     KEY `location_key` (`location_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE `v2_schema_migrations` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `version` varchar(80) NOT NULL,
+    `checksum` char(64) NOT NULL,
+    `applied_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `version` (`version`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 
 -- 2025-09-12 10:05:00
 
