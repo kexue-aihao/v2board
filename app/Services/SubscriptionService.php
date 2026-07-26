@@ -65,6 +65,13 @@ class SubscriptionService
 
     public function create(User $user, Plan $plan, ?string $period = null, bool $primary = false): Subscription
     {
+        // 必须在插入之前判断：primary() 只按 is_primary/id 排序取第一条、并不过滤 is_primary，
+        // 插入之后调用它必然返回刚建的这条，会导致主订阅永远设不上、user 表也不同步。
+        // 判断「有没有主订阅」而非「有没有订阅」，可顺带纠正历史上缺主订阅的账户。
+        $needsPrimary = !Subscription::where('user_id', $user->id)
+            ->where('is_primary', true)
+            ->exists();
+
         $subscription = new Subscription();
         $subscription->user_id = $user->id;
         $subscription->plan_id = $plan->id;
@@ -88,7 +95,7 @@ class SubscriptionService
         $subscription->node_user_id = self::NODE_ID_OFFSET + $subscription->id;
         $subscription->save();
 
-        if ($primary || !$this->primary($user)) {
+        if ($primary || $needsPrimary) {
             $this->setPrimary($user, $subscription);
         }
         return $subscription->fresh();
