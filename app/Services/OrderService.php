@@ -8,6 +8,7 @@ use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 class OrderService
@@ -31,6 +32,22 @@ class OrderService
 
     public function open()
     {
+        if (!$this->order->id) return false;
+
+        return DB::transaction(function () {
+            $lockedOrder = Order::where('id', $this->order->id)
+                ->lockForUpdate()
+                ->first();
+            if (!$lockedOrder) return false;
+            $this->order = $lockedOrder;
+            if ((int)$lockedOrder->status === 3) return true;
+            if ((int)$lockedOrder->status !== 1) return false;
+            return $this->openUnlocked();
+        });
+    }
+
+    private function openUnlocked()
+    {
         $order = $this->order;
         if ((int)$order->status === 3) return true;
         $this->user = User::find($order->user_id);
@@ -48,7 +65,7 @@ class OrderService
                 abort(500, '充值失败');
             }
             DB::commit();
-            return;
+            return true;
         }
 
         $plan = Plan::find($order->plan_id);
@@ -123,8 +140,42 @@ class OrderService
         }
 
         DB::commit();
+        return true;
     }
 
+
+    public function completeFree(): bool
+    {
+        if ((int)$this->order->total_amount > 0 || !$this->order->id) return false;
+
+        try {
+            return (bool)DB::transaction(function () {
+                $order = Order::where('id', $this->order->id)
+                    ->lockForUpdate()
+                    ->first();
+                if (!$order || (int)$order->total_amount > 0) return false;
+                if ((int)$order->status === 3) return true;
+                if (!in_array((int)$order->status, [0, 1], true)) return false;
+
+                $order->paid_at = $order->paid_at ?: time();
+                $order->callback_no = 'free_order';
+                $order->status = 1;
+                if (!$order->save()) {
+                    throw new \RuntimeException('Unable to mark free order as paid');
+                }
+
+                $this->order = $order;
+                return (bool)$this->open();
+            });
+        } catch (\Throwable $e) {
+            Log::error('Free order opening failed', [
+                'trade_no' => $this->order->trade_no,
+                'order_id' => $this->order->id,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
+    }
 
     public function setOrderType(User $user)
     {
@@ -285,6 +336,9 @@ class OrderService
     public function paid(string $callbackNo)
     {
         $order = $this->order;
+        if ((int)$order->total_amount <= 0) {
+            return $this->completeFree();
+        }
         if ($order->status !== 0) return true;
         $order->status = 1;
         $order->paid_at = time();

@@ -237,7 +237,9 @@ class OrderController extends Controller
         // free process
         if ($order->total_amount <= 0) {
             $orderService = new OrderService($order);
-            if (!$orderService->paid($order->trade_no)) abort(500, '');
+            if (!$orderService->completeFree()) {
+                abort(500, 'Free order could not be opened');
+            }
             return response([
                 'type' => -1,
                 'data' => true

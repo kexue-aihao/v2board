@@ -9,6 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 class OrderHandleJob implements ShouldQueue
 {
@@ -35,21 +36,37 @@ class OrderHandleJob implements ShouldQueue
      */
     public function handle()
     {
-        $order = Order::where('trade_no', $this->tradeNo)
-            ->first();
+        try {
+            $order = Order::where('trade_no', $this->tradeNo)
+                ->first();
 
-        if (!$order) return;
+            if (!$order) return;
 
-        $orderService = new OrderService($order);
-        switch ($order->status) {
-            case 0:
-                if ($order->created_at <= (time() - 3600 * 2)) {
-                    $orderService->cancel();
-                }
-                break;
-            case 1:
-                $orderService->open();
-                break;
+            $orderService = new OrderService($order);
+            switch ($order->status) {
+                case 0:
+                    if ($order->created_at <= (time() - 3600 * 2)) {
+                        $orderService->cancel();
+                    }
+                    break;
+                case 1:
+                    $orderService->open();
+                    break;
+            }
+        } catch (\Throwable $e) {
+            Log::error('Order opening job failed', [
+                'trade_no' => $this->tradeNo,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
         }
+    }
+
+    public function failed(\Throwable $e)
+    {
+        Log::critical('Order opening job exhausted retries', [
+            'trade_no' => $this->tradeNo,
+            'error' => $e->getMessage()
+        ]);
     }
 }
