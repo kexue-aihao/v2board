@@ -114404,16 +114404,26 @@
             document.cookie = e + "=".concat(encodeURIComponent(t), ";expires=").concat(o, ";path=").concat(r) + (i ? ";domain=".concat(i) : "")
         }
         function c(e, t) {
+            // 手工补丁：原实现把 localStorage.getItem("habit") 的返回值（字符串）当对象
+            // 用，直接写 n[e] = t。本模块顶部有 "use strict"，给字符串原始值赋属性会同步
+            // 抛 TypeError，所以紧随其后的 setItem 是死代码，异常被下面的 catch 吞掉，
+            // habit 每次都被「只含当前这一个键」的新对象整体覆盖 —— 用户管理和节点管理
+            // 的每页条数会互相清掉对方。改成先 JSON.parse 再合并，两条路径都保留。
             try {
-                if (localStorage.getItem("habit")) {
-                    var n = localStorage.getItem("habit");
-                    n[e] = t,
-                    localStorage.setItem("habit", JSON.stringify(n))
-                } else
-                    localStorage.setItem("habit", JSON.stringify({
-                        [e]: t
-                    }))
+                var habitRaw = localStorage.getItem("habit")
+                  , habitData = habitRaw ? JSON.parse(habitRaw) : null;
+                // 类型守卫：存量 habit 可能是被双重编码的字符串，也可能是数字、null 或
+                // 数组，对这些值赋属性在严格模式下同样抛 TypeError，等于原地复现本 bug。
+                // 只有非数组的纯对象才敢合并，其余一律丢弃重建（下一次写入即自愈）。
+                if (!habitData || "object" != typeof habitData || Array.isArray(habitData))
+                    habitData = {};
+                habitData[e] = t,
+                localStorage.setItem("habit", JSON.stringify(habitData))
             } catch (n) {
+                // 语义变化：原来这个 catch 是必经之路（每次写入都会走到），现在只有 habit
+                // 不是合法 JSON、或 localStorage 本身不可用（隐私模式、配额写满）时才走到。
+                // 前者按单键重建、自愈；后者这一次 setItem 同样会抛并向外传播 —— 与原
+                // 实现逐位一致，不在本次改动里扩大范围。
                 localStorage.setItem("habit", JSON.stringify({
                     [e]: t
                 }))
