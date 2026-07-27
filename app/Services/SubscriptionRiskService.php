@@ -456,11 +456,11 @@ class SubscriptionRiskService
         $hasPending = count($latestBySubscription) === 0;
         foreach (Subscription::where('user_id', $userId)->get(['id', 'started_at']) as $subscription) {
             $startedAt = (int)$subscription->started_at;
+            // 第一个周期还没走完的订阅确实算「待观察」。
+            // 这里原先还有一个 (time() - $startedAt) % CYCLE_SECONDS !== 0 的判断，它只在恰好
+            // 落在周期边界那一秒才为 0，其余时刻恒为真，使 $hasPending 几乎永远为真、
+            // 下面的 'normal' 分支永不可达 —— 所有用户都显示「待观察」。
             if ($startedAt > 0 && $startedAt + self::CYCLE_SECONDS > time()) {
-                $hasPending = true;
-                continue;
-            }
-            if ($startedAt > 0 && ((time() - $startedAt) % self::CYCLE_SECONDS) !== 0) {
                 $hasPending = true;
             }
         }
