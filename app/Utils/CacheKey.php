@@ -42,7 +42,8 @@ class CacheKey
         'TWO_FACTOR_CHALLENGE' => '2FA challenge',
         'TWO_FACTOR_SETUP' => '2FA setup',
         'TWO_FACTOR_FAILURE' => '2FA failure',
-        'RISK_RECOMPUTE_CURSOR' => '风险重算游标'
+        'RISK_RECOMPUTE_CURSOR' => '风险重算游标',
+        'TOKEN_HISTORY_STARTED_AT' => 'Token 历史起始时间'
     ];
 
     public static function get(string $key, $uniqueValue)

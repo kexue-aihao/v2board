@@ -27,6 +27,8 @@ use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use App\Services\SubscriptionTokenHistoryService;
+use App\Utils\TokenRotationContext;
 use Illuminate\Support\Facades\Schema;
 
 class UserController extends Controller
@@ -35,17 +37,21 @@ class UserController extends Controller
     {
         $user = User::find($request->input('id'));
         if (!$user) abort(500, '用户不存在');
-        $user->token = Helper::guid();
-        $user->uuid = Helper::guid(true);
-        $primary = (new SubscriptionService())->primary($user);
-        if ($primary) {
-            $primary->token = $user->token;
-            $primary->uuid = $user->uuid;
-            $primary->save();
-        }
-        return response([
-            'data' => $user->save()
-        ]);
+        // 包 using() 只为给 token 历史标注原因与操作者；捕获本身由 Eloquent 观察者完成，
+        // 漏包只会让 issued_reason 退化成 unknown，不会丢记录。
+        return TokenRotationContext::using('admin_reset', function () use ($user) {
+            $user->token = Helper::guid();
+            $user->uuid = Helper::guid(true);
+            $primary = (new SubscriptionService())->primary($user);
+            if ($primary) {
+                $primary->token = $user->token;
+                $primary->uuid = $user->uuid;
+                $primary->save();
+            }
+            return response([
+                'data' => $user->save()
+            ]);
+        });
     }
 
     private function filter(Request $request, $builder)
@@ -438,7 +444,10 @@ class UserController extends Controller
                 abort(500, '邮箱已存在于系统中');
             }
             $user['password'] = password_hash($request->input('password') ?? $user['email'], PASSWORD_DEFAULT);
-            if (!User::create($user)) {
+            $created = TokenRotationContext::using('admin_generate', function () use ($user) {
+                return User::create($user);
+            });
+            if (!$created) {
                 abort(500, '生成失败');
             }
             return response([
@@ -479,6 +488,17 @@ class UserController extends Controller
         if (!User::insert($users)) {
             DB::rollBack();
             abort(500, '生成失败');
+        }
+        // User::insert() 绕过全部 Eloquent 事件，是整个项目里唯一需要显式记录 token 历史的
+        // 写入点。insert 不回填 id，按 token 反查（该列有唯一索引）拿 id。放在事务内：
+        // 批量生成回滚时历史也要跟着回滚。
+        $tokens = array_values(array_filter(array_column($users, 'token')));
+        if (count($tokens)) {
+            $historyRows = [];
+            foreach (User::whereIn('token', $tokens)->get(['id', 'token']) as $created) {
+                $historyRows[] = ['user_id' => (int)$created->id, 'token' => (string)$created->token];
+            }
+            (new SubscriptionTokenHistoryService())->recordBulk($historyRows, 'admin_generate_bulk');
         }
         DB::commit();
         $data = "账号,密码,过期时间,UUID,创建时间,订阅地址\r\n";
@@ -561,6 +581,9 @@ class UserController extends Controller
                 // 走同一个服务，「该用户的审计数据」只有一处定义，与清空按钮不会漂移。
                 // 原来这里漏了 v2_node_connection_log，已注销账号的真实 IP 会残留。
                 (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
+                // token 历史单独清：它不该被「清空该用户审计记录」那个按钮带走（那个按钮
+                // 的用途是重置误判的风险判定），但账号注销后 user_id 已无法解析，必须清。
+                (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
                 User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
             });
             $builder->delete();
@@ -595,6 +618,8 @@ class UserController extends Controller
             }
             Ticket::where('user_id', $request->input('id'))->delete();
             (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
+            // 同 allDel：token 历史不跟随「清空审计记录」按钮，但账号注销时必须清。
+            (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
 
             $user->delete();
             DB::commit();

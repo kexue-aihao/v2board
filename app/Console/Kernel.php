@@ -42,6 +42,9 @@ class Kernel extends ConsoleKernel
         $schedule->command('reset:log')->daily();
         // 必须排在 subscription:risk 之后：先让隔夜完成的周期被评估，其证据才可以清理。
         $schedule->command('audit:clean')->dailyAt('0:40')->withoutOverlapping();
+        // 排在清理之后：本命令只读活凭证列并补历史，与保留期清理无关，但排开可以避开
+        // 同一时段的 I/O。稳态下它写 0 条，非零就是 token 观察者漏写的证据。
+        $schedule->command('token-history:reconcile')->dailyAt('0:50')->withoutOverlapping();
         // send
         $schedule->command('send:remindMail')->dailyAt('11:30');
         // horizon metrics

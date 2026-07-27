@@ -112,7 +112,10 @@ class AuthController extends Controller
             }
         }
 
-        if (!$user->save()) {
+        $registered = \App\Utils\TokenRotationContext::using('register', function () use ($user) {
+            return $user->save();
+        });
+        if (!$registered) {
             abort(500, __('Register failed'));
         }
         if ((int)config('v2board.email_verify', 0)) {

@@ -393,21 +393,24 @@ class UserController extends Controller
         if (!$user) {
             abort(500, __('The user does not exist'));
         }
-        $user->uuid = Helper::guid(true);
-        $user->token = Helper::guid();
-        if (!$user->save()) {
-            abort(500, __('Reset failed'));
-        }
-        $subscriptionService = new SubscriptionService();
-        $primary = $subscriptionService->primary($user);
-        if ($primary) {
-            $primary->uuid = $user->uuid;
-            $primary->token = $user->token;
-            $primary->save();
-        }
-        return response([
-            'data' => Helper::getSubscribeUrl($user['token'])
-        ]);
+        // 包 using() 只为给 token 历史标注原因；捕获由 Eloquent 观察者完成。
+        return \App\Utils\TokenRotationContext::using('self_reset', function () use ($user) {
+            $user->uuid = Helper::guid(true);
+            $user->token = Helper::guid();
+            if (!$user->save()) {
+                abort(500, __('Reset failed'));
+            }
+            $subscriptionService = new SubscriptionService();
+            $primary = $subscriptionService->primary($user);
+            if ($primary) {
+                $primary->uuid = $user->uuid;
+                $primary->token = $user->token;
+                $primary->save();
+            }
+            return response([
+                'data' => Helper::getSubscribeUrl($user['token'])
+            ]);
+        });
     }
 
     public function update(UserUpdate $request)

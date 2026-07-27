@@ -121,7 +121,9 @@ class V2boardInstall extends Command
         $user->uuid = Helper::guid(true);
         $user->token = Helper::guid();
         $user->is_admin = 1;
-        return $user->save();
+        return \App\Utils\TokenRotationContext::using('install_admin', function () use ($user) {
+            return $user->save();
+        });
     }
 
     private function saveToEnv($data = [])

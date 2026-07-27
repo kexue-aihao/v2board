@@ -632,7 +632,9 @@ CREATE TABLE `v2_subscribe_request_log` (
                                   PRIMARY KEY (`id`),
                                   KEY `user_subscription_requested_at` (`user_id`,`subscription_id`,`requested_at`),
                                   KEY `subscription_requested_at` (`subscription_id`,`requested_at`),
-                                  KEY `subscription_ua_requested_at` (`subscription_id`,`ua_hash`,`requested_at`)
+                                  KEY `subscription_ua_requested_at` (`subscription_id`,`ua_hash`,`requested_at`),
+                                  KEY `user_requested_at` (`user_id`,`requested_at`),
+                                  KEY `requested_at` (`requested_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 DROP TABLE IF EXISTS `v2_subscription_risk_cycle`;
@@ -729,6 +731,33 @@ INSERT INTO `v2_risk_rule` (`label`,`dimension`,`operator`,`threshold`,`enabled`
 ('订阅 UA 种类过多','user_agent_count','>',3,1,1,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
 ('跨省/州请求过多','region_count','>=',3,1,2,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
 ('跨市请求过多','city_count','>=',3,1,3,UNIX_TIMESTAMP(),UNIX_TIMESTAMP());
+
+DROP TABLE IF EXISTS `v2_subscription_token_history`;
+CREATE TABLE `v2_subscription_token_history` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `token_hash` char(64) NOT NULL,
+    `token_prefix` char(8) NOT NULL DEFAULT '',
+    `token_encrypted` text DEFAULT NULL,
+    `user_id` int(11) NOT NULL,
+    `subscription_id` bigint(20) DEFAULT NULL,
+    `issued_at` bigint(20) NOT NULL,
+    `issued_at_exact` tinyint(1) NOT NULL DEFAULT '1',
+    `issued_reason` varchar(32) NOT NULL DEFAULT 'unknown',
+    `issued_actor_type` varchar(16) NOT NULL DEFAULT 'unknown',
+    `issued_actor_user_id` int(11) DEFAULT NULL,
+    `retired_at` bigint(20) DEFAULT NULL,
+    `retired_at_exact` tinyint(1) DEFAULT NULL,
+    `retired_reason` varchar(32) DEFAULT NULL,
+    `retired_actor_type` varchar(16) DEFAULT NULL,
+    `retired_actor_user_id` int(11) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `token_hash` (`token_hash`),
+    KEY `user_id_issued_at` (`user_id`,`issued_at`),
+    KEY `subscription_id_issued_at` (`subscription_id`,`issued_at`),
+    KEY `token_prefix` (`token_prefix`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `v2_schema_migrations` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,

@@ -13,7 +13,8 @@ class SchemaUpgradeService
         'risk_audit_schema' => 'risk_audit_schema_v1',
         'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
-        'risk_rule_schema' => 'risk_rule_schema_v1'
+        'risk_rule_schema' => 'risk_rule_schema_v1',
+        'token_history_schema' => 'token_history_schema_v1'
     ];
 
     public function run(): array
@@ -67,6 +68,9 @@ class SchemaUpgradeService
                 return;
             case 'risk_rule_schema':
                 $this->applyRiskRuleSchema();
+                return;
+            case 'token_history_schema':
+                $this->applyTokenHistorySchema();
                 return;
         }
 
@@ -237,6 +241,10 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_subscribe_request_log', 'subscription_ua_requested_at', ['subscription_id', 'ua_hash', 'requested_at']);
         // 上面三个索引里 requested_at 都不是前导列，按保留期删除会全表扫描。
         $this->ensureIndex('v2_subscribe_request_log', 'requested_at', ['requested_at']);
+        // 管理端订阅溯源页要 GROUP BY user_id 并对 requested_at 取 MIN/MAX。MySQL 的
+        // loose index scan 要求 GROUP BY 列是索引最左前缀、且聚合列紧随其后；
+        // user_subscription_requested_at 中间夹了 subscription_id 用不上，会退化成整索引扫描。
+        $this->ensureIndex('v2_subscribe_request_log', 'user_requested_at', ['user_id', 'requested_at']);
 
         DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_cycle` (
             `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -408,6 +416,86 @@ class SchemaUpgradeService
                 [$label, $dimension, $operator, $threshold, $sort, $now, $now, $dimension, $operator, $threshold]
             );
         }
+    }
+
+    private function applyTokenHistorySchema(): void
+    {
+        $this->requireTable('v2_user');
+        $this->requireTable('v2_subscription');
+
+        // 与 applyRiskRuleSchema 同理：判断必须取在 CREATE 之前。
+        $freshTable = !Schema::hasTable('v2_subscription_token_history');
+
+        // 订阅 token 被 resetSecret / resetSecurity 原地覆写，改之前不读旧值，全库没有
+        // 任何地方留下旧 token，所以这张表是「哪怕 token 被重置也能溯源」的唯一依据。
+        //
+        // token_hash 是语义主键：反查按它做唯一索引点查，去重也靠它 —— syncUser 会把
+        // 同一个值同时写进 v2_user.token 和 v2_subscription.token，按 token 去重才不会
+        // 让镜像看起来像两个不同的 token。
+        //
+        // 归属是 user_id（NOT NULL）；subscription_id 只是来源标注且可空（老用户没有订阅
+        // 行），因此绝不能进唯一键 —— MySQL 唯一索引不约束 NULL，会写出重复行。
+        //
+        // 原值加密存 token_encrypted，仅在管理员显式点「显示」时解密；token_prefix 存前
+        // 8 位明文，供部分搜索与解密失败（APP_KEY 变更）时兜底。
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_token_history` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `token_hash` char(64) NOT NULL,
+            `token_prefix` char(8) NOT NULL DEFAULT '',
+            `token_encrypted` text DEFAULT NULL,
+            `user_id` int(11) NOT NULL,
+            `subscription_id` bigint(20) DEFAULT NULL,
+            `issued_at` bigint(20) NOT NULL,
+            `issued_at_exact` tinyint(1) NOT NULL DEFAULT '1',
+            `issued_reason` varchar(32) NOT NULL DEFAULT 'unknown',
+            `issued_actor_type` varchar(16) NOT NULL DEFAULT 'unknown',
+            `issued_actor_user_id` int(11) DEFAULT NULL,
+            `retired_at` bigint(20) DEFAULT NULL,
+            `retired_at_exact` tinyint(1) DEFAULT NULL,
+            `retired_reason` varchar(32) DEFAULT NULL,
+            `retired_actor_type` varchar(16) DEFAULT NULL,
+            `retired_actor_user_id` int(11) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'token_hash' => 'char(64) NOT NULL',
+            'token_prefix' => "char(8) NOT NULL DEFAULT ''",
+            'token_encrypted' => 'text DEFAULT NULL',
+            'user_id' => 'int(11) NOT NULL',
+            'subscription_id' => 'bigint(20) DEFAULT NULL',
+            'issued_at' => 'bigint(20) NOT NULL',
+            'issued_at_exact' => "tinyint(1) NOT NULL DEFAULT '1'",
+            'issued_reason' => "varchar(32) NOT NULL DEFAULT 'unknown'",
+            'issued_actor_type' => "varchar(16) NOT NULL DEFAULT 'unknown'",
+            'issued_actor_user_id' => 'int(11) DEFAULT NULL',
+            'retired_at' => 'bigint(20) DEFAULT NULL',
+            'retired_at_exact' => 'tinyint(1) DEFAULT NULL',
+            'retired_reason' => 'varchar(32) DEFAULT NULL',
+            'retired_actor_type' => 'varchar(16) DEFAULT NULL',
+            'retired_actor_user_id' => 'int(11) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscription_token_history', $column, $definition);
+        }
+
+        $this->ensureIndex('v2_subscription_token_history', 'token_hash', ['token_hash'], true);
+        $this->ensureIndex('v2_subscription_token_history', 'user_id_issued_at', ['user_id', 'issued_at']);
+        $this->ensureIndex('v2_subscription_token_history', 'subscription_id_issued_at', ['subscription_id', 'issued_at']);
+        $this->ensureIndex('v2_subscription_token_history', 'token_prefix', ['token_prefix']);
+        // 刻意不给 retired_at 建索引：本表不做时间清理（保留期恰好就是答案消失的窗口），
+        // 而 retired_at IS NULL 选择性太低，MySQL 也用不上。
+
+        if (!$freshTable) {
+            return;
+        }
+
+        // 种子就是对账。加密必须在 PHP 里做，所以不写单独的种子 SQL，直接跑与夜间命令
+        // 同一个方法，只有一条代码路径。历史只能从这一刻起累积，种子行标为不精确。
+        (new SubscriptionTokenHistoryService())->reconcile();
     }
 
     private function applyIpLocationCacheSchema(): void

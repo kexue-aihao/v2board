@@ -6,6 +6,7 @@ use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Utils\Helper;
+use App\Utils\TokenRotationContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -63,7 +64,18 @@ class SubscriptionService
         return $subscription->fresh();
     }
 
+    /**
+     * 只是给 token 历史标注原因的一层包装，方法体原样在 createSubscription()。
+     * 包在这里而不是把整个方法体缩进一层，是为了让改动不淹没在缩进 diff 里。
+     */
     public function create(User $user, Plan $plan, ?string $period = null, bool $primary = false): Subscription
+    {
+        return TokenRotationContext::using('subscription_new', function () use ($user, $plan, $period, $primary) {
+            return $this->createSubscription($user, $plan, $period, $primary);
+        });
+    }
+
+    private function createSubscription(User $user, Plan $plan, ?string $period = null, bool $primary = false): Subscription
     {
         // 必须在插入之前判断：primary() 只按 is_primary/id 排序取第一条、并不过滤 is_primary，
         // 插入之后调用它必然返回刚建的这条，会导致主订阅永远设不上、user 表也不同步。
@@ -233,6 +245,11 @@ class SubscriptionService
         $user->token = $subscription->token;
         $user->uuid = $subscription->uuid;
         $user->auto_renewal = $subscription->auto_renewal;
-        $user->save();
+        // v2_user.token 是主订阅 token 的镜像。稳态下值不变、观察者根本不会触发；真正变化
+        // 只发生在 setPrimary 换主时，那时新值是另一条订阅已有的 token，旧值仍活在它自己
+        // 的订阅行上 —— 一个用户可以合法地同时有多个活 token。
+        TokenRotationContext::using('superseded', function () use ($user) {
+            $user->save();
+        });
     }
 }
