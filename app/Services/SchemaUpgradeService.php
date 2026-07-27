@@ -184,6 +184,15 @@ class SchemaUpgradeService
               AND NOT EXISTS (
                   SELECT 1 FROM `v2_subscription` s WHERE s.`user_id` = u.`id`
               )");
+
+        // v2_user 是主订阅的镜像，但流量在很长一段时间里只累加到 v2_subscription，
+        // 没有回写 v2_user（见 TrafficUpdate）。每分钟那次回写只覆盖当轮真的有流量上报的
+        // 订阅，Redis 队列为空时命令直接返回，所以闲置订阅的历史偏差永远追不平，
+        // 必须在升级时一次性对齐。条件写在 WHERE 里，已对齐的行不会被更新，可反复执行。
+        DB::statement("UPDATE `v2_user` u
+            JOIN `v2_subscription` s ON s.`user_id` = u.`id` AND s.`is_primary` = 1
+            SET u.`u` = s.`u`, u.`d` = s.`d`
+            WHERE u.`u` <> s.`u` OR u.`d` <> s.`d`");
     }
 
     private function applyRiskAuditSchema(): void
