@@ -71413,39 +71413,175 @@
                     user_id: e.id,
                     page: 1,
                     pageSize: 100
-                }).then(function(n) {
-                    if (200 !== n.code) return;
-                    var r = n.data || [];
-                    var i = n.risk || {}, o = "suspicious" === i.status ? "疑似内鬼" : "normal" === i.status ? "正常" : "待观察";
-                    var s = n.summary || {}, l = "请求次数：" + (s.request_count || 0) + "，UA种类：" + (s.user_agent_count || 0) + "，IP数量：" + (s.distinct_ip_count || 0) + "，地区：" + (i.region_count || 0) + "，国家：" + (i.country_count || 0);
+                }).then(function(r) {
+                    if (200 !== r.code) return;
+                    var i = n("wCAj")["a"]
+                      , o = r.data || []
+                      , a = r.connections || []
+                      , s = r.risk || {}
+                      , l = r.summary || {}
+                      , c = "suspicious" === s.status ? "疑似内鬼" : "normal" === s.status ? "正常" : "待观察";
+                    // 归属地/运营商/IDC 三列在两张表里含义一致，共用格式化逻辑。
+                    var u = function(e) {
+                        var t = e || {};
+                        return [t.country_name || t.country_code, t.province || t.region, t.city, t.district].filter(Boolean).join(" / ") || "未知"
+                    }
+                      , h = function(e) {
+                        var t = e || {};
+                        // is_idc 由后端给出三态：命中 IDC 库为 true，命中普通库为 false，
+                        // 完全查不到为 null。查到且非 IDC 才能写「否」，查不到只能写未知。
+                        return !0 === t.is_idc ? t.idc_vendor || "是" : !1 === t.is_idc ? "否" : "未知"
+                    }
+                      , f = function(e) {
+                        return e ? w()(1e3 * e).format("YYYY-MM-DD HH:mm:ss") : "-"
+                    }
+                      , d = function(e, t) {
+                        return g.a.createElement("div", {
+                            style: {
+                                marginBottom: 8,
+                                fontWeight: 600
+                            }
+                        }, e, g.a.createElement("span", {
+                            style: {
+                                marginLeft: 8,
+                                fontWeight: 400,
+                                color: "#8c8c8c"
+                            }
+                        }, t))
+                    };
                     p["a"].info({
-                        title: "历史订阅 User-Agent - " + e.email + "（风险：" + o + "，" + l + "）",
-                        width: 960,
+                        title: "订阅审计 - " + e.email + "（风险：" + c + "）",
+                        width: 1180,
                         content: g.a.createElement("div", {
                             style: {
-                                maxHeight: "60vh",
+                                maxHeight: "62vh",
                                 overflowY: "auto"
                             }
-                        }, r.length ? r.map(function(e, t) {
-                            return g.a.createElement("div", {
-                                key: e.id || t,
+                        },
+                            d("订阅拉取 IP", "客户端下载订阅配置的来源；请求 " + (l.request_count || 0) + " 次，UA " + (l.user_agent_count || 0) + " 种，IP " + (l.distinct_ip_count || 0) + " 个，地区 " + (s.region_count || 0) + "，国家 " + (s.country_count || 0)),
+                            g.a.createElement(i, {
+                                size: "small",
+                                tableLayout: "auto",
+                                rowKey: function(e, t) {
+                                    return e.id || "pull-" + t
+                                },
+                                dataSource: o,
+                                pagination: !1,
+                                locale: {
+                                    emptyText: "暂无订阅拉取记录"
+                                },
+                                columns: [{
+                                    title: "订阅",
+                                    dataIndex: "subscription_name",
+                                    render: function(e, t) {
+                                        return e || (t.subscription_id ? "#" + t.subscription_id : "主订阅")
+                                    }
+                                }, {
+                                    title: "User-Agent",
+                                    dataIndex: "user_agent",
+                                    render: function(e) {
+                                        return g.a.createElement("span", {
+                                            style: {
+                                                wordBreak: "break-all"
+                                            }
+                                        }, e)
+                                    }
+                                }, {
+                                    title: "拉取 IP",
+                                    dataIndex: "request_ip"
+                                }, {
+                                    title: "次数",
+                                    dataIndex: "ip_count",
+                                    align: "right",
+                                    render: function(e) {
+                                        return e || 0
+                                    }
+                                }, {
+                                    title: "归属地",
+                                    render: function(e, t) {
+                                        return u(t.ip_location)
+                                    }
+                                }, {
+                                    title: "运营商",
+                                    render: function(e, t) {
+                                        return (t.ip_location || {}).isp || "-"
+                                    }
+                                }, {
+                                    title: "IDC/云厂商",
+                                    render: function(e, t) {
+                                        return h(t.ip_location)
+                                    }
+                                }, {
+                                    title: "请求时间",
+                                    dataIndex: "requested_at",
+                                    render: f
+                                }]
+                            }),
+                            g.a.createElement("div", {
                                 style: {
-                                    borderBottom: "1px solid #f0f0f0",
-                                    padding: "10px 0",
-                                    wordBreak: "break-all"
+                                    height: 20
                                 }
-                            }, function() {
-                                var t = e.ip_location || {};
-                                return g.a.createElement(g.a.Fragment, null,
-                                    g.a.createElement("div", null, "订阅：", e.subscription_name || (e.subscription_id ? "#" + e.subscription_id : "主订阅")),
-                                    g.a.createElement("div", null, "User-Agent：", e.user_agent),
-                                    g.a.createElement("div", null, "请求IP：", e.request_ip, "（出现 ", e.ip_count || 0, " 次）"),
-                                    g.a.createElement("div", null, "归属地：", [t.country_name || t.country_code, t.province || t.region, t.city, t.district].filter(Boolean).join(" / ") || "未知"),
-                                    g.a.createElement("div", null, "运营商：", t.isp || "-", "；IDC/云厂商：", t.idc_vendor || "-"),
-                                    g.a.createElement("div", null, "请求时间：", e.requested_at ? w()(1e3 * e.requested_at).format("YYYY-MM-DD HH:mm:ss") : "-")
-                                )
-                            }())
-                        }) : "暂无历史订阅请求记录")
+                            }),
+                            d("节点连接 IP", "节点上报的实际使用来源；共 " + (l.connection_ip_count || 0) + " 个 IP"),
+                            g.a.createElement(i, {
+                                size: "small",
+                                tableLayout: "auto",
+                                rowKey: function(e, t) {
+                                    return e.id || "conn-" + t
+                                },
+                                dataSource: a,
+                                pagination: !1,
+                                locale: {
+                                    emptyText: "暂无节点连接记录（该功能自本次升级后开始累积）"
+                                },
+                                columns: [{
+                                    title: "订阅",
+                                    dataIndex: "subscription_name",
+                                    render: function(e, t) {
+                                        return e || (t.subscription_id ? "#" + t.subscription_id : "主订阅")
+                                    }
+                                }, {
+                                    title: "节点",
+                                    dataIndex: "node_name",
+                                    render: function(e, t) {
+                                        return e || t.node_type + " #" + t.node_id
+                                    }
+                                }, {
+                                    title: "连接 IP",
+                                    dataIndex: "ip"
+                                }, {
+                                    title: "上报次数",
+                                    dataIndex: "report_count",
+                                    align: "right",
+                                    render: function(e) {
+                                        return e || 0
+                                    }
+                                }, {
+                                    title: "归属地",
+                                    render: function(e, t) {
+                                        return u(t.ip_location)
+                                    }
+                                }, {
+                                    title: "运营商",
+                                    render: function(e, t) {
+                                        return (t.ip_location || {}).isp || "-"
+                                    }
+                                }, {
+                                    title: "IDC/云厂商",
+                                    render: function(e, t) {
+                                        return h(t.ip_location)
+                                    }
+                                }, {
+                                    title: "首次出现",
+                                    dataIndex: "first_seen_at",
+                                    render: f
+                                }, {
+                                    title: "最近出现",
+                                    dataIndex: "last_seen_at",
+                                    render: f
+                                }]
+                            })
+                        )
                     })
                 }).catch(function() {
                     p["a"].error({

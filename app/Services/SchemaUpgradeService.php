@@ -11,7 +11,8 @@ class SchemaUpgradeService
     private const MIGRATIONS = [
         'subscription_schema' => 'subscription_schema_v1',
         'risk_audit_schema' => 'risk_audit_schema_v1',
-        'ip_location_cache_schema' => 'ip_location_cache_schema_v1'
+        'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
+        'node_connection_log_schema' => 'node_connection_log_schema_v1'
     ];
 
     public function run(): array
@@ -59,6 +60,9 @@ class SchemaUpgradeService
                 return;
             case 'ip_location_cache_schema':
                 $this->applyIpLocationCacheSchema();
+                return;
+            case 'node_connection_log_schema':
+                $this->applyNodeConnectionLogSchema();
                 return;
         }
 
@@ -273,6 +277,57 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_subscription_risk_cycle', 'subscription_cycle_start', ['subscription_id', 'cycle_start'], true);
         $this->ensureIndex('v2_subscription_risk_cycle', 'user_cycle_end', ['user_id', 'cycle_end']);
         $this->ensureIndex('v2_subscription_risk_cycle', 'status', ['status']);
+    }
+
+    private function applyNodeConnectionLogSchema(): void
+    {
+        $this->requireTable('v2_user');
+
+        // 订阅拉取 IP 与实际连接节点的 IP 是两回事：前者是客户端下载配置的来源，
+        // 记在 v2_subscribe_request_log；后者由节点通过 /UniProxy/alive 上报，此前只
+        // 落在 120 秒 TTL 的缓存里，查不到任何历史。这张表把后者持久化。
+        //
+        // 唯一键用 node_user_id 而不是 subscription_id：老用户没有订阅记录时
+        // subscription_id 为 NULL，而 MySQL 的唯一索引不约束 NULL，会写出重复行。
+        // node_user_id 是节点上报时实际使用的标识，恒非空。
+        //
+        // 每个「节点用户 + 节点 + IP」只保留一行，用 first_seen_at / last_seen_at /
+        // report_count 表达历史，表的规模由去重后的 IP 数决定而不是随时间线性增长。
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_node_connection_log` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `subscription_id` bigint(20) DEFAULT NULL,
+            `node_user_id` bigint(20) NOT NULL,
+            `node_type` varchar(16) NOT NULL,
+            `node_id` int(11) NOT NULL,
+            `ip` varchar(45) NOT NULL,
+            `report_count` bigint(20) NOT NULL DEFAULT '0',
+            `first_seen_at` bigint(20) NOT NULL,
+            `last_seen_at` bigint(20) NOT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'subscription_id' => 'bigint(20) DEFAULT NULL',
+            'node_user_id' => 'bigint(20) NOT NULL',
+            'node_type' => 'varchar(16) NOT NULL',
+            'node_id' => 'int(11) NOT NULL',
+            'ip' => 'varchar(45) NOT NULL',
+            'report_count' => "bigint(20) NOT NULL DEFAULT '0'",
+            'first_seen_at' => 'bigint(20) NOT NULL',
+            'last_seen_at' => 'bigint(20) NOT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_node_connection_log', $column, $definition);
+        }
+
+        $this->ensureIndex('v2_node_connection_log', 'node_user_node_ip', ['node_user_id', 'node_type', 'node_id', 'ip'], true);
+        $this->ensureIndex('v2_node_connection_log', 'user_id_last_seen_at', ['user_id', 'last_seen_at']);
+        $this->ensureIndex('v2_node_connection_log', 'subscription_id_last_seen_at', ['subscription_id', 'last_seen_at']);
     }
 
     private function applyIpLocationCacheSchema(): void

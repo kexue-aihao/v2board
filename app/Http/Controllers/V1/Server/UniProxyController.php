@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\V1\Server;
 
 use App\Http\Controllers\Controller;
+use App\Services\NodeConnectionAuditService;
 use App\Services\ServerService;
 use App\Services\UserService;
 use App\Utils\CacheKey;
@@ -204,6 +205,9 @@ class UniProxyController extends Controller
         foreach ($updates as $key => $value) {
             Cache::put($key, $value, 120);
         }
+
+        // 缓存只有 120 秒 TTL，查历史连接来源必须另外落库。
+        (new NodeConnectionAuditService())->record($this->nodeType, $this->nodeId, $data);
 
         return response([
             'data' => true

@@ -16,6 +16,25 @@ class IpLocationService
 
     public function lookup(?string $ip): array
     {
+        return $this->decorate($this->resolve($ip));
+    }
+
+    // 内置库把 IDC/云厂商单独建库，所以「查到了但不落在 IDC 库里」才是可以确定的「非 IDC」，
+    // 必须与「压根没查到」区分开：前者可以写否，后者只能写未知。
+    // 在 resolve() 之外附加，避免这个派生字段被 cache() 当成列写进 v2_ip_location_cache。
+    private function decorate(array $location): array
+    {
+        if (($location['status'] ?? '') !== 'resolved') {
+            $location['is_idc'] = null;
+            return $location;
+        }
+        $location['is_idc'] = (string)($location['idc_vendor'] ?? '') !== ''
+            || strpos((string)($location['source'] ?? ''), '_idc') !== false;
+        return $location;
+    }
+
+    private function resolve(?string $ip): array
+    {
         $ip = trim((string)$ip);
         $unknown = $this->unknown($ip);
         if (!filter_var($ip, FILTER_VALIDATE_IP)) {

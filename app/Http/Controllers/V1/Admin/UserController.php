@@ -16,7 +16,9 @@ use App\Models\TicketMessage;
 use App\Models\User;
 use App\Models\Subscription;
 use App\Models\SubscribeRequestLog;
+use App\Models\NodeConnectionLog;
 use App\Services\AuthService;
+use App\Services\ServerService;
 use App\Services\SubscriptionService;
 use App\Services\SubscriptionRiskService;
 use App\Services\IpLocationService;
@@ -280,17 +282,53 @@ class UserController extends Controller
                 ?? (int)($ipCounts['|' . $record->request_ip] ?? 0);
             $record['ip_location'] = $locationService->lookup($record->request_ip);
         });
+        $connections = $this->nodeConnections($userId, $subscriptionId, $locationService);
         return response([
             'data' => $records,
             'total' => $total,
+            'connections' => $connections,
             'summary' => [
                 'request_count' => $total,
                 'user_agent_count' => $uaCount,
                 'distinct_ip_count' => (int)(clone $query)->reorder()->select('request_ip')->distinct()->count('request_ip'),
+                'connection_ip_count' => $connections->pluck('ip')->unique()->count(),
                 'user_agents' => $uaSummary
             ],
             'risk' => (new SubscriptionRiskService())->summaryForUser($userId)
         ]);
+    }
+
+    /**
+     * 节点上报的实际连接 IP。与订阅拉取 IP 是两条完全不同的来源：拉取 IP 是客户端
+     * 下载配置时访问 Web 服务留下的，连接 IP 是节点看到的真实使用者。
+     */
+    private function nodeConnections(int $userId, ?int $subscriptionId, IpLocationService $locationService)
+    {
+        if (!Schema::hasTable('v2_node_connection_log')) {
+            return collect();
+        }
+        $query = NodeConnectionLog::where('user_id', $userId)->orderByDesc('last_seen_at');
+        if ($subscriptionId) $query->where('subscription_id', $subscriptionId);
+        $records = $query->limit(200)->get();
+        if ($records->isEmpty()) {
+            return $records;
+        }
+
+        $subscriptions = Schema::hasTable('v2_subscription')
+            ? Subscription::with('plan')->whereIn('id', $records->pluck('subscription_id')->filter()->unique())->get()->keyBy('id')
+            : collect();
+        $servers = (new ServerService())->getAllServers();
+        $serverNames = [];
+        foreach ($servers as $server) {
+            $serverNames[$server['type'] . '-' . $server['id']] = $server['name'];
+        }
+
+        $records->each(function ($record) use ($subscriptions, $serverNames, $locationService) {
+            $record['subscription_name'] = optional(optional($subscriptions->get($record->subscription_id))->plan)->name;
+            $record['node_name'] = $serverNames[$record->node_type . '-' . $record->node_id] ?? null;
+            $record['ip_location'] = $locationService->lookup($record->ip);
+        });
+        return $records;
     }
 
     public function subscriptionRisk(Request $request)
