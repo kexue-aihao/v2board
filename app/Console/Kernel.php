@@ -40,6 +40,8 @@ class Kernel extends ConsoleKernel
         // reset
         $schedule->command('reset:traffic')->daily();
         $schedule->command('reset:log')->daily();
+        // 必须排在 subscription:risk 之后：先让隔夜完成的周期被评估，其证据才可以清理。
+        $schedule->command('audit:clean')->dailyAt('0:40')->withoutOverlapping();
         // send
         $schedule->command('send:remindMail')->dailyAt('11:30');
         // horizon metrics

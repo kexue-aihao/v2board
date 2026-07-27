@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\ConfigSave;
 use App\Jobs\SendEmailJob;
 use App\Models\User;
 use App\Models\UserTwoFactor;
+use App\Services\SubscribeAuditRetentionService;
 use App\Services\TelegramService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
@@ -174,7 +175,11 @@ class ConfigController extends Controller
                 'password_limit_enable' => (int)config('v2board.password_limit_enable', 1),
                 'password_limit_count' => config('v2board.password_limit_count', 5),
                 'password_limit_expire' => config('v2board.password_limit_expire', 60),
-                'admin_2fa_force_enable' => (int)config('v2board.admin_2fa_force_enable', 0)
+                'admin_2fa_force_enable' => (int)config('v2board.admin_2fa_force_enable', 0),
+                'subscribe_audit_retention_days' => (int)config(
+                    'v2board.subscribe_audit_retention_days',
+                    SubscribeAuditRetentionService::DEFAULT_RETENTION_DAYS
+                )
             ]
         ];
         if ($key && isset($data[$key])) {

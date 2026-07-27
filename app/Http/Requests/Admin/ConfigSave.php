@@ -106,6 +106,8 @@ class ConfigSave extends FormRequest
         'password_limit_count' => 'integer',
         'password_limit_expire' => 'integer',
         'admin_2fa_force_enable' => 'in:0,1',
+        // 声明成数组而不是字符串：rules() 里要往后追加闭包，对字符串做 $rules[$k][] 会 fatal。
+        'subscribe_audit_retention_days' => ['nullable', 'integer'],
     ];
     /**
      * Get the validation rules that apply to the request.
@@ -124,6 +126,18 @@ class ConfigSave extends FormRequest
                     }
                     $fail('充值奖励格式不正确，必须为充值金额:奖励金额');
                 }
+            }
+        };
+
+        // 下限不能低于风险评估的 30 天周期：保留期更短会在周期被评估前就删掉证据，
+        // 判定永远是空的。35 给延迟的调度留 4 天余量。
+        $rules['subscribe_audit_retention_days'][] = function ($attribute, $value, $fail) {
+            if ($value === null || $value === '') {
+                return;
+            }
+            $days = (int)$value;
+            if ($days !== 0 && ($days < 35 || $days > 3650)) {
+                $fail('订阅审计保留天数必须为 0（不清理）或 35 至 3650 之间');
             }
         };
         return $rules;

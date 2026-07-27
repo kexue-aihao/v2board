@@ -231,6 +231,8 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_subscribe_request_log', 'user_subscription_requested_at', ['user_id', 'subscription_id', 'requested_at']);
         $this->ensureIndex('v2_subscribe_request_log', 'subscription_requested_at', ['subscription_id', 'requested_at']);
         $this->ensureIndex('v2_subscribe_request_log', 'subscription_ua_requested_at', ['subscription_id', 'ua_hash', 'requested_at']);
+        // 上面三个索引里 requested_at 都不是前导列，按保留期删除会全表扫描。
+        $this->ensureIndex('v2_subscribe_request_log', 'requested_at', ['requested_at']);
 
         DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_cycle` (
             `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -328,6 +330,8 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_node_connection_log', 'node_user_node_ip', ['node_user_id', 'node_type', 'node_id', 'ip'], true);
         $this->ensureIndex('v2_node_connection_log', 'user_id_last_seen_at', ['user_id', 'last_seen_at']);
         $this->ensureIndex('v2_node_connection_log', 'subscription_id_last_seen_at', ['subscription_id', 'last_seen_at']);
+        // 同上：last_seen_at 不是前导列，保留期清理需要它单独成索引。
+        $this->ensureIndex('v2_node_connection_log', 'last_seen_at', ['last_seen_at']);
     }
 
     private function applyIpLocationCacheSchema(): void

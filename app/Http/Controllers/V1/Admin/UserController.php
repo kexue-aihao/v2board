@@ -19,6 +19,7 @@ use App\Models\SubscribeRequestLog;
 use App\Models\NodeConnectionLog;
 use App\Services\AuthService;
 use App\Services\ServerService;
+use App\Services\SubscribeAuditRetentionService;
 use App\Services\SubscriptionService;
 use App\Services\SubscriptionRiskService;
 use App\Services\IpLocationService;
@@ -360,6 +361,30 @@ class UserController extends Controller
         ]);
     }
 
+    public function clearSubscribeAudit(Request $request)
+    {
+        $userId = (int)$request->input('user_id');
+        if (!$userId || !User::where('id', $userId)->exists()) {
+            abort(404, '用户不存在');
+        }
+
+        try {
+            $counts = (new SubscribeAuditRetentionService())->purgeUser($userId);
+        } catch (\Throwable $e) {
+            abort(500, '清空审计记录失败');
+        }
+
+        // 这是面板里唯一一个删除滥用证据的端点，而 RequestLog 中间件只记路径，
+        // 不记是谁删的、删了什么，所以这里单独补一条。
+        info('ADMIN AUDIT CLEAR user_id=' . $userId
+            . ' by=' . (is_array($request->user) ? ($request->user['email'] ?? '-') : '-')
+            . ' ' . json_encode($counts));
+
+        return response([
+            'data' => $counts
+        ]);
+    }
+
     public function dumpCSV(Request $request)
     {
         $userModel = User::orderBy('id', 'asc');
@@ -533,12 +558,9 @@ class UserController extends Controller
                     TicketMessage::where('ticket_id', $ticket->id)->delete();
                 }
                 Ticket::where('user_id', $user->id)->delete();
-                if (Schema::hasTable('v2_subscribe_request_log')) {
-                    SubscribeRequestLog::where('user_id', $user->id)->delete();
-                }
-                if (Schema::hasTable('v2_subscription_risk_cycle')) {
-                    \App\Models\SubscriptionRiskCycle::where('user_id', $user->id)->delete();
-                }
+                // 走同一个服务，「该用户的审计数据」只有一处定义，与清空按钮不会漂移。
+                // 原来这里漏了 v2_node_connection_log，已注销账号的真实 IP 会残留。
+                (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
                 User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
             });
             $builder->delete();
@@ -572,13 +594,8 @@ class UserController extends Controller
                 TicketMessage::where('ticket_id', $ticket->id)->delete();
             }
             Ticket::where('user_id', $request->input('id'))->delete();
-            if (Schema::hasTable('v2_subscribe_request_log')) {
-                SubscribeRequestLog::where('user_id', $request->input('id'))->delete();
-            }
-            if (Schema::hasTable('v2_subscription_risk_cycle')) {
-                \App\Models\SubscriptionRiskCycle::where('user_id', $request->input('id'))->delete();
-            }
-    
+            (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
+
             $user->delete();
             DB::commit();
         } catch (\Exception $e) {

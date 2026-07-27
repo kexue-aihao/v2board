@@ -6222,7 +6222,17 @@
                     placeholder: "\u8bf7\u8f93\u5165",
                     defaultValue: _.password_limit_expire,
                     onChange: e=>this.set("safe", "password_limit_expire", e.target.value)
-                }))) : "")), f.a.createElement(s["a"].TabPane, {
+                }))) : "", f.a.createElement(m, {
+                    title: "\u8ba2\u9605\u5ba1\u8ba1\u8bb0\u5f55\u4fdd\u7559\u5929\u6570",
+                    description: "\u8ba2\u9605\u62c9\u53d6\u8bb0\u5f55\u4e0e\u8282\u70b9\u8fde\u63a5\u8bb0\u5f55\u8d85\u8fc7\u8be5\u5929\u6570\u540e\u7531\u6bcf\u65e5\u4efb\u52a1\u6e05\u7406\u30020 \u8868\u793a\u4e0d\u6e05\u7406\uff0c\u6700\u5c0f 35 \u5929\uff08\u9700\u8986\u76d6 30 \u5929\u98ce\u9669\u8bc4\u4f30\u5468\u671f\uff09\u3002\u98ce\u9669\u5224\u5b9a\u7ed3\u679c\u4e0d\u4f1a\u88ab\u6e05\u7406\u3002"
+                }, f.a.createElement(a["a"], {
+                    addonAfter: "\u5929",
+                    size: "large",
+                    type: "number",
+                    placeholder: "180",
+                    defaultValue: _.subscribe_audit_retention_days,
+                    onChange: e=>this.set("safe", "subscribe_audit_retention_days", e.target.value)
+                })))), f.a.createElement(s["a"].TabPane, {
                     tab: "\u8ba2\u9605",
                     key: "subscribe"
                 }, f.a.createElement("div", {
@@ -71407,6 +71417,42 @@
                     cancelText: "\u53d6\u6d88"
                 })
             }
+            clearSubscribeAudit(user, auditModal) {
+                var t = this;
+                p["a"].confirm({
+                    title: "\u6e05\u7a7a\u8ba2\u9605\u5ba1\u8ba1\u8bb0\u5f55",
+                    content: "\u786e\u5b9a\u8981\u6e05\u7a7a " + user.email + " \u7684\u8ba2\u9605\u62c9\u53d6\u8bb0\u5f55\u548c\u8282\u70b9\u8fde\u63a5\u8bb0\u5f55\u5417\uff1f\u5220\u9664\u540e\u65e0\u6cd5\u6062\u590d\uff0c\u8be5\u7528\u6237\u7684\u98ce\u9669\u5224\u5b9a\u7ed3\u679c\u4f1a\u4e00\u5e76\u91cd\u7f6e\u3002",
+                    okText: "\u786e\u5b9a\u6e05\u7a7a",
+                    okType: "danger",
+                    cancelText: "\u53d6\u6d88",
+                    onOk() {
+                        // \u8fd4\u56de Promise\uff0c\u8ba9\u786e\u5b9a\u6309\u94ae\u4fdd\u6301 loading \u76f4\u5230\u8bf7\u6c42\u7ed3\u675f\u3002
+                        return Object(n("t3Un")["b"])("/" + window.settings.secure_path + "/user/subscribe-audit/clear", {
+                            user_id: user.id
+                        }).then(function(res) {
+                            if (200 !== res.code) return;
+                            var counts = res.data || {};
+                            // \u7528\u6237\u5217\u8868\u6709\u98ce\u9669\u5217\uff0c\u4e0d\u5237\u65b0\u4f1a\u7559\u7740\u5df2\u88ab\u91cd\u7f6e\u7684\u65e7\u5fbd\u7ae0\u3002
+                            t.props.dispatch({
+                                type: "user/fetch"
+                            }),
+                            auditModal && auditModal.destroy(),
+                            p["a"].success({
+                                title: "\u5df2\u6e05\u7a7a",
+                                content: "\u8ba2\u9605\u62c9\u53d6 " + (counts.subscribe_request_log || 0)
+                                    + " \u6761\uff0c\u8282\u70b9\u8fde\u63a5 " + (counts.node_connection_log || 0)
+                                    + " \u6761\uff0c\u98ce\u9669\u5224\u5b9a " + (counts.subscription_risk_cycle || 0) + " \u6761\u3002"
+                            }),
+                            t.subscribeRequests(user)
+                        }).catch(function() {
+                            p["a"].error({
+                                title: "\u8bf7\u6c42\u5931\u8d25",
+                                content: "\u6e05\u7a7a\u5ba1\u8ba1\u8bb0\u5f55\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5"
+                            })
+                        })
+                    }
+                })
+            }
             subscribeRequests(e) {
                 var t = this;
                 Object(n("t3Un")["a"])("/" + window.settings.secure_path + "/user/subscribe-requests", {
@@ -71415,7 +71461,11 @@
                     pageSize: 100
                 }).then(function(r) {
                     if (200 !== r.code) return;
+                    // 注意：这个回调里模块级的 antd 别名全被下面的局部变量遮蔽了
+                    // （s 是 r.risk、u 是格式化函数……），所以 Button 必须另起一个
+                    // 可读的名字就地取，不能用模块级的 s["a"]。
                     var i = n("wCAj")["a"]
+                      , auditButton = n("2/Rp")["a"]
                       , o = r.data || []
                       , a = r.connections || []
                       , s = r.risk || {}
@@ -71449,7 +71499,7 @@
                             }
                         }, t))
                     };
-                    p["a"].info({
+                    var auditModal = p["a"].info({
                         title: "订阅审计 - " + e.email + "（风险：" + c + "）",
                         width: 1180,
                         content: g.a.createElement("div", {
@@ -71458,6 +71508,19 @@
                                 overflowY: "auto"
                             }
                         },
+                            g.a.createElement("div", {
+                                style: {
+                                    marginBottom: 12,
+                                    textAlign: "right"
+                                }
+                            }, g.a.createElement(auditButton, {
+                                type: "danger",
+                                size: "small",
+                                icon: "delete",
+                                onClick: function() {
+                                    t.clearSubscribeAudit(e, auditModal)
+                                }
+                            }, "清空该用户审计记录")),
                             d("订阅拉取 IP", "客户端下载订阅配置的来源；请求 " + (l.request_count || 0) + " 次，UA " + (l.user_agent_count || 0) + " 种，IP " + (l.distinct_ip_count || 0) + " 个，地区 " + (s.region_count || 0) + "，国家 " + (s.country_count || 0)),
                             g.a.createElement(i, {
                                 size: "small",
