@@ -635,7 +635,10 @@ textarea.ant-input {
   background: #17202f !important;
 }
 
-.v2board-node_mobile,
+/* .v2board-node_mobile 已删：umi.js 输出的类名是 v2board_node_mobile（下划线），
+   这个连字符版本从来没匹配到任何元素。但也不要改成下划线版 —— .child_node 本来就同时
+   挂在移动端 List.Item 上，子节点高亮已经生效；加上下划线版会把暖色底打到每一张节点
+   卡片，反而抹掉父子区分。 */
 .child_node {
   border-color: var(--v2-border) !important;
   background: var(--v2-surface-warm) !important;
@@ -1918,5 +1921,282 @@ textarea.ant-input {
   /* 贴顶布局留的负外边距会让居中偏 8px，居中时不需要。 */
   body:not(:has(.v2board-auth-box)) .ant-message-notice:first-child {
     margin-top: 0;
+  }
+}
+
+/* ==========================================================================
+   移动端表格档 + 三个既有 bug 修复
+   作用域沿用本文件 1388 行起的约定：#page-container:not(:has(.v2board-auth-box))
+   [+ #main-container]。裸选择器打不过 1714 / 1730 已锁死的 12px 14px 与 height:44px。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1) 尺寸变量
+   宿主选择器与 1389 完全相同：同特异性、位置更靠后 → 只是往同一份自定义属性集合里
+   追加条目，不会覆盖任何已有的 --admin-* 颜色。
+   --admin-table-rev 是哨兵：一条 getComputedStyle 就能同时证明「新 CSS 上线了」
+   和「:has() 作用域匹配成功」，是上线后最先要看的一项。
+   -------------------------------------------------------------------------- */
+#page-container:not(:has(.v2board-auth-box)) {
+  --admin-cell-py: 12px;         /* td/th 纵向内距，= 现状 1716 / 1730 */
+  --admin-cell-px: 14px;         /* td/th 横向内距，= 现状 1716 / 1730 */
+  --admin-cell-fz: 14px;         /* td 字号，= antd .ant-table 基线 */
+  --admin-head-fz: 11px;         /* th 字号，= 现状 1720 */
+  --admin-head-h: 44px;          /* th 高度，= 现状 1715 */
+  --admin-row-min-h: 48px;       /* td 最小高，= 现状 1729 */
+  --admin-tap: 40px;             /* 触控最小边长 */
+  --admin-page-header-h: 65px;   /* 固定顶栏实占高，上线后用 getBoundingClientRect 校准 */
+  --admin-hint-w: 18px;          /* 横滚边缘提示宽度 */
+  --admin-table-rev: 1;          /* 部署哨兵 */
+}
+
+/* 断点只换变量值，不新增任何 th/td 选择器 —— 这是规避「主表与固定列浮层必须同时命中」
+   的结构性手段，见下面第 2 段。 */
+@media (max-width: 767.98px) {
+  #page-container:not(:has(.v2board-auth-box)) {
+    --admin-cell-py: 9px;
+    --admin-cell-px: 8px;
+    --admin-cell-fz: 13px;
+    --admin-head-fz: 10px;
+    --admin-head-h: 36px;
+    --admin-row-min-h: 40px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   2) 密度：全站只有一条 th 规则、一条 td 规则
+   选择器逐字复制 1713-1714 与 1726-1728（同特异性、位置更靠后 → 那两处的
+   height / padding / font-size 作废，其余声明仍然生效）。
+   关键：选择器里没有 .ant-table-scroll / .ant-table-body / .ant-table-fixed-* /
+   .ant-table-content 任何一段，所以它同时命中主表和 .ant-table-fixed-right 里
+   那份浮层表格。antd 用 JS 把主表量出的行高内联同步给浮层，两边尺寸必须一致，
+   否则行高错位 —— 这是本档最容易踩的坑。
+   -------------------------------------------------------------------------- */
+#page-container:not(:has(.v2board-auth-box)) #main-container .table thead th,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-thead > tr > th {
+  height: var(--admin-head-h);
+  padding: var(--admin-cell-py) var(--admin-cell-px);
+  font-size: var(--admin-head-fz);
+}
+
+#page-container:not(:has(.v2board-auth-box)) #main-container .table td,
+#page-container:not(:has(.v2board-auth-box)) #main-container .table th,
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-tbody > tr > td {
+  min-height: var(--admin-row-min-h);
+  padding: var(--admin-cell-py) var(--admin-cell-px);
+  font-size: var(--admin-cell-fz);
+}
+
+/* --------------------------------------------------------------------------
+   3) 撤掉那个不成立的「出血」—— 移动端第一可见缺陷
+   732-739 与 1853-1859 的负 margin + 等量 padding 本意是让表格铺满屏宽，但
+   12 张表全部挂在 .block > .bg-white 下，这两层都没有 padding，压根没有内槽可以
+   出血；再叠加 434 行的 max-width:100% 把 border-box 钳回容器宽度，净效果是
+   「整体左移 16px + 右边空出 32px」—— 固定操作列于是悬在离卡片右缘 32px 的地方。
+   归零后表格铺满卡片宽度，.ant-table-fixed-right 才真的贴在右边缘。
+   -------------------------------------------------------------------------- */
+@media (max-width: 767.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .table-responsive,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-wrapper,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .v2board-table {
+    margin-right: 0;
+    margin-left: 0;
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  /* 上面那条会连带清掉 antd 给展开行内嵌表的负边距，按实际 td 内距还原横向部分。
+     只影响订阅溯源页的展开行。 */
+  #page-container:not(:has(.v2board-auth-box)) #main-container tr.ant-table-expanded-row > td > .ant-table-wrapper {
+    margin-right: calc(var(--admin-cell-px) * -1);
+    margin-left: calc(var(--admin-cell-px) * -1);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   4) 让「外层 wrapper 横滚」结构上不可能发生
+   431-436 给 .ant-table-wrapper 加了 overflow-x:auto。一旦它真的滚起来，
+   position:absolute 的 .ant-table-fixed-right 会跟着整体位移（它的包含块是
+   .ant-table，在可滚动内容里）。用 overflow-x:clip 把它从「滚动容器」降级成
+   「裁剪容器」：不存在 scrollLeft，浮层不可能位移。
+   :has(.ant-table-fixed-*) 精确圈定有固定列因而危险的那 9 张表；另外几张没设
+   scroll.x 的表保留 auto，长 token 溢出时仍然能滚到。
+   overflow-y:visible 显式写出：clip 不像 auto/hidden 会把另一轴逼成 auto。
+   不支持 overflow:clip 的浏览器整条声明被丢弃 → 退回今天的行为，优雅降级。
+   -------------------------------------------------------------------------- */
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-wrapper:has(.ant-table-fixed-right),
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-wrapper:has(.ant-table-fixed-left) {
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+/* 成因层再补一刀：wrapper 里唯一可能超宽的东西是分页器（float:right，且 umi.css
+   给它的 margin 带 !important 所以这里也必须 !important）。float:none + 居中让它
+   必定换行而不是横向溢出。 */
+@media (max-width: 767.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-pagination {
+    float: none;
+    margin: 12px 0 4px !important;
+    text-align: center;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   5) 横滚行为：防穿透
+   .ant-table-body 才是真正的 x 滚动容器（rc-table 给它内联 overflow-x:scroll）。
+   overscroll-behavior 是非布局属性，不动任何尺寸，也不参与行高同步。
+   代价：手指起点落在表格内时浏览器的边缘返回手势会被吞掉 —— 在管理端正是想要的。
+   -------------------------------------------------------------------------- */
+#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-body {
+  overscroll-behavior-x: contain;
+}
+
+/* --------------------------------------------------------------------------
+   6) 横滚提示
+   谓词直接用 rc-table 自己维护的类，不需要一行 JS：
+     内容装得下 → -left 与 -right 同时存在 → 两侧提示都被 :not() 关掉
+     在最左     → 只有 -left              → 只出右侧提示
+     中间       → -middle                 → 两侧都出
+     在最右     → 只有 -right             → 只出左侧提示
+   左侧用伪元素（全项目 fixed:"left" 零处，左缘永远没有浮层可挡）。
+   右侧不用伪元素（会盖住 z-index:1 的固定列），改为放大 antd 自带的位置感知投影；
+   只有没有右固定列的 3 张表才补右侧渐变。
+   锚点选 .ant-table：它已经是 position:relative，不需要新建包含块，也不会抢走
+   .ant-table-fixed-right 的包含块；三份样式表确认它自身没有 ::before/::after。
+   伪元素 z-index:auto → 画在非定位后代之上、但在 z-index:1 的固定列之下。
+   -------------------------------------------------------------------------- */
+@media (max-width: 767.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table:not(.ant-table-scroll-position-left)::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: var(--admin-hint-w);
+    pointer-events: none;
+    background: linear-gradient(to right, rgb(16 24 40 / 12%), rgb(16 24 40 / 0));
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table:not(.ant-table-scroll-position-right):not(:has(> .ant-table-content > .ant-table-fixed-right))::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: var(--admin-hint-w);
+    pointer-events: none;
+    background: linear-gradient(to left, rgb(16 24 40 / 12%), rgb(16 24 40 / 0));
+  }
+
+  /* 加强固定列投影。:not(-scroll-position-right) 与 antd 自己的
+     .ant-table.ant-table-scroll-position-right .ant-table-fixed-right{box-shadow:none}
+     互斥，所以滚到最右时自动熄灭；内容装得下时 -right 也在，同样熄灭。
+     用 > 直接子代，避免命中溯源页展开行里的内嵌表。 */
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table:not(.ant-table-scroll-position-right) > .ant-table-content > .ant-table-fixed-right {
+    box-shadow: -12px 0 12px -8px rgb(16 24 40 / 22%);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   7) 滚动条可见性
+   刻意只在 pointer:fine（鼠标/触控板）下生效。在触摸设备上定义 ::-webkit-scrollbar
+   会把系统的「覆盖式」滚动条变成「占位式」，凭空给主表加 8px 高度，而
+   .ant-table-fixed-right 那份表格不会加 —— 等于自己制造一处底边错位。
+   桌面端本来就因 overflow-x:scroll 常驻约 15px，缩到 8px 是净改善。
+   -------------------------------------------------------------------------- */
+@media (pointer: fine) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-body {
+    scrollbar-width: thin;
+    scrollbar-color: var(--admin-border-strong) var(--admin-surface-subtle);
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-body::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-body::-webkit-scrollbar-track {
+    background: var(--admin-surface-subtle);
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-body::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: var(--admin-border-strong);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   8) 分页器触控尺寸
+   antd 基线 32px，而用户/节点/溯源三页传了 size:"small" → .ant-pagination.mini 是
+   24px。这里两个 id 压过 antd 所有 .mini 变体。40px × 7~9 项必定换成两行，
+   上一段的 text-align:center 让换行不难看。
+   -------------------------------------------------------------------------- */
+@media (max-width: 767.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-item,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-prev,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-next,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-jump-prev,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-jump-next {
+    min-width: var(--admin-tap);
+    height: var(--admin-tap);
+    margin: 2px 3px;
+    line-height: calc(var(--admin-tap) - 2px);
+  }
+
+  /* prev/next 的可点区域是内层 .ant-pagination-item-link */
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-prev .ant-pagination-item-link,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-next .ant-pagination-item-link {
+    height: 100%;
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-item a {
+    padding: 0 4px;
+  }
+}
+
+/* ==========================================================================
+   既有 bug 修复
+   ========================================================================== */
+
+/* B1) 1436 行的 #sidebar{width:240px} 没有包在任何断点里。
+   桌面端不只是留 10px 缝：布局恒定带 side-scroll 类，umi.css 用
+   #page-container.side-scroll #sidebar .content-header, .content-side{width:250px!important}
+   把侧栏内层钉死在 250px，外层 240px 时内层会漫过 240px 处的 border-right 与
+   box-shadow。而 #page-container.sidebar-o{padding-left:250px} 也仍是 250。
+   移动端：umi.css 顶层是 #sidebar{width:80%}（不是 100%），被 240px 压掉了。
+   这里用 min(80%, 320px) —— 纯 80% 在 991px 的横屏平板上会摊成 793px。
+   两条都与 1436 同特异性、位置更靠后 → 胜出，不必回去改 1436。
+   -------------------------------------------------------------------------- */
+@media (max-width: 991.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #sidebar {
+    width: min(80%, 320px);
+  }
+}
+
+@media (min-width: 992px) {
+  #page-container:not(:has(.v2board-auth-box)) #sidebar {
+    width: 250px;
+  }
+}
+
+/* B4) umi.css 在 @media (max-width:767.98px) 里给
+   .v2board-table-action 设了 position:fixed;background:#fff;width:100%;z-index:100，
+   却既没有 top 也没有 left。后果不是「向右溢出撑出文档横滚」（position:fixed 的溢出
+   不计入文档滚动区域），而是三件事：
+     a. 脱离文档流 → 后面的表格上移，这条白底工具条压在表头上；
+     b. 用静态位置固定在视口 → 页面一滚它就冻在原处飘着；
+     c. width:100% 相对初始包含块从 x≈12px 起算 → 右侧约 12px 被裁到视口外，
+        节点管理那条 float:right 的「编辑排序」按钮正好在那里。
+   改成 position:sticky：留在文档流里 → a、c 消失；top 给顶栏实高 → 保留原作者
+   显然想要的「工具条吸顶」意图。祖先 .bg-white / .block / .content（overflow-x:visible）
+   / #main-container 均无 overflow，sticky 的滚动端口就是文档，能正常工作。
+   z-index 沿用 umi.css 的 100 → 低于顶栏的 998，不会盖住顶栏。
+   -------------------------------------------------------------------------- */
+@media (max-width: 767.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .v2board-table-action {
+    position: sticky;
+    top: var(--admin-page-header-h);
+    width: auto;
+    border-bottom: 1px solid var(--admin-border);
+    background: var(--admin-surface);
   }
 }
