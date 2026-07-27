@@ -71434,6 +71434,71 @@
                     cancelText: "\u53d6\u6d88"
                 })
             }
+            // 独立于 resetSecret：换订阅地址和把用户锁在门外是两件事，合并会让任何一次换
+            // 订阅地址都顺手让用户登不进来。明文只在这一个响应里出现一次，不进日志不发邮件。
+            resetPassword(user) {
+                if (!user) return;
+                var t = this;
+                p["a"].confirm({
+                    title: "重置密码",
+                    width: 520,
+                    content: g.a.createElement("div", null, g.a.createElement("p", {
+                        className: "mb-2"
+                    }, "将为 " + user.email + " 生成一个 64 位随机密码（大小写字母 + 数字），原密码立即失效。"), g.a.createElement("p", {
+                        className: "mb-2"
+                    }, "该用户所有已登录设备会被强制退出，需要用新密码重新登录。"), g.a.createElement("p", {
+                        className: "mb-0 font-w600"
+                    }, "新密码只显示一次，关闭弹窗后无法再次查看，请当场复制并转交本人。")),
+                    okText: "生成新密码",
+                    okType: "danger",
+                    cancelText: "取消",
+                    onOk() {
+                        // 返回 Promise，让确定按钮保持 loading 直到请求结束。
+                        return Object(n("t3Un")["b"])("/" + window.settings.secure_path + "/user/resetPassword", {
+                            id: user.id
+                        }).then(function(res) {
+                            if (200 !== res.code) return;
+                            var data = res.data || {};
+                            t.showNewPassword(data.email || user.email, data.password || "")
+                        }).catch(function() {
+                            p["a"].error({
+                                title: "请求失败",
+                                content: "重置密码失败，请稍后重试"
+                            })
+                        })
+                    }
+                })
+            }
+            // 明文单独用一个 info 弹窗，而不是塞进 confirm 的成功回调 —— 需要一个可点的复制
+            // 按钮，也要能手动选中文本。
+            showNewPassword(email, password) {
+                p["a"].info({
+                    title: "新密码已生成",
+                    width: 520,
+                    okText: "我已复制",
+                    content: g.a.createElement("div", null, g.a.createElement("p", {
+                        className: "mb-2"
+                    }, email), g.a.createElement("code", {
+                        style: {
+                            display: "block",
+                            padding: "10px",
+                            background: "#f5f5f5",
+                            borderRadius: "4px",
+                            lineHeight: "1.6",
+                            wordBreak: "break-all"
+                        }
+                    }, password), g.a.createElement("div", {
+                        className: "mt-2"
+                    }, g.a.createElement(s["a"], {
+                        size: "small",
+                        onClick: ()=>Object(L["a"])(password)
+                    }, g.a.createElement(u["a"], {
+                        type: "copy"
+                    }), " 复制密码")), g.a.createElement("p", {
+                        className: "mb-0 mt-2 text-muted"
+                    }, "关闭后无法再次查看。该用户已被强制退出所有设备。"))
+                })
+            }
             clearSubscribeAudit(user, auditModal) {
                 var t = this;
                 p["a"].confirm({
@@ -71901,7 +71966,11 @@
                                 onClick: ()=>this.resetSecret(t)
                             }, g.a.createElement(u["a"], {
                                 type: "reload"
-                            }), " \u91cd\u7f6eUUID\u53ca\u8ba2\u9605URL")), g.a.createElement(c["a"].Item, {
+                            }), " \u91cd\u7f6eUUID\u53ca\u8ba2\u9605URL")), g.a.createElement(c["a"].Item, null, g.a.createElement("a", {
+                                onClick: ()=>this.resetPassword(t)
+                            }, g.a.createElement(u["a"], {
+                                type: "key"
+                            }), " 重置密码")), g.a.createElement(c["a"].Item, {
                                 onClick: ()=>this.orderFilter("user_id", "=", t.id)
                             }, g.a.createElement("a", null, g.a.createElement(u["a"], {
                                 type: "account-book"
@@ -72116,6 +72185,15 @@
                 }, g.a.createElement(u["a"], {
                     type: "reload"
                 }), " \u91cd\u7f6eUUID\u53ca\u8ba2\u9605URL")), g.a.createElement("li", {
+                    className: "ant-dropdown-menu-item"
+                }, g.a.createElement("a", {
+                    style: {
+                        color: "#ff4d4f"
+                    },
+                    onClick: ()=>this.resetPassword(this.record)
+                }, g.a.createElement(u["a"], {
+                    type: "key"
+                }), " 重置密码")), g.a.createElement("li", {
                     className: "ant-dropdown-menu-item",
                     onClick: ()=>{
                         var e;

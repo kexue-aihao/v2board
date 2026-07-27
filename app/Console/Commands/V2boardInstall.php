@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Encryption\Encrypter;
 use App\Models\User;
+use App\Services\PasswordPolicyService;
 use App\Utils\Helper;
 use Illuminate\Support\Facades\DB;
 
@@ -94,7 +95,8 @@ class V2boardInstall extends Command
             while (!$email) {
                 $email = $this->ask('请输入管理员邮箱?');
             }
-            $password = Helper::guid(false);
+            // 走统一的密码策略生成器：64 位大小写字母 + 数字，而不是原来 32 位小写 hex。
+            $password = PasswordPolicyService::generate();
             if (!$this->registerAdmin($email, $password)) {
                 abort(500, '管理员账号注册失败，请重试');
             }
@@ -117,10 +119,12 @@ class V2boardInstall extends Command
         if (strlen($password) < 8) {
             abort(500, '管理员密码长度最小为8位字符');
         }
-        $user->password = password_hash($password, PASSWORD_DEFAULT);
+        PasswordPolicyService::apply($user, $password);
         $user->uuid = Helper::guid(true);
         $user->token = Helper::guid();
         $user->is_admin = 1;
+        // 旗标不用显式置 0：install.sql 里这一列的默认值就是 0，而且管理员本来就被排除在
+        // 提醒之外。
         return \App\Utils\TokenRotationContext::using('install_admin', function () use ($user) {
             return $user->save();
         });

@@ -555,6 +555,7 @@ CREATE TABLE `v2_user` (
                            `password` varchar(64) NOT NULL,
                            `password_algo` char(10) DEFAULT NULL,
                            `password_salt` char(10) DEFAULT NULL,
+                           `password_reset_required` tinyint(1) NOT NULL DEFAULT '0',
                            `balance` int(11) NOT NULL DEFAULT '0',
                            `discount` int(11) DEFAULT NULL,
                            `commission_type` tinyint(4) NOT NULL DEFAULT '0' COMMENT '0: system 1: period 2: onetime',

@@ -14,7 +14,8 @@ class SchemaUpgradeService
         'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
         'risk_rule_schema' => 'risk_rule_schema_v1',
-        'token_history_schema' => 'token_history_schema_v1'
+        'token_history_schema' => 'token_history_schema_v1',
+        'password_policy_schema' => 'password_policy_schema_v1'
     ];
 
     public function run(): array
@@ -71,6 +72,9 @@ class SchemaUpgradeService
                 return;
             case 'token_history_schema':
                 $this->applyTokenHistorySchema();
+                return;
+            case 'password_policy_schema':
+                $this->applyPasswordPolicySchema();
                 return;
         }
 
@@ -547,6 +551,31 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_ip_location_cache', 'ip', ['ip'], true);
         $this->ensureIndex('v2_ip_location_cache', 'location_status', ['status']);
         $this->ensureIndex('v2_ip_location_cache', 'location_key', ['location_key']);
+    }
+
+    private function applyPasswordPolicySchema(): void
+    {
+        $this->requireTable('v2_user');
+
+        // 与 applyRiskRuleSchema / applyTokenHistorySchema 同理：判断必须取在 ALTER 之前。
+        // run() 对每个版本每次部署都无条件重跑 apply()，不门控的话每次 update.sh 都会把
+        // 已经重置过密码的用户重新标成待重置。
+        $freshColumn = !Schema::hasColumn('v2_user', 'password_reset_required');
+
+        // 默认 0：安装器创建的那个管理员天生合规，不需要额外补救；注册路径显式置 1。
+        $this->ensureColumn('v2_user', 'password_reset_required', "tinyint(1) NOT NULL DEFAULT '0'");
+
+        // 不建索引：这一列只会以「按主键读某个用户」的方式访问，且取值只有两种。
+        if (!$freshColumn) {
+            return;
+        }
+
+        // 一次性回填：现存普通用户的密码全是自己敲的，按策略都要重置。管理员和员工不打扰
+        // —— 提醒只出现在用户端，而他们主要用管理端，被提醒了也无处可点。
+        DB::table('v2_user')
+            ->where('is_admin', 0)
+            ->where('is_staff', 0)
+            ->update(['password_reset_required' => 1]);
     }
 
     private function requireTable(string $table): void

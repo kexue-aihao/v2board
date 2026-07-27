@@ -43,7 +43,8 @@ class CacheKey
         'TWO_FACTOR_SETUP' => '2FA setup',
         'TWO_FACTOR_FAILURE' => '2FA failure',
         'RISK_RECOMPUTE_CURSOR' => '风险重算游标',
-        'TOKEN_HISTORY_STARTED_AT' => 'Token 历史起始时间'
+        'TOKEN_HISTORY_STARTED_AT' => 'Token 历史起始时间',
+        'PASSWORD_RESET_ERROR_LIMIT' => '重置密码时原密码错误次数限制'
     ];
 
     public static function get(string $key, $uniqueValue)

@@ -15886,17 +15886,6 @@
                     type: "comm/config"
                 })
             }
-            changePassword() {
-                if (this.refs.re_password.value !== this.refs.new_password.value)
-                    return c["a"].error(Object(m["formatMessage"])({
-                        id: "\u4e24\u6b21\u65b0\u5bc6\u7801\u8f93\u5165\u4e0d\u540c"
-                    }));
-                this.props.dispatch({
-                    type: "user/changePassword",
-                    oldPassword: this.refs.old_password.value,
-                    newPassword: this.refs.new_password.value
-                })
-            }
             redeemgiftcard() {
                 if (this.refs.giftcard.value.length == 0)
                     return c["a"].error(Object(m["formatMessage"])({
@@ -16116,7 +16105,7 @@
                 }, l.a.createElement("h3", {
                     className: "block-title"
                 }, Object(m["formatMessage"])({
-                    id: "\u4fee\u6539\u5bc6\u7801"
+                    id: "\u91cd\u7f6e\u5bc6\u7801"
                 })), l.a.createElement("div", {
                     className: "block-options"
                 })), l.a.createElement("div", {
@@ -16126,45 +16115,8 @@
                 }, l.a.createElement("div", {
                     className: "col-lg-8 col-xl-5"
                 }, l.a.createElement("div", {
-                    className: "form-group"
-                }, l.a.createElement("label", null, Object(m["formatMessage"])({
-                    id: "\u65e7\u5bc6\u7801"
-                })), l.a.createElement("input", {
-                    type: "password",
-                    className: "form-control",
-                    placeholder: Object(m["formatMessage"])({
-                        id: "\u8bf7\u8f93\u5165\u65e7\u5bc6\u7801"
-                    }),
-                    ref: "old_password"
-                })), l.a.createElement("div", {
-                    className: "form-group"
-                }, l.a.createElement("label", null, Object(m["formatMessage"])({
-                    id: "\u65b0\u5bc6\u7801"
-                })), l.a.createElement("input", {
-                    type: "password",
-                    className: "form-control",
-                    placeholder: Object(m["formatMessage"])({
-                        id: "\u8bf7\u8f93\u5165\u65b0\u5bc6\u7801"
-                    }),
-                    ref: "new_password"
-                })), l.a.createElement("div", {
-                    className: "form-group"
-                }, l.a.createElement("label", null, Object(m["formatMessage"])({
-                    id: "\u65b0\u5bc6\u7801"
-                })), l.a.createElement("input", {
-                    type: "password",
-                    className: "form-control",
-                    placeholder: Object(m["formatMessage"])({
-                        id: "\u8bf7\u8f93\u5165\u65b0\u5bc6\u7801"
-                    }),
-                    ref: "re_password"
-                })), l.a.createElement(a["a"], {
-                    type: "primary",
-                    onClick: ()=>this.changePassword(),
-                    loading: n
-                }, Object(m["formatMessage"])({
-                    id: "\u4fdd\u5b58"
-                })))))))), l.a.createElement("div", {
+                    id: "v2board-password-reset-inline"
+                }))))))), l.a.createElement("div", {
                     className: "row mb-3 mb-md-0"
                 }, l.a.createElement("div", {
                     className: "col-md-12"

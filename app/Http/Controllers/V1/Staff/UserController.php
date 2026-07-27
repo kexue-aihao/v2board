@@ -8,6 +8,7 @@ use App\Http\Requests\Staff\UserUpdate;
 use App\Jobs\SendEmailJob;
 use App\Models\Plan;
 use App\Models\User;
+use App\Services\PasswordPolicyService;
 use Illuminate\Http\Request;
 
 class UserController extends Controller
@@ -40,6 +41,11 @@ class UserController extends Controller
         if (isset($params['password'])) {
             $params['password'] = password_hash($params['password'], PASSWORD_DEFAULT);
             $params['password_algo'] = NULL;
+            $params['password_salt'] = NULL;
+            // 与 Admin\UserController::update 同规则：人打的密码就要提醒重置。
+            if (PasswordPolicyService::available()) {
+                $params['password_reset_required'] = 1;
+            }
         } else {
             unset($params['password']);
         }

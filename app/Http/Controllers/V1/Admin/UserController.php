@@ -18,6 +18,7 @@ use App\Models\Subscription;
 use App\Models\SubscribeRequestLog;
 use App\Models\NodeConnectionLog;
 use App\Services\AuthService;
+use App\Services\PasswordPolicyService;
 use App\Services\ServerService;
 use App\Services\SubscribeAuditRetentionService;
 use App\Services\SubscriptionService;
@@ -29,6 +30,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use App\Services\SubscriptionTokenHistoryService;
 use App\Utils\TokenRotationContext;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 class UserController extends Controller
@@ -52,6 +54,37 @@ class UserController extends Controller
                 'data' => $user->save()
             ]);
         });
+    }
+
+    /**
+     * 由系统生成一个新密码并返回明文，供管理员转交本人。
+     *
+     * 刻意不与 resetSecret 合并：换订阅地址和把用户锁在门外是两件事，一次点击同时做完
+     * 意味着任何一次「重置UUID及订阅URL」都会让用户无法登录，直到管理员想起来通知他。
+     * 明文不进日志、不发邮件，只在这一个响应里出现一次。
+     */
+    public function resetPassword(Request $request)
+    {
+        $user = User::find($request->input('id'));
+        if (!$user) abort(500, '用户不存在');
+
+        $password = PasswordPolicyService::generate();
+        PasswordPolicyService::apply($user, $password);
+        if (!$user->save()) abort(500, '重置失败');
+        // 排在 save() 之后：save 失败时旗标不能先翻。
+        PasswordPolicyService::markSatisfied($user);
+        // 密码变了，旧会话必须死。
+        (new AuthService($user))->removeAllSession();
+
+        $actor = is_array($request->user ?? null) ? ($request->user['id'] ?? null) : null;
+        Log::info('ADMIN PASSWORD RESET user_id=' . $user->id . ' by=' . ($actor ?? 'unknown'));
+
+        return response([
+            'data' => [
+                'password' => $password,
+                'email' => $user->email
+            ]
+        ]);
     }
 
     private function filter(Request $request, $builder)
@@ -165,6 +198,11 @@ class UserController extends Controller
         if (isset($params['password'])) {
             $params['password'] = password_hash($params['password'], PASSWORD_DEFAULT);
             $params['password_algo'] = NULL;
+            $params['password_salt'] = NULL;
+            // 管理员手打的密码同样是人选的，按策略不合规。列不存在时不能塞进 update()。
+            if (PasswordPolicyService::available()) {
+                $params['password_reset_required'] = 1;
+            }
         } else {
             unset($params['password']);
         }
@@ -444,6 +482,10 @@ class UserController extends Controller
                 abort(500, '邮箱已存在于系统中');
             }
             $user['password'] = password_hash($request->input('password') ?? $user['email'], PASSWORD_DEFAULT);
+            // 默认密码就是邮箱地址，是全站最弱的口令；管理员指定的也是人选的。都要提醒。
+            if (PasswordPolicyService::available()) {
+                $user['password_reset_required'] = 1;
+            }
             $created = TokenRotationContext::using('admin_generate', function () use ($user) {
                 return User::create($user);
             });
@@ -482,6 +524,10 @@ class UserController extends Controller
                 'updated_at' => time()
             ];
             $user['password'] = password_hash($request->input('password') ?? $user['email'], PASSWORD_DEFAULT);
+            // 同 generate()：批量账号的密码默认就是邮箱地址，必须提醒重置。
+            if (PasswordPolicyService::available()) {
+                $user['password_reset_required'] = 1;
+            }
             array_push($users, $user);
         }
         DB::beginTransaction();

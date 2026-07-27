@@ -82,6 +82,9 @@ class AuthController extends Controller
         $user->password = password_hash($password, PASSWORD_DEFAULT);
         $user->uuid = Helper::guid(true);
         $user->token = Helper::guid();
+        // 注册照旧允许弱密码（不然没人能完成注册），但从这一刻起持续提醒重置。跟着同一条
+        // INSERT 走，不额外发一次 UPDATE。
+        \App\Services\PasswordPolicyService::stampRequired($user);
         if ($request->input('invite_code')) {
             $inviteCode = InviteCode::where('code', $request->input('invite_code'))
                 ->where('status', 0)
@@ -324,6 +327,8 @@ class AuthController extends Controller
         if (!$user->save()) {
             abort(500, __('Reset failed'));
         }
+        // 走完邮件验证码设的仍然是用户自选密码，按策略不合规，重新开始提醒。
+        \App\Services\PasswordPolicyService::markRequired($user);
         Cache::forget(CacheKey::get('EMAIL_VERIFY_CODE', $cacheKeyEmail));
         (new AuthService($user))->removeAllSession();
         return response([

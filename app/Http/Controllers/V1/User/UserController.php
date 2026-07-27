@@ -14,6 +14,7 @@ use App\Models\Ticket;
 use App\Models\User;
 use App\Services\AuthService;
 use App\Services\OrderService;
+use App\Services\PasswordPolicyService;
 use App\Services\UserService;
 use App\Services\SubscriptionService;
 use App\Utils\CacheKey;
@@ -56,9 +57,36 @@ class UserController extends Controller
         if ($request->user['is_admin']) {
             $data['is_admin'] = true;
         }
+        // 密码策略提醒的数据来源：这是前端每次启动唯一会调的接口。实时读库而不是复用
+        // $request->user —— 那份载荷被 AuthService::decryptAuthData 按 JWT 缓存了 3600 秒，
+        // 旗标翻转最多要一小时才生效。
+        $data['password_reset_required'] = $this->passwordResetRequired($request);
         return response([
             'data' => $data
         ]);
+    }
+
+    /**
+     * 一个「提醒」绝不能有能力把用户踢下线。
+     *
+     * checkLogin 抛异常 = 500，而前端路由守卫把 checkLogin 失败当作「未登录」直接 logout()，
+     * 所以这里必须吞掉一切异常（例如 available() 记忆化之后列被 DROP 掉的竞态）。拿不到旗标
+     * 的代价只是少提醒一次，代价方向正确。
+     */
+    private function passwordResetRequired(Request $request): bool
+    {
+        if (!PasswordPolicyService::available()) {
+            return false;
+        }
+        try {
+            $user = User::where('id', $request->user['id'])
+                ->select(['id', 'is_admin', 'is_staff', 'password_reset_required'])
+                ->first();
+            return PasswordPolicyService::requiresReset($user);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('读取密码策略旗标失败', ['error' => $e->getMessage()]);
+            return false;
+        }
     }
 
     public function changePassword(UserChangePassword $request)
@@ -75,16 +103,68 @@ class UserController extends Controller
         )) {
             abort(500, __('The old password is wrong'));
         }
-        $user->password = password_hash($request->input('new_password'), PASSWORD_DEFAULT);
-        $user->password_algo = NULL;
-        $user->password_salt = NULL;
+        PasswordPolicyService::apply($user, $request->input('new_password'));
         if (!$user->save()) {
             abort(500, __('Save failed'));
         }
+        // 自己敲的密码按策略不合规，重新开始提醒。这个接口的 UI 已经从三个主题里撤掉了，
+        // 保留它只为兼容可能存在的第三方客户端。
+        PasswordPolicyService::markRequired($user);
         $authService = new AuthService($user);
         $authService->removeAllSession();
         return response([
             'data' => true
+        ]);
+    }
+
+    /**
+     * 由系统生成一个新密码并落库，返回明文。
+     *
+     * 明文只在这一个响应里出现一次：不写日志、不发邮件、不入库。前端必须让用户先保存再关闭。
+     * 仍然要求输入当前密码 —— 会话可能是别人捡到的设备，改密码是账号接管的最后一道门。
+     */
+    public function resetPassword(Request $request)
+    {
+        $request->validate(['current_password' => 'required|string']);
+
+        $user = User::find($request->user['id']);
+        if (!$user) {
+            abort(500, __('The user does not exist'));
+        }
+
+        // 没有限流的话这个接口就是一台密码验证机：会话被偷之后可以用它离线爆破原密码。
+        $limitKey = CacheKey::get('PASSWORD_RESET_ERROR_LIMIT', $user->id);
+        $errorCount = (int)Cache::get($limitKey, 0);
+        if ($errorCount >= 5) {
+            abort(500, '密码错误次数过多，请 60 分钟后再试');
+        }
+
+        if (!Helper::multiPasswordVerify(
+            $user->password_algo,
+            $user->password_salt,
+            $request->input('current_password'),
+            $user->password
+        )) {
+            Cache::put($limitKey, $errorCount + 1, 3600);
+            abort(500, __('The old password is wrong'));
+        }
+        Cache::forget($limitKey);
+
+        $password = PasswordPolicyService::generate();
+        PasswordPolicyService::apply($user, $password);
+        if (!$user->save()) {
+            abort(500, __('Save failed'));
+        }
+        // 顺序刻意排在 save() 之后：save 失败时旗标不能先翻，否则用户密码没变却不再被提醒。
+        PasswordPolicyService::markSatisfied($user);
+        // 密码变了，所有旧会话必须死。响应体已经生成，明文照样返回得出去。
+        (new AuthService($user))->removeAllSession();
+
+        return response([
+            'data' => [
+                'password' => $password,
+                'length' => PasswordPolicyService::LENGTH
+            ]
         ]);
     }
 
@@ -290,6 +370,9 @@ class UserController extends Controller
             abort(500, __('The user does not exist'));
         }
         $user['avatar_url'] = 'https://cravatar.cn/avatar/' . md5($user->email) . '?s=64&d=identicon';
+        // 派生值而不是加进上面的 select()：列可能还没迁移，且 is_admin / is_staff 不在这个
+        // 列表里，判定规则只能在 PasswordPolicyService 里算。
+        $user['password_reset_required'] = $this->passwordResetRequired($request);
         return response([
             'data' => $user
         ]);
