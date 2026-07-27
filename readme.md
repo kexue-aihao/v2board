@@ -450,6 +450,15 @@ PHP 配置分两套，不要混用：
 
 AdapterMan 要求 php.ini 通过 disable_functions 屏蔽 header、session 等原生函数，否则启动时报 `Functions not disabled in php.ini` 并拒绝运行。禁止把 disable_functions 加进 aaPanel 与 PHP-FPM 共用的 php.ini，那会破坏同版本 PHP 下的其它站点；Webman 使用仓库自带的 cli-php.ini 即可。deploy_check_webman_runtime 会在启动前校验该文件的 disable_functions 与 pdo_mysql、redis、pcntl 扩展。
 
+Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorctl 停启，不再自行 `webman.php start -d`：
+
+- supervisorctl 二进制按 PATH、`/www/server/panel/pyenv/bin`、`/usr/local/bin`、`/usr/bin` 顺序查找，可用 `SUPERVISORCTL` 覆盖。
+- 程序名从 `/www/server/panel/plugin/supervisor/profile/*.ini`、`/etc/supervisor/conf.d/*.conf`、`/etc/supervisord.d/*.ini` 中反查（取同时提到 webman.php 与本项目目录的那个文件），可用 `SUPERVISOR_PROGRAM` 覆盖。配置了 numprocs 时进程名是 `<程序名>_00`，脚本会自动用 `<程序名>:*` 这种组形式定位。
+
+托管情况下必须走 supervisorctl：supervisor 配置通常是 `autorestart=true`，手工 `webman.php stop` 之后 supervisord 会在几秒内把它重新拉起来占住端口，随后部署脚本自己的 start 就会撞上 `Address already in use`，并且起出一套 supervisord 不认、进程属主也不对的实例。
+
+另需注意 supervisor 配置里的 `command=` 用的是哪个 PHP。若写成 `command=php -c cli-php.ini webman.php start`，实际生效的是 PATH 上的 php，可能与 PHP_BIN 指向的版本不同，deploy_check_webman_runtime 校验的则是 PHP_BIN。两者版本不一致时请把 command 改成绝对路径。
+
 ## 十二、安全要求
 
 | 项目 | 要求 |

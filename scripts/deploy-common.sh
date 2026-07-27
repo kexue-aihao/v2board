@@ -223,15 +223,139 @@ deploy_webman_master_running() {
     pgrep -f 'WorkerMan: master process.*webman\.php' >/dev/null 2>&1
 }
 
+# 必须按端口找残留：Workerman 会把 worker 的进程标题改成
+# "WorkerMan: worker process AdapterMan http://127.0.0.1:6600"，里面没有 webman.php，
+# 所以任何 pgrep -f webman.php 都看不见它们，而它们才是继续占着监听套接字的那批进程。
+deploy_port_pids() {
+    local port="$1" pids=""
+    if command -v ss >/dev/null 2>&1; then
+        pids="$(ss -lntp 2>/dev/null | grep -E "[:.]${port}[[:space:]]" | grep -o 'pid=[0-9]*' | cut -d= -f2)"
+    fi
+    if [ -z "$pids" ] && command -v lsof >/dev/null 2>&1; then
+        pids="$(lsof -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null)"
+    fi
+    if [ -z "$pids" ] && command -v fuser >/dev/null 2>&1; then
+        pids="$(fuser -n tcp "$port" 2>/dev/null | tr -s ' ' '\n')"
+    fi
+    { printf '%s\n' "$pids" | grep -E '^[0-9]+$' | sort -u; } || true
+}
+
+# 进程标题被 Workerman 改写过，所以三种可能的写法都认；认不出来的一律不动，
+# 免得误杀恰好占用同一端口的其它服务。
+deploy_pid_is_webman() {
+    local cmdline
+    [ -r "/proc/$1/cmdline" ] || return 1
+    cmdline="$(tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null)"
+    case "$cmdline" in
+        *WorkerMan*|*AdapterMan*|*php*) return 0 ;;
+    esac
+    return 1
+}
+
+deploy_free_webman_port() {
+    local port="$1" pid signal attempt
+    deploy_port_listening "$port" || return 0
+    for signal in TERM KILL; do
+        for pid in $(deploy_port_pids "$port"); do
+            if deploy_pid_is_webman "$pid"; then
+                kill "-$signal" "$pid" 2>/dev/null || true
+            else
+                echo "ERROR: port ${port} is held by pid ${pid}, which is not a Webman process." >&2
+                echo "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" >&2
+                return 1
+            fi
+        done
+        for attempt in 1 2 3 4 5; do
+            deploy_port_listening "$port" || return 0
+            sleep 1
+        done
+    done
+    return 1
+}
+
+# aaPanel 把 supervisorctl 装在面板自带的 pyenv 里，不在 PATH 上，
+# 所以 command -v supervisorctl 会失败，不能用它来判断有没有 supervisor。
+deploy_supervisorctl_bin() {
+    local candidate
+    if [ -n "${SUPERVISORCTL:-}" ]; then
+        echo "$SUPERVISORCTL"
+        return 0
+    fi
+    if command -v supervisorctl >/dev/null 2>&1; then
+        echo supervisorctl
+        return 0
+    fi
+    for candidate in \
+        /www/server/panel/pyenv/bin/supervisorctl \
+        /usr/local/bin/supervisorctl \
+        /usr/bin/supervisorctl; do
+        [ -x "$candidate" ] && { echo "$candidate"; return 0; }
+    done
+    return 1
+}
+
+# 程序名不能写死：aaPanel 的配置在 supervisord.conf 的 files= 指向的
+# plugin/supervisor/profile/*.ini 里，一个程序一个文件，通用部署一般也是这个布局。
+# 所以「哪个文件同时提到 webman.php 和本项目目录」就足够定位，不必解析 ini 分块。
+deploy_supervisor_program() {
+    local conf name
+    if [ -n "${SUPERVISOR_PROGRAM:-}" ]; then
+        echo "$SUPERVISOR_PROGRAM"
+        return 0
+    fi
+    for conf in /www/server/panel/plugin/supervisor/profile/*.ini \
+                /etc/supervisor/conf.d/*.conf \
+                /etc/supervisord.d/*.ini; do
+        [ -f "$conf" ] || continue
+        grep -q 'webman\.php' "$conf" || continue
+        grep -Fq "$ROOT_DIR" "$conf" || continue
+        name="$(sed -n 's/^\[program:\([^]]*\)\].*/\1/p' "$conf" | head -n 1)"
+        [ -n "$name" ] && { echo "$name"; return 0; }
+    done
+    return 1
+}
+
+# numprocs + process_name=%(program_name)s_%(process_num)02d 会让进程叫 <program>_00，
+# 裸程序名查不到（no such process），必须用组形式 <program>:*。
+deploy_supervisor_target() {
+    case "$1" in
+        *:*) echo "$1" ;;
+        *)   echo "${1}:*" ;;
+    esac
+}
+
+# supervisorctl status 对 FATAL / STOPPED 的程序返回非 0 退出码，用退出码判断会把
+# 「程序存在但没在跑」误判成「没有这个程序」，于是掉回手工分支去和 supervisord 抢端口。
+deploy_supervisor_knows_program() {
+    "$1" status "$2" 2>/dev/null | grep -qE 'RUNNING|STOPPED|STARTING|BACKOFF|FATAL|EXITED|STOPPING|UNKNOWN'
+}
+
+deploy_supervisor_running() {
+    "$1" status "$2" 2>/dev/null | grep -q RUNNING
+}
+
 deploy_stop_webman() {
-    SUPERVISOR_PROGRAM="${SUPERVISOR_PROGRAM:-webman}"
-    if command -v supervisorctl >/dev/null 2>&1 && supervisorctl status "$SUPERVISOR_PROGRAM" >/dev/null 2>&1; then
-        supervisorctl stop "$SUPERVISOR_PROGRAM"
-        WEBMAN_MANAGER=supervisor
-    else
+    local sc program
+
+    WEBMAN_MANAGER=webman
+    if sc="$(deploy_supervisorctl_bin)" && program="$(deploy_supervisor_program)"; then
+        SUPERVISORCTL_BIN="$sc"
+        SUPERVISOR_PROGRAM="$program"
+        SUPERVISOR_TARGET="$(deploy_supervisor_target "$program")"
+        if deploy_supervisor_knows_program "$sc" "$SUPERVISOR_TARGET"; then
+            # 这里必须走 supervisorctl：配置是 autorestart=true，手工 webman.php stop
+            # 之后 supervisord 会在几秒内把它重新拉起来占住端口，随后我们自己的 start
+            # 必然撞上 Address already in use，而且会起出一套 supervisord 不认的实例。
+            echo "Webman is managed by supervisor: $SUPERVISOR_TARGET"
+            "$sc" stop "$SUPERVISOR_TARGET"
+            WEBMAN_MANAGER=supervisor
+        fi
+    fi
+
+    if [ "$WEBMAN_MANAGER" != supervisor ]; then
         deploy_webman_php webman.php stop >/dev/null 2>&1 || true
         # TERM 之后主进程有时不会立刻退出，残留进程会让启动校验误判为成功。
-        local attempt
+        local attempt port
         for attempt in 1 2 3 4 5; do
             deploy_webman_master_running || break
             sleep 1
@@ -241,26 +365,53 @@ deploy_stop_webman() {
             pkill -f 'WorkerMan: master process.*webman\.php' >/dev/null 2>&1 || true
             sleep 1
         fi
-        WEBMAN_MANAGER=webman
+        # webman.php stop 靠 pid 文件定位主进程，pid 文件过期时它只会打印
+        # "Master pid:N is not alive" 就返回，worker 仍然握着监听套接字，
+        # 于是下一步 start 必然撞上 Address already in use。以端口为准再收一次尾。
+        port="$(deploy_webman_port)"
+        if deploy_port_listening "$port"; then
+            echo "Port ${port} is still in use after stop; clearing leftover workers."
+            deploy_free_webman_port "$port" || {
+                echo "ERROR: could not free 127.0.0.1:${port}; aborting before any code changes." >&2
+                return 1
+            }
+        fi
     fi
     WEBMAN_STOPPED=1
 }
 
 deploy_start_webman() {
+    local port attempt
+    WEBMAN_START_ATTEMPTED=1
+    port="$(deploy_webman_port)"
     if [ "${WEBMAN_MANAGER:-webman}" = supervisor ]; then
-        supervisorctl start "$SUPERVISOR_PROGRAM"
-        supervisorctl status "$SUPERVISOR_PROGRAM" | grep -q 'RUNNING' || {
-            echo "ERROR: Webman did not start under supervisor: $SUPERVISOR_PROGRAM" >&2
-            return 1
-        }
+        "$SUPERVISORCTL_BIN" start "$SUPERVISOR_TARGET"
+        # start 返回不代表端口已经 bind 好，配置里 startsecs=3 还要再等一会儿。
+        for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if deploy_supervisor_running "$SUPERVISORCTL_BIN" "$SUPERVISOR_TARGET" \
+               && deploy_port_listening "$port"; then
+                echo "Webman is listening on 127.0.0.1:${port} (supervisor: $SUPERVISOR_TARGET)"
+                WEBMAN_RESTARTED=1
+                return 0
+            fi
+            sleep 1
+        done
+        echo "ERROR: supervisor program $SUPERVISOR_TARGET is not serving 127.0.0.1:${port}." >&2
+        "$SUPERVISORCTL_BIN" status "$SUPERVISOR_TARGET" >&2 || true
+        return 1
     else
+        # 端口没空出来就直接说清楚是谁占着，而不是让 Workerman 抛一段
+        # stream_socket_server / Address already in use 的堆栈出来。
+        if deploy_port_listening "$port"; then
+            echo "ERROR: 127.0.0.1:${port} is already in use by pid(s): $(deploy_port_pids "$port" | tr '\n' ' ')" >&2
+            echo "Webman cannot start until they are gone." >&2
+            return 1
+        fi
         # 启动失败时 AdapterMan 会把原因写到输出上，不要吞掉。
         deploy_webman_php webman.php start -d || {
             echo "ERROR: Webman failed to start; see the AdapterMan output above." >&2
             return 1
         }
-        local port attempt
-        port="$(deploy_webman_port)"
         for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if deploy_webman_master_running && deploy_port_listening "$port"; then
                 echo "Webman is listening on 127.0.0.1:${port}"
@@ -272,7 +423,6 @@ deploy_start_webman() {
         echo "ERROR: Webman is not listening on 127.0.0.1:${port} after start." >&2
         return 1
     fi
-    WEBMAN_RESTARTED=1
 }
 
 deploy_chown() {

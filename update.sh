@@ -8,7 +8,10 @@ source "$ROOT_DIR/scripts/deploy-common.sh"
 
 WEBMAN_STOPPED=0
 WEBMAN_RESTARTED=0
-trap 'if [ "$WEBMAN_STOPPED" = 1 ] && [ "$WEBMAN_RESTARTED" = 0 ]; then deploy_start_webman || true; fi' EXIT
+# 只在从没走到启动那一步时才兜底重启，否则一次失败的启动会被 trap 再跑一遍，
+# 同样的报错刷两遍还是失败。
+WEBMAN_START_ATTEMPTED=0
+trap 'if [ "$WEBMAN_STOPPED" = 1 ] && [ "$WEBMAN_RESTARTED" = 0 ] && [ "$WEBMAN_START_ATTEMPTED" = 0 ]; then deploy_start_webman || true; fi' EXIT
 
 [ -d .git ] || {
     echo "ERROR: Please deploy using Git." >&2
