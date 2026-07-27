@@ -71409,7 +71409,7 @@
             }
             subscribeRequests(e) {
                 var t = this;
-                Object(a["a"])("/" + window.settings.secure_path + "/user/subscribe-requests", {
+                Object(n("t3Un")["a"])("/" + window.settings.secure_path + "/user/subscribe-requests", {
                     user_id: e.id,
                     page: 1,
                     pageSize: 100
