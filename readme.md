@@ -441,6 +441,15 @@ aaPanel 升级示例：
 
 update.sh 会执行 Git 拉取、Composer 安装、数据库升级、缓存清理、IP 缓存清理和 Webman 重启；不会每次自动执行历史 IP 回填和风险计算。
 
+PHP 配置分两套，不要混用：
+
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| PHP_INI | aaPanel 的 etc/php.ini，探测失败时回退 cli-php.ini | artisan 与 composer，需要完整扩展 |
+| WEBMAN_PHP_INI | cli-php.ini | Webman/AdapterMan，必须带 disable_functions |
+
+AdapterMan 要求 php.ini 通过 disable_functions 屏蔽 header、session 等原生函数，否则启动时报 `Functions not disabled in php.ini` 并拒绝运行。禁止把 disable_functions 加进 aaPanel 与 PHP-FPM 共用的 php.ini，那会破坏同版本 PHP 下的其它站点；Webman 使用仓库自带的 cli-php.ini 即可。deploy_check_webman_runtime 会在启动前校验该文件的 disable_functions 与 pdo_mysql、redis、pcntl 扩展。
+
 ## 十二、安全要求
 
 | 项目 | 要求 |

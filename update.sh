@@ -48,6 +48,7 @@ deploy_download_composer
 deploy_install_composer
 deploy_patch_adapterman
 deploy_check_mmdb
+deploy_check_webman_runtime
 
 if [ "${LEGACY_DB_UPDATE:-0}" = "1" ]; then
     deploy_php artisan v2board:update --legacy

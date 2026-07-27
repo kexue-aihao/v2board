@@ -16,6 +16,7 @@ deploy_download_composer
 deploy_install_composer
 deploy_patch_adapterman
 deploy_check_mmdb
+deploy_check_webman_runtime
 
 deploy_php artisan v2board:install
 deploy_php artisan optimize:clear
