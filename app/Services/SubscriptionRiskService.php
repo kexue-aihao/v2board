@@ -29,7 +29,7 @@ class SubscriptionRiskService
             && Schema::hasColumn('v2_subscription_risk_cycle', 'country_count');
     }
 
-    public function evaluateCompletedCycles(Subscription $subscription, ?int $now = null): array
+    public function evaluateCompletedCycles(Subscription $subscription, ?int $now = null, bool $force = false): array
     {
         if (!$this->available() || !$subscription->started_at) {
             return [];
@@ -41,10 +41,25 @@ class SubscriptionRiskService
             return [];
         }
 
+        // 已完成周期的输入是封闭的：窗口关闭后不会再有新行落进该区间，只会因保留期被删。
+        // 所以重算等于用「证据已被清理」的空结果覆盖当初的判定，把 suspicious 改写成
+        // normal。已评估过的周期一律跳过，只有 CLI 的 --force 能穿透。
+        $evaluated = [];
+        if (!$force) {
+            foreach (SubscriptionRiskCycle::where('subscription_id', (int)$subscription->id)
+                ->whereNotNull('evaluated_at')
+                ->pluck('cycle_start') as $cycleStart) {
+                $evaluated[(int)$cycleStart] = true;
+            }
+        }
+
         $completedCycles = intdiv($now - $startedAt, self::CYCLE_SECONDS);
         $results = [];
         for ($cycle = 0; $cycle < $completedCycles; $cycle++) {
             $cycleStart = $startedAt + ($cycle * self::CYCLE_SECONDS);
+            if (isset($evaluated[$cycleStart])) {
+                continue;
+            }
             $cycleEnd = $cycleStart + self::CYCLE_SECONDS;
             $results[] = $this->evaluateCycle($subscription, $cycleStart, $cycleEnd);
         }
@@ -105,38 +120,9 @@ class SubscriptionRiskService
         $regionCount = count($regionKeys);
         $countryCount = count($countries);
 
-        $status = 'pending';
-        $reasons = [];
         $hasTrafficBasis = $transferEnable > 0 && $sampleCount > 0;
-        $ratio = null;
-        if ($hasTrafficBasis) {
-            $ratio = round($usedTraffic / $transferEnable, 8);
-            if ($ratio < 0.4) {
-                $reasons[] = '低流量使用率：' . round($ratio * 100, 2) . '%';
-            }
-        } elseif ($transferEnable <= 0) {
-            $reasons[] = '套餐总流量无效';
-        } else {
-            $reasons[] = '历史流量统计数据不足';
-        }
-
-        if ($userAgentCount > 3) {
-            $reasons[] = '发现订阅 User-Agent：' . $userAgentCount . '种';
-        }
-        if ($regionCount >= 3 || $cityCount >= 3) {
-            $reasons[] = '跨市/跨地区请求：' . max($regionCount, $cityCount) . '个地区';
-            if ($regionCount >= 3) {
-                $reasons[] = '跨省/州请求：' . $regionCount . '个地区';
-            }
-        }
-        foreach ($ipRows->filter(function ($row) {
-            return (int)$row->request_count > 1;
-        })->take(10) as $ipRow) {
-            $reasons[] = '重复 IP：' . $ipRow->request_ip . ' 出现 ' . $ipRow->request_count . ' 次';
-        }
-
-        $hasRisk = $userAgentCount > 3 || $regionCount >= 3 || $cityCount >= 3;
-        $status = $hasRisk ? 'suspicious' : ($hasTrafficBasis ? 'normal' : 'pending');
+        $hasLogBasis = ($userAgentCount + $distinctIpCount) > 0;
+        $ratio = $hasTrafficBasis ? round($usedTraffic / $transferEnable, 8) : null;
 
         $record = SubscriptionRiskCycle::firstOrNew([
             'subscription_id' => (int)$subscription->id,
@@ -144,16 +130,61 @@ class SubscriptionRiskService
         ]);
         $record->user_id = (int)$subscription->user_id;
         $record->cycle_end = $cycleEnd;
-        $record->transfer_enable = $transferEnable;
-        $record->used_traffic = $usedTraffic;
-        $record->used_ratio = $ratio;
-        $record->user_agent_count = $userAgentCount;
-        $record->distinct_ip_count = $distinctIpCount;
-        $record->city_count = $cityCount;
-        $record->region_count = $regionCount;
-        $record->country_count = $countryCount;
-        $record->status = $status;
-        $record->risk_reasons = json_encode(array_values(array_unique($reasons)), JSON_UNESCAPED_UNICODE);
+
+        // 只在本轮确实拿到依据时才覆盖对应字段组，否则沿用已存值。源数据被保留期清掉
+        // 之后再跑（尤其 --force）不会把历史判定抹成零。首次创建时无旧值可留，全部写入。
+        if ($hasTrafficBasis || !$record->exists) {
+            $record->transfer_enable = $transferEnable;
+            $record->used_traffic = $usedTraffic;
+            $record->used_ratio = $ratio;
+        }
+        if ($hasLogBasis || !$record->exists) {
+            $record->user_agent_count = $userAgentCount;
+            $record->distinct_ip_count = $distinctIpCount;
+            $record->city_count = $cityCount;
+            $record->region_count = $regionCount;
+            $record->country_count = $countryCount;
+        }
+
+        // status 与 risk_reasons 只在有日志依据时重算：$hasRisk 完全由日志派生的计数决定，
+        // 而「重复 IP」这类理由也只能从本轮的 $ipRows 复原。没有日志依据时原样保留，
+        // 避免出现一条既没有理由、又把 suspicious 降级掉的记录。
+        if ($hasLogBasis || !$record->exists) {
+            $reasons = [];
+            $mergedRatio = $record->used_ratio === null ? null : (float)$record->used_ratio;
+            if ($mergedRatio !== null) {
+                if ($mergedRatio < 0.4) {
+                    $reasons[] = '低流量使用率：' . round($mergedRatio * 100, 2) . '%';
+                }
+            } elseif ((int)$record->transfer_enable <= 0) {
+                $reasons[] = '套餐总流量无效';
+            } else {
+                $reasons[] = '历史流量统计数据不足';
+            }
+
+            $mergedUserAgentCount = (int)$record->user_agent_count;
+            $mergedCityCount = (int)$record->city_count;
+            $mergedRegionCount = (int)$record->region_count;
+            if ($mergedUserAgentCount > 3) {
+                $reasons[] = '发现订阅 User-Agent：' . $mergedUserAgentCount . '种';
+            }
+            if ($mergedRegionCount >= 3 || $mergedCityCount >= 3) {
+                $reasons[] = '跨市/跨地区请求：' . max($mergedRegionCount, $mergedCityCount) . '个地区';
+                if ($mergedRegionCount >= 3) {
+                    $reasons[] = '跨省/州请求：' . $mergedRegionCount . '个地区';
+                }
+            }
+            foreach ($ipRows->filter(function ($row) {
+                return (int)$row->request_count > 1;
+            })->take(10) as $ipRow) {
+                $reasons[] = '重复 IP：' . $ipRow->request_ip . ' 出现 ' . $ipRow->request_count . ' 次';
+            }
+
+            $hasRisk = $mergedUserAgentCount > 3 || $mergedRegionCount >= 3 || $mergedCityCount >= 3;
+            $record->status = $hasRisk ? 'suspicious' : ($mergedRatio !== null ? 'normal' : 'pending');
+            $record->risk_reasons = json_encode(array_values(array_unique($reasons)), JSON_UNESCAPED_UNICODE);
+        }
+
         $record->evaluated_at = time();
         $record->save();
         return $record;
