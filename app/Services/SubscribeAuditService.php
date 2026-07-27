@@ -42,10 +42,14 @@ class SubscribeAuditService
 
     public function resolveIp(Request $request): string
     {
-        // Subscription audit records the peer address seen by the application.
-        // Forwarding headers are client-controlled unless a separate trusted-proxy
-        // policy is configured, so they must not affect this audit trail.
-        $address = $request->server('REMOTE_ADDR');
+        // 站点经反向代理接入，REMOTE_ADDR 恒为回环地址，直接读它审计不到任何东西。
+        // 改用 $request->ip()：它只有在对端属于 config/trustedproxy.php 声明的可信
+        // 代理时才解析转发头，否则依旧回退到 REMOTE_ADDR，所以客户端自行伪造的
+        // 转发头仍然进不了审计记录。
+        $address = $request->ip();
+        if (!filter_var($address, FILTER_VALIDATE_IP)) {
+            $address = $request->server('REMOTE_ADDR');
+        }
         return filter_var($address, FILTER_VALIDATE_IP) ? $address : 'unknown';
     }
 }
