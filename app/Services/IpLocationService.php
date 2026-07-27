@@ -91,14 +91,44 @@ class IpLocationService
         }
 
         $prefix = $version === 6 ? 'ipv6' : 'ipv4';
-        $files = [
-            "china_{$prefix}.mmdb" => 'china_' . $prefix,
-            "china_{$prefix}_idc.mmdb" => 'china_' . $prefix . '_idc',
-            "global_{$prefix}_idc.mmdb" => 'global_' . $prefix . '_idc',
-            "global_{$prefix}_residential.mmdb" => 'global_' . $prefix . '_residential'
-        ];
 
-        foreach ($files as $file => $source) {
+        // IDC/云厂商判定必须独立于地理定位，不能靠「首个命中的库」决定。
+        // 香港的 AWS 地址同时存在于 china_ipv4.mmdb（有 province/city/isp="Amazon"，
+        // 但没有 idc_vendor）和 global_ipv4_idc.mmdb（vendor="AWS"）。原来按文件顺序
+        // 首个命中即返回，中国库先命中就再也查不到 vendor，AWS、Azure 这类海外云
+        // 会被判成非 IDC。国内云不受影响，因为 china_ipv4.mmdb 自带 idc_vendor。
+        // 四个 IDC 库的每条记录都带 vendor，所以命中即可确定是 IDC 且拿得到厂商名。
+        $idcSource = '';
+        $idcRecord = null;
+        $idcVendor = '';
+        foreach ([
+            "china_{$prefix}_idc.mmdb" => 'china_' . $prefix . '_idc',
+            "global_{$prefix}_idc.mmdb" => 'global_' . $prefix . '_idc'
+        ] as $file => $source) {
+            $reader = $this->reader($file);
+            if (!$reader) {
+                continue;
+            }
+            $record = $reader->get($ip);
+            if (!is_array($record)) {
+                continue;
+            }
+            $vendor = $this->value($record, ['idc_vendor', 'vendor']);
+            if ($vendor === '') {
+                continue;
+            }
+            $idcSource = $source;
+            $idcRecord = $record;
+            $idcVendor = $vendor;
+            break;
+        }
+
+        // 地理信息取更精细的库：中国库有 province/city/isp，其次全球住宅库。
+        // IDC 库只在前两者都没有时兜底 —— 云厂商地址通常不在住宅库里。
+        foreach ([
+            "china_{$prefix}.mmdb" => 'china_' . $prefix,
+            "global_{$prefix}_residential.mmdb" => 'global_' . $prefix . '_residential'
+        ] as $file => $source) {
             $reader = $this->reader($file);
             if (!$reader) {
                 continue;
@@ -107,9 +137,21 @@ class IpLocationService
             if (!is_array($record) || !$this->isKnownRecord($record)) {
                 continue;
             }
-            return $this->normalize($ip, $version, $record, $source);
+            return $this->withIdcVendor($this->normalize($ip, $version, $record, $source), $idcVendor);
+        }
+
+        if ($idcRecord !== null && $this->isKnownRecord($idcRecord)) {
+            return $this->withIdcVendor($this->normalize($ip, $version, $idcRecord, $idcSource), $idcVendor);
         }
         return $this->unknown($ip, $version);
+    }
+
+    private function withIdcVendor(array $location, string $vendor): array
+    {
+        if ($vendor !== '' && ($location['status'] ?? '') === 'resolved') {
+            $location['idc_vendor'] = $vendor;
+        }
+        return $location;
     }
 
     private function reader(string $file): ?Reader
@@ -139,24 +181,27 @@ class IpLocationService
 
     private function normalize(string $ip, int $version, array $record, string $source): array
     {
-        $countryCode = strtoupper(trim((string)($record['country_code'] ?? '')));
         $isChina = strpos($source, 'china_') === 0;
         if ($isChina) {
-            $countryCode = $countryCode ?: 'CN';
+            $countryCode = strtoupper(trim((string)($record['country_code'] ?? ''))) ?: 'CN';
+            $province = $this->value($record, ['province']);
+            $region = $province ?: $this->value($record, ['region']);
+            $city = $this->value($record, ['city']);
+            $countryName = $this->value($record, ['country', 'country_name']) ?: $countryCode;
+        } else {
+            // 全球库的字段名和含义并不一致：country_code 存的是大洲代码（NA/EU/AS/OC/AF/SA），
+            // 真正的 ISO 国家代码在 region，city 存的是一级行政区（California/Bavaria/Guangdong）。
+            // continent 字段几乎恒为 NA，不可用。按原来的字面映射会把美国地址标成
+            // 「国家 NA / 地区 US」，风控统计的 country_count 数的其实是大洲。
+            // 已对美国、澳大利亚、德国、南非、委内瑞拉、香港、中国大陆七地实测确认该规律。
+            $countryCode = strtoupper($this->value($record, ['region']));
+            $province = $this->value($record, ['city']);
+            $region = $province;
+            $city = '';
+            $countryName = $this->value($record, ['country', 'country_name']) ?: $countryCode;
         }
-        if ($countryCode === 'ZZ') {
+        if ($countryCode === 'ZZ' || $countryCode === '') {
             return $this->unknown($ip, $version);
-        }
-
-        $province = $this->value($record, ['province']);
-        $region = $this->value($record, ['region']);
-        if ($isChina) {
-            $region = $province ?: $region;
-        }
-        $city = $this->value($record, ['city']);
-        $countryName = $this->value($record, ['country', 'country_name']);
-        if (!$countryName) {
-            $countryName = $countryCode ?: '';
         }
         $idc = $this->value($record, ['idc_vendor', 'vendor']);
 
