@@ -21436,6 +21436,16 @@
                             className: "nav-main-link-icon si si-bulb"
                         })
                     }, {
+                        title: "风控",
+                        type: "heading"
+                    }, {
+                        title: "风控规则",
+                        type: "item",
+                        href: "/risk/rule",
+                        icon: o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-shield"
+                        })
+                    }, {
                         title: "\u6307\u6807",
                         type: "heading"
                     }, {
@@ -71453,6 +71463,51 @@
                     }
                 })
             }
+            // 单用户重算：调完阈值先拿一个用户验证，比全站刷一遍安全得多（爆炸半径小、
+            // 一秒完成）。后端对单用户是同步跑完的（直接返回 done:true），所以这里没有
+            // 全站入口那种游标循环，也不能带 restart。
+            recomputeUserRisk(user, auditModal) {
+                var t = this
+                  , warning = ["重算会用当前规则重新判定所有已完成周期，覆盖此前的判定结果。", "若审计证据已被保留期清理，重算结果可能低于当初的真实值，原本「疑似内鬼」的周期可能被改为「正常」。", "节点连接记录按 last_seen_at 清理，历史周期的连接指标尤其容易失真。", "此操作不可撤销。"];
+                p["a"].confirm({
+                    title: "重算 " + user.email + " 的历史周期",
+                    width: 560,
+                    content: g.a.createElement("div", null, warning.map(function(line, index) {
+                        return g.a.createElement("p", {
+                            key: index,
+                            className: index === warning.length - 1 ? "mb-0 font-w600" : "mb-2"
+                        }, line)
+                    })),
+                    okText: "开始重算",
+                    okType: "danger",
+                    cancelText: "取消",
+                    onOk() {
+                        // 返回 Promise，让确定按钮保持 loading 直到请求结束。
+                        return Object(n("t3Un")["b"])("/" + window.settings.secure_path + "/risk/rule/recompute", {
+                            user_id: user.id
+                        }).then(function(res) {
+                            if (200 !== res.code) return;
+                            var counts = res.data || {};
+                            // 用户列表的风险列读的就是判定结果，不刷新会留着旧徽章。
+                            t.props.dispatch({
+                                type: "user/fetch"
+                            }),
+                            auditModal && auditModal.destroy(),
+                            p["a"].success({
+                                title: "重算完成",
+                                content: "订阅 " + (counts.subscriptions || 0) + " 个，重算周期 " + (counts.cycles || 0) + " 个。"
+                            }),
+                            // 弹窗标题里的风险判定也要重新读一遍。
+                            t.subscribeRequests(user)
+                        }).catch(function() {
+                            p["a"].error({
+                                title: "请求失败",
+                                content: "重算失败，请稍后重试"
+                            })
+                        })
+                    }
+                })
+            }
             subscribeRequests(e) {
                 var t = this;
                 Object(n("t3Un")["a"])("/" + window.settings.secure_path + "/user/subscribe-requests", {
@@ -71520,7 +71575,19 @@
                                 onClick: function() {
                                     t.clearSubscribeAudit(e, auditModal)
                                 }
-                            }, "清空该用户审计记录")),
+                            }, "清空该用户审计记录"), g.a.createElement(auditButton, {
+                                // 重算只改写判定、不删证据，比清空轻一档。用 dashed 和实心
+                                // danger 拉开视觉差，两个按钮不会被误点。
+                                type: "dashed",
+                                size: "small",
+                                icon: "reload",
+                                style: {
+                                    marginLeft: 8
+                                },
+                                onClick: function() {
+                                    t.recomputeUserRisk(e, auditModal)
+                                }
+                            }, "重算该用户历史周期")),
                             d("订阅拉取 IP", "客户端下载订阅配置的来源；请求 " + (l.request_count || 0) + " 次，UA " + (l.user_agent_count || 0) + " 种，IP " + (l.distinct_ip_count || 0) + " 个，地区 " + (s.region_count || 0) + "，国家 " + (s.country_count || 0)),
                             g.a.createElement(i, {
                                 size: "small",
@@ -83177,6 +83244,10 @@
             path: "/user",
             exact: !0,
             component: n("d1ca").default
+        }, {
+            path: "/risk/rule",
+            exact: !0,
+            component: n("riskrulepage").default
         }];
         window.g_routes = u;
         var h = n("PszG");
@@ -116331,6 +116402,516 @@
                 }
             }
         }
+    },
+    riskrulepage: function(e, t, n) {
+        "use strict";
+        n.r(t);
+        // 手工补丁：风控规则页面。故意不建 dva model —— 数据访问直接走 t3Un 请求助手，
+        // 与 d1ca 里的订阅审计补丁同一路数。维度与运算符列表全部来自 /risk/rule/fetch
+        // 的响应，前端不留第二份副本（唯一事实源是 RiskRuleService 的类常量）。
+        var r = n("jehZ")
+          , i = n.n(r)
+          , o = (n("g9YV"),
+        n("wCAj"))
+          , a = (n("+L6B"),
+        n("2/Rp"))
+          , s = (n("5NDa"),
+        n("5rEg"))
+          , l = (n("Pwec"),
+        n("CtXQ"))
+          , c = (n("2qtc"),
+        n("kLXV"))
+          , u = (n("OaEy"),
+        n("2fM7"))
+          , h = (n("BoS7"),
+        n("Sdc0"))
+          , f = (n("/zsF"),
+        n("PArb"))
+          , d = n("q1tI")
+          , p = n.n(d)
+          , m = n("Bl7J")
+          , g = n("v32e");
+        function riskUrl(path) {
+            return "/" + window.settings.secure_path + path
+        }
+        function riskGet(path, params) {
+            return Object(n("t3Un")["a"])(riskUrl(path), params)
+        }
+        function riskPost(path, params) {
+            return Object(n("t3Un")["b"])(riskUrl(path), params)
+        }
+        // enabled 是 tinyint，从 PDO 出来可能是 int 也可能是字符串，统一收口。
+        function riskEnabled(value) {
+            return !0 === value || 1 === value || "1" === value
+        }
+        // threshold 是 decimal(18,8)，回来是 "3.00000000"；展示与回填都要去掉尾零。
+        function riskNumberText(value) {
+            if (null === value || void 0 === value || "" === value)
+                return "";
+            var num = Number(value);
+            return isNaN(num) ? String(value) : String(num)
+        }
+        // 重算会改写被冻结的判定结果，确认文案必须带全部四行保真度警告。
+        var RISK_RECOMPUTE_WARNING = ["重算会用当前规则重新判定所有已完成周期，覆盖此前的判定结果。", "若审计证据已被保留期清理，重算结果可能低于当初的真实值，原本「疑似内鬼」的周期可能被改为「正常」。", "节点连接记录按 last_seen_at 清理，历史周期的连接指标尤其容易失真。", "此操作不可撤销。"];
+        class RiskRulePage extends p.a.Component {
+            constructor(props) {
+                super(props),
+                this.defaultSubmit = {
+                    label: "",
+                    dimension: void 0,
+                    operator: ">",
+                    threshold: "",
+                    enabled: !0
+                },
+                this.state = {
+                    rules: [],
+                    dimensions: {},
+                    operators: {},
+                    // 表缺失（未升级的库）与表存在但为空是两种状态：前者引擎走内置兜底
+                    // 规则，后者才真的一条都不命中。横幅文案必须分开，不能混为一谈。
+                    available: !0,
+                    fetchLoading: !0,
+                    saveLoading: !1,
+                    visible: !1,
+                    submit: i()({}, this.defaultSubmit),
+                    recomputeVisible: !1,
+                    recomputeRunning: !1,
+                    recomputeProgress: null
+                },
+                // 全站重算是前端驱动的游标循环。每次启动领一个 token，组件卸载或弹窗
+                // 关闭时把 token 推进一格，在飞的那一批响应就会被丢弃、循环停下来。
+                this.recomputeToken = 0
+            }
+            componentDidMount() {
+                this.fetch()
+            }
+            componentWillUnmount() {
+                this.recomputeToken++
+            }
+            fetch() {
+                this.setState({
+                    fetchLoading: !0
+                }),
+                riskGet("/risk/rule/fetch").then(res=>{
+                    // 非 200 已由请求助手弹出带服务端消息的提示，这里只收 loading。
+                    if (200 !== res.code)
+                        return void this.setState({
+                            fetchLoading: !1
+                        });
+                    this.setState({
+                        rules: res.data || [],
+                        dimensions: res.dimensions || {},
+                        operators: res.operators || {},
+                        available: !1 !== res.available,
+                        fetchLoading: !1
+                    })
+                }
+                ).catch(()=>this.setState({
+                    fetchLoading: !1
+                }))
+            }
+            openModal(record) {
+                this.setState({
+                    visible: !0,
+                    submit: record ? {
+                        id: record.id,
+                        label: record.label || "",
+                        dimension: record.dimension,
+                        operator: record.operator,
+                        threshold: riskNumberText(record.threshold),
+                        enabled: riskEnabled(record.enabled)
+                    } : i()({}, this.defaultSubmit)
+                })
+            }
+            closeModal() {
+                this.setState({
+                    visible: !1,
+                    submit: i()({}, this.defaultSubmit)
+                })
+            }
+            submitChange(key, value) {
+                var patch = {};
+                patch[key] = value,
+                this.setState({
+                    submit: i()({}, this.state.submit, patch)
+                })
+            }
+            save() {
+                var submit = this.state.submit
+                  , label = String(submit.label || "").trim();
+                if (!label)
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "请填写规则名称"
+                    });
+                if (!submit.dimension)
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "请选择判定维度"
+                    });
+                if (!submit.operator)
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "请选择运算符"
+                    });
+                if ("" === submit.threshold || null === submit.threshold || void 0 === submit.threshold || isNaN(Number(submit.threshold)))
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "请填写有效的阈值"
+                    });
+                this.setState({
+                    saveLoading: !0
+                }),
+                riskPost("/risk/rule/save", {
+                    id: submit.id,
+                    label: label,
+                    dimension: submit.dimension,
+                    operator: submit.operator,
+                    threshold: Number(submit.threshold),
+                    enabled: submit.enabled ? 1 : 0
+                }).then(res=>{
+                    this.setState({
+                        saveLoading: !1
+                    }),
+                    200 === res.code && (this.closeModal(),
+                    this.fetch())
+                }
+                ).catch(()=>this.setState({
+                    saveLoading: !1
+                }))
+            }
+            show(record) {
+                riskPost("/risk/rule/show", {
+                    id: record.id,
+                    show: riskEnabled(record.enabled) ? 0 : 1
+                }).then(res=>{
+                    200 === res.code && this.fetch()
+                }
+                )
+            }
+            drop(record) {
+                c["a"].confirm({
+                    title: "警告",
+                    content: "确定要删除规则「" + (record.label || "") + "」吗？已判定的历史周期不受影响，除非重算。",
+                    okText: "确定删除",
+                    okType: "danger",
+                    cancelText: "取消",
+                    onOk: ()=>riskPost("/risk/rule/drop", {
+                        id: record.id
+                    }).then(res=>{
+                        200 === res.code && this.fetch()
+                    }
+                    )
+                })
+            }
+            move(index, offset) {
+                var rules = this.state.rules.slice()
+                  , target = index + offset;
+                if (target < 0 || target >= rules.length)
+                    return;
+                var swap = rules[index];
+                rules[index] = rules[target],
+                rules[target] = swap,
+                // 先乐观交换本地顺序，再把完整有序 id 列表交给后端。
+                this.setState({
+                    rules: rules
+                }),
+                riskPost("/risk/rule/sort", {
+                    ids: rules.map(rule=>rule.id)
+                }).then(()=>this.fetch()).catch(()=>this.fetch())
+            }
+            confirmRecompute() {
+                c["a"].confirm({
+                    title: "重算历史周期",
+                    width: 560,
+                    content: p.a.createElement("div", null, RISK_RECOMPUTE_WARNING.map((line,index)=>p.a.createElement("p", {
+                        key: index,
+                        className: index === RISK_RECOMPUTE_WARNING.length - 1 ? "mb-0 font-w600" : "mb-2"
+                    }, line))),
+                    okText: "开始重算",
+                    okType: "danger",
+                    cancelText: "取消",
+                    onOk: ()=>this.startRecompute()
+                })
+            }
+            startRecompute() {
+                var token = ++this.recomputeToken;
+                this.setState({
+                    recomputeVisible: !0,
+                    recomputeRunning: !0,
+                    recomputeProgress: null
+                }),
+                this.recomputeStep(token, !0)
+            }
+            recomputeStep(token, restart) {
+                riskPost("/risk/rule/recompute", restart ? {
+                    restart: 1
+                } : {}).then(res=>{
+                    if (token !== this.recomputeToken)
+                        return;
+                    if (200 !== res.code)
+                        return void this.setState({
+                            recomputeRunning: !1
+                        });
+                    var data = res.data || {};
+                    this.setState({
+                        recomputeProgress: data,
+                        recomputeRunning: !data.done
+                    }),
+                    data.done ? this.fetch() : this.recomputeStep(token, !1)
+                }
+                ).catch(()=>{
+                    token === this.recomputeToken && this.setState({
+                        recomputeRunning: !1
+                    })
+                }
+                )
+            }
+            closeRecompute() {
+                this.recomputeToken++,
+                this.setState({
+                    recomputeVisible: !1,
+                    recomputeRunning: !1
+                })
+            }
+            renderRecomputeBody() {
+                var progress = this.state.recomputeProgress || {}
+                  , subscriptions = progress.subscriptions || 0
+                  , cycles = progress.cycles || 0
+                  , total = progress.total || 0
+                  , percent = total > 0 ? Math.min(100, Math.round(subscriptions / total * 100)) : 0;
+                return p.a.createElement("div", null, p.a.createElement("p", {
+                    className: "mb-2"
+                }, this.state.recomputeRunning ? "正在分批重算，请保持本页面打开……" : progress.done ? "重算完成。" : "重算已停止，重新点击「重算历史周期」会从头开始。"), p.a.createElement("p", {
+                    className: "mb-2"
+                }, "已处理订阅 " + subscriptions + (total > 0 ? " / " + total : "") + "，重算周期 " + cycles + " 个" + (total > 0 ? "（" + percent + "%）" : "")), p.a.createElement("p", {
+                    className: "mb-0 text-muted font-size-sm"
+                }, "关闭本弹窗只会停止后续分批，已重算的周期不会回滚。"))
+            }
+            render() {
+                var state = this.state
+                  , rules = state.rules
+                  , dimensions = state.dimensions
+                  , operators = state.operators
+                  , enabledCount = rules.filter(rule=>riskEnabled(rule.enabled)).length
+                  , currentDimension = dimensions[state.submit.dimension] || {}
+                  , columns = [{
+                    title: "#",
+                    dataIndex: "id",
+                    key: "id"
+                }, {
+                    title: "名称",
+                    dataIndex: "label",
+                    key: "label"
+                }, {
+                    title: "维度",
+                    dataIndex: "dimension",
+                    key: "dimension",
+                    render: value=>{
+                        // 库里留着已从注册表移除的旧维度时退化成显示原始 key，不白屏。
+                        var dimension = dimensions[value];
+                        return dimension ? dimension.label : value
+                    }
+                }, {
+                    title: "条件",
+                    key: "condition",
+                    render: (value,record)=>{
+                        var dimension = dimensions[record.dimension] || {};
+                        return (operators[record.operator] || record.operator) + " " + riskNumberText(record.threshold) + (dimension.unit || "")
+                    }
+                }, {
+                    title: "启用",
+                    dataIndex: "enabled",
+                    key: "enabled",
+                    render: (value,record)=>{
+                        return p.a.createElement(h["a"], {
+                            size: "small",
+                            checked: riskEnabled(value),
+                            onChange: ()=>this.show(record)
+                        })
+                    }
+                }, {
+                    title: "优先级",
+                    dataIndex: "sort",
+                    key: "sort",
+                    render: (value,record,index)=>{
+                        return p.a.createElement("div", null, p.a.createElement("span", {
+                            style: {
+                                marginRight: 8
+                            }
+                        }, null === value || void 0 === value ? "-" : value), p.a.createElement(a["a"], {
+                            size: "small",
+                            icon: "arrow-up",
+                            title: "上移",
+                            disabled: 0 === index,
+                            onClick: ()=>this.move(index, -1)
+                        }), p.a.createElement(a["a"], {
+                            size: "small",
+                            icon: "arrow-down",
+                            title: "下移",
+                            style: {
+                                marginLeft: 4
+                            },
+                            disabled: index === rules.length - 1,
+                            onClick: ()=>this.move(index, 1)
+                        }))
+                    }
+                }, {
+                    title: "操作",
+                    key: "action",
+                    align: "right",
+                    render: (value,record)=>{
+                        return p.a.createElement(p.a.Fragment, null, p.a.createElement("a", {
+                            href: "javascript:void(0);",
+                            onClick: ()=>this.openModal(record)
+                        }, "编辑"), p.a.createElement(f["a"], {
+                            type: "vertical"
+                        }), p.a.createElement("a", {
+                            href: "javascript:void(0);",
+                            onClick: ()=>this.drop(record)
+                        }, "删除"))
+                    }
+                }];
+                // 必须展开路由 props，否则侧边栏会在 location.pathname 上崩。
+                return p.a.createElement(m["a"], i()({}, this.props, {
+                    title: "风控规则"
+                }), p.a.createElement(g["a"], {
+                    loading: state.fetchLoading
+                }, p.a.createElement("div", {
+                    className: "block block-rounded"
+                }, p.a.createElement("div", {
+                    className: "bg-white"
+                }, p.a.createElement("div", {
+                    className: "d-flex justify-content-between align-items-center",
+                    style: {
+                        padding: 15
+                    }
+                }, p.a.createElement(a["a"], {
+                    onClick: ()=>this.openModal(null)
+                }, p.a.createElement(l["a"], {
+                    type: "plus"
+                }), " 新增规则"), p.a.createElement(a["a"], {
+                    type: "danger",
+                    onClick: ()=>this.confirmRecompute()
+                }, p.a.createElement(l["a"], {
+                    type: "reload"
+                }), " 重算历史周期")), p.a.createElement("div", {
+                    style: {
+                        padding: "0 15px 15px"
+                    }
+                }, p.a.createElement("p", {
+                    className: "mb-0 text-muted font-size-sm"
+                }, "规则改动只影响之后新完成的周期；要让改动应用到历史周期，请点击「重算历史周期」。"), !state.fetchLoading && !state.available && p.a.createElement("div", {
+                    className: "alert alert-warning mb-0",
+                    role: "alert",
+                    style: {
+                        marginTop: 12
+                    }
+                }, p.a.createElement("p", {
+                    className: "mb-0"
+                }, "风控规则表尚未安装（数据库尚未升级），当前仍按内置默认规则判定；升级数据库后才能增删规则。")), !state.fetchLoading && state.available && 0 === enabledCount && p.a.createElement("div", {
+                    className: "alert alert-warning mb-0",
+                    role: "alert",
+                    style: {
+                        marginTop: 12
+                    }
+                }, p.a.createElement("p", {
+                    className: "mb-0"
+                }, "当前没有启用任何风控规则，之后完成的周期都会被判定为「正常」。"))), p.a.createElement(o["a"], {
+                    tableLayout: "auto",
+                    rowKey: record=>record.id,
+                    dataSource: rules,
+                    columns: columns,
+                    pagination: !1,
+                    locale: {
+                        emptyText: "暂无风控规则"
+                    },
+                    scroll: {
+                        x: 900
+                    }
+                })))), p.a.createElement(c["a"], {
+                    title: state.submit.id ? "编辑规则" : "新增规则",
+                    visible: state.visible,
+                    onCancel: ()=>this.closeModal(),
+                    onOk: ()=>this.save(),
+                    okText: "提交",
+                    cancelText: "取消",
+                    okButtonProps: {
+                        loading: state.saveLoading
+                    }
+                }, p.a.createElement("div", null, p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "名称"), p.a.createElement(s["a"], {
+                    placeholder: "会原样出现在风险理由里，例如：跨省/州请求过多",
+                    value: state.submit.label,
+                    onChange: e=>this.submitChange("label", e.target.value)
+                })), p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "判定维度"), p.a.createElement(u["a"], {
+                    style: {
+                        width: "100%"
+                    },
+                    placeholder: "请选择判定维度",
+                    value: state.submit.dimension,
+                    onChange: value=>this.submitChange("dimension", value)
+                }, Object.keys(dimensions).map(key=>{
+                    return p.a.createElement(u["a"].Option, {
+                        key: key,
+                        value: key
+                    }, dimensions[key].label)
+                }
+                ))), p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "运算符"), p.a.createElement(u["a"], {
+                    style: {
+                        width: "100%"
+                    },
+                    placeholder: "请选择运算符",
+                    value: state.submit.operator,
+                    onChange: value=>this.submitChange("operator", value)
+                }, Object.keys(operators).map(key=>{
+                    return p.a.createElement(u["a"].Option, {
+                        key: key,
+                        value: key
+                    }, operators[key])
+                }
+                ))), p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "阈值"), p.a.createElement(s["a"], {
+                    type: "number",
+                    placeholder: "请输入阈值",
+                    addonAfter: currentDimension.unit || void 0,
+                    value: state.submit.threshold,
+                    onChange: e=>this.submitChange("threshold", e.target.value)
+                }), p.a.createElement("p", {
+                    className: "mb-0 mt-1 text-muted font-size-sm"
+                }, "流量使用率填 0 ~ 1 的小数（如 0.4），计数类维度填整数。")), p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", {
+                    style: {
+                        display: "block"
+                    }
+                }, "启用"), p.a.createElement(h["a"], {
+                    checked: !!state.submit.enabled,
+                    onChange: value=>this.submitChange("enabled", value)
+                })))), p.a.createElement(c["a"], {
+                    title: "重算历史周期",
+                    visible: state.recomputeVisible,
+                    maskClosable: !1,
+                    closable: !state.recomputeRunning,
+                    okText: state.recomputeRunning ? "停止并关闭" : "关闭",
+                    okType: state.recomputeRunning ? "danger" : "primary",
+                    cancelButtonProps: {
+                        style: {
+                            display: "none"
+                        }
+                    },
+                    onOk: ()=>this.closeRecompute(),
+                    onCancel: ()=>this.closeRecompute()
+                }, this.renderRecomputeBody()))
+            }
+        }
+        t["default"] = RiskRulePage
     }
 });
 

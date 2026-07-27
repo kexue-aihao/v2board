@@ -12,7 +12,8 @@ class SchemaUpgradeService
         'subscription_schema' => 'subscription_schema_v1',
         'risk_audit_schema' => 'risk_audit_schema_v1',
         'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
-        'node_connection_log_schema' => 'node_connection_log_schema_v1'
+        'node_connection_log_schema' => 'node_connection_log_schema_v1',
+        'risk_rule_schema' => 'risk_rule_schema_v1'
     ];
 
     public function run(): array
@@ -63,6 +64,9 @@ class SchemaUpgradeService
                 return;
             case 'node_connection_log_schema':
                 $this->applyNodeConnectionLogSchema();
+                return;
+            case 'risk_rule_schema':
+                $this->applyRiskRuleSchema();
                 return;
         }
 
@@ -332,6 +336,78 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_node_connection_log', 'subscription_id_last_seen_at', ['subscription_id', 'last_seen_at']);
         // 同上：last_seen_at 不是前导列，保留期清理需要它单独成索引。
         $this->ensureIndex('v2_node_connection_log', 'last_seen_at', ['last_seen_at']);
+    }
+
+    private function applyRiskRuleSchema(): void
+    {
+        $this->requireTable('v2_subscription_risk_cycle');
+
+        // 种子只在这次真的建了表时写，判断必须取在 CREATE 之前：
+        //   存量安装首次升级 ⇒ 表不存在 ⇒ 建表并写三条默认规则
+        //   全新安装 ⇒ install.sql 已建表并写好种子 ⇒ 不再写
+        //   任何后续部署 ⇒ 表已存在 ⇒ 不写，管理员删掉的规则不会复活
+        // 用「这次是否首次应用该迁移版本」来判断是不够的：全新安装不写
+        // v2_schema_migrations 行，首次 bash update.sh 会看到「未应用」，此时若管理员已经
+        // 删掉某条默认规则，下面的 WHERE NOT EXISTS 挡不住，规则会复活并重新给用户打标。
+        $freshTable = !Schema::hasTable('v2_risk_rule');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_risk_rule` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `label` varchar(255) NOT NULL,
+            `dimension` varchar(32) NOT NULL,
+            `operator` varchar(2) NOT NULL,
+            `threshold` decimal(18,8) NOT NULL,
+            `enabled` tinyint(1) NOT NULL DEFAULT '1',
+            `sort` int(11) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'label' => 'varchar(255) NOT NULL',
+            'dimension' => 'varchar(32) NOT NULL',
+            'operator' => 'varchar(2) NOT NULL',
+            'threshold' => 'decimal(18,8) NOT NULL',
+            'enabled' => "tinyint(1) NOT NULL DEFAULT '1'",
+            'sort' => 'int(11) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_risk_rule', $column, $definition);
+        }
+        // 引擎唯一的读法是 WHERE enabled = 1 ORDER BY sort ASC, id ASC。
+        $this->ensureIndex('v2_risk_rule', 'enabled_sort', ['enabled', 'sort']);
+
+        // 新指标存进一个可空 JSON 列：已有的五个计数列和 used_ratio 是展示契约（编译产物
+        // 和 summaryForUser 都直接读），一个字节都不动，此后新增维度永远不需要再 DDL。
+        // 刻意不把这一列加进 SubscriptionRiskService::available()，那是硬闸门，多一个条件
+        // 就会在未升级的库上静默关掉全部风控评估。
+        $this->ensureColumn('v2_subscription_risk_cycle', 'metrics', 'text DEFAULT NULL');
+
+        if (!$freshTable) {
+            return;
+        }
+
+        // 第二道保险：并发部署或 CREATE 与 INSERT 之间被打断时，NOT EXISTS 保证不写重复行。
+        $now = time();
+        foreach ([
+            ['订阅 UA 种类过多', 'user_agent_count', '>', 3, 1],
+            ['跨省/州请求过多', 'region_count', '>=', 3, 2],
+            ['跨市请求过多', 'city_count', '>=', 3, 3]
+        ] as [$label, $dimension, $operator, $threshold, $sort]) {
+            DB::statement(
+                "INSERT INTO `v2_risk_rule`
+                    (`label`,`dimension`,`operator`,`threshold`,`enabled`,`sort`,`created_at`,`updated_at`)
+                 SELECT ?, ?, ?, ?, 1, ?, ?, ?
+                 FROM (SELECT 1) AS seed
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM `v2_risk_rule` r
+                     WHERE r.`dimension` = ? AND r.`operator` = ? AND r.`threshold` = ?
+                 )",
+                [$label, $dimension, $operator, $threshold, $sort, $now, $now, $dimension, $operator, $threshold]
+            );
+        }
     }
 
     private function applyIpLocationCacheSchema(): void

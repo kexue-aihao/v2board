@@ -11,6 +11,8 @@ class SubscriptionRiskCycle extends Model
     protected $guarded = ['id'];
     public $timestamps = true;
 
+    // metrics 与 risk_reasons 都刻意不加 cast：两列都在服务里手工 json_encode（metrics 要
+    // JSON_UNESCAPED_UNICODE，array cast 做不到），加 cast 会双重编码。
     protected $casts = [
         'distinct_ip_count' => 'integer',
         'city_count' => 'integer',

@@ -126,6 +126,13 @@ class AdminRoute
             $router->get ('/user/subscribe-requests', 'V1\\Admin\\UserController@subscribeRequests');
             $router->get ('/user/risk', 'V1\\Admin\\UserController@subscriptionRisk');
             $router->post('/user/subscribe-audit/clear', 'V1\\Admin\\UserController@clearSubscribeAudit');
+            // Risk
+            $router->get ('/risk/rule/fetch', 'V1\\Admin\\RiskRuleController@fetch');
+            $router->post('/risk/rule/save', 'V1\\Admin\\RiskRuleController@save');
+            $router->post('/risk/rule/show', 'V1\\Admin\\RiskRuleController@show');
+            $router->post('/risk/rule/sort', 'V1\\Admin\\RiskRuleController@sort');
+            $router->post('/risk/rule/drop', 'V1\\Admin\\RiskRuleController@drop');
+            $router->post('/risk/rule/recompute', 'V1\\Admin\\RiskRuleController@recompute');
             // Stat
             $router->get ('/stat/getStat', 'V1\\Admin\\StatController@getStat');
             $router->get ('/stat/getOverride', 'V1\\Admin\\StatController@getOverride');

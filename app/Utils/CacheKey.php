@@ -41,7 +41,8 @@ class CacheKey
         'FORGET_REQUEST_LIMIT' => '找回密码次数限制',
         'TWO_FACTOR_CHALLENGE' => '2FA challenge',
         'TWO_FACTOR_SETUP' => '2FA setup',
-        'TWO_FACTOR_FAILURE' => '2FA failure'
+        'TWO_FACTOR_FAILURE' => '2FA failure',
+        'RISK_RECOMPUTE_CURSOR' => '风险重算游标'
     ];
 
     public static function get(string $key, $uniqueValue)

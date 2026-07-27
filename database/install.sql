@@ -652,6 +652,7 @@ CREATE TABLE `v2_subscription_risk_cycle` (
                                   `country_count` int(11) NOT NULL DEFAULT '0',
                                   `status` varchar(16) NOT NULL DEFAULT 'pending',
                                   `risk_reasons` text DEFAULT NULL,
+                                  `metrics` text DEFAULT NULL,
                                   `evaluated_at` bigint(20) DEFAULT NULL,
                                   `created_at` int(11) NOT NULL,
                                   `updated_at` int(11) NOT NULL,
@@ -687,6 +688,47 @@ CREATE TABLE `v2_ip_location_cache` (
     KEY `location_status` (`status`),
     KEY `location_key` (`location_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_node_connection_log`;
+CREATE TABLE `v2_node_connection_log` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NOT NULL,
+    `subscription_id` bigint(20) DEFAULT NULL,
+    `node_user_id` bigint(20) NOT NULL,
+    `node_type` varchar(16) NOT NULL,
+    `node_id` int(11) NOT NULL,
+    `ip` varchar(45) NOT NULL,
+    `report_count` bigint(20) NOT NULL DEFAULT '0',
+    `first_seen_at` bigint(20) NOT NULL,
+    `last_seen_at` bigint(20) NOT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `node_user_node_ip` (`node_user_id`,`node_type`,`node_id`,`ip`),
+    KEY `user_id_last_seen_at` (`user_id`,`last_seen_at`),
+    KEY `subscription_id_last_seen_at` (`subscription_id`,`last_seen_at`),
+    KEY `last_seen_at` (`last_seen_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_risk_rule`;
+CREATE TABLE `v2_risk_rule` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `label` varchar(255) NOT NULL,
+    `dimension` varchar(32) NOT NULL,
+    `operator` varchar(2) NOT NULL,
+    `threshold` decimal(18,8) NOT NULL,
+    `enabled` tinyint(1) NOT NULL DEFAULT '1',
+    `sort` int(11) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `enabled_sort` (`enabled`,`sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO `v2_risk_rule` (`label`,`dimension`,`operator`,`threshold`,`enabled`,`sort`,`created_at`,`updated_at`) VALUES
+('订阅 UA 种类过多','user_agent_count','>',3,1,1,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
+('跨省/州请求过多','region_count','>=',3,1,2,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
+('跨市请求过多','city_count','>=',3,1,3,UNIX_TIMESTAMP(),UNIX_TIMESTAMP());
 
 CREATE TABLE `v2_schema_migrations` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
