@@ -15,7 +15,13 @@
     <link rel="stylesheet" href="/assets/admin/umi.css?v={{$adminAssetVersion}}">
     <link rel="stylesheet" href="/assets/admin/custom.css?v={{$adminAssetVersion}}">
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no">
+    {{-- 放开捏合缩放：原值 maximum-scale=1 + user-scalable=no 是 V2Board 上游 2020 年首个
+         commit 自带的，五年多没人动过也没留下理由。它让 WCAG 1.4.4 不合格，而管理端有 12 张
+         表格靠横向滚动（最宽 1500px），手机上不能缩小就等于没有「看全景」这条退路。
+         minimum-scale=1 一并删掉：它管的是缩小下限，留着等于只修了一半。
+         刻意不加 viewport-fit=cover —— modern/signature 敢写是因为它们的 CSS 自己处理了
+         env(safe-area-inset-*)，而管理端三份样式表里一次都没有，加了会让内容钻到刘海下面。 --}}
+    <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{$title}}</title>
     <!-- <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Nunito+Sans:300,400,400i,600,700"> -->
     <script>window.routerBase = "/";</script>

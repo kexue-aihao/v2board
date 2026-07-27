@@ -1875,3 +1875,48 @@ textarea.ant-input {
     min-height: 44px;
   }
 }
+
+/* 手工补丁：放开捏合缩放之后唯一真实的新增退化 —— antd 的成功/失败提示会跑到可视区外。
+   components.chunk.css 把 .ant-message 定成 position:fixed;top:16px;left:0;width:100%，
+   而 position:fixed 定位在「布局视口」，捏合缩放只移动「可视视口」：放大后往下翻表格时，
+   顶部那条约 16-60px 的提示带整块落在可视区之外，用户看不到「保存成功／失败」，3 秒后
+   自动消失。纯 CSS 无法让元素跟随可视视口（那要监听 visualViewport 事件，只能改 JS），
+   但挪到布局视口的垂直正中可以把最坏情况兜住：2 倍缩放下可视视口正好是布局视口的一半，
+   无论怎么平移都必然包含中心点；贴顶那条窄带只有约 10-15%。
+
+   作用域只能挂在 body 上。antd 的 message 经 rc-notification 挂到 document.body，不在
+   #page-container 里面，所以本文件 1388 行起统一使用的
+   #page-container:not(:has(.v2board-auth-box)) 前缀对它完全无效 —— 本文件 1778-1791 行
+   给 .ant-modal-content / .ant-dropdown-menu 加的同款前缀就是这么失效的（那批 overlay
+   同样 portal 到 body），别重复那个错。
+
+   也不能写成 body:has(#page-container:not(:has(...)))：:has() 不允许嵌套在 :has() 里面，
+   那样整条规则会被当成语法错误整块丢弃。这里只用一层 :has()。
+
+   :not(:has(.v2board-auth-box)) 用来排除登录页：登录页没有宽表格、没人会去缩放它，而它
+   的卡片本身是垂直居中的，居中的提示会正好压在密码框和登录按钮上。
+
+   只在 <=991.98px 生效。桌面浏览器不解析 viewport meta 的缩放段，也就没有这个退化，改它
+   是纯风险零收益；断点取 991.98 而不是 767.98，是因为竖屏 iPad 的布局视口正好 768，
+   767.98 会把它排除掉 —— 而它恰恰是会去捏合缩放 1300px 宽节点表的设备。
+   @media 求值的是布局视口，捏合缩放不改变它，所以这条规则不会随缩放闪断。 */
+@media (max-width: 991.98px) {
+  body:not(:has(.v2board-auth-box)) .ant-message {
+    top: 50%;
+    transform: translateY(-50%);
+    /* 重申 pointer-events:none。antd 原本就有这一条（气泡自己是 all），但提示挪到屏幕
+       正中之后，万一这一层能接收点击，整个管理端会被它盖住 3 秒。 */
+    pointer-events: none;
+  }
+
+  /* 气泡也改成穿透点击。贴顶时它只占顶部一小条，能点无所谓；挪到正中之后它会压在表格行
+     和弹窗按钮上。代价是手机上没法长按选中提示文本（实际没人这么做）。 */
+  body:not(:has(.v2board-auth-box)) .ant-message-notice-content {
+    pointer-events: none;
+  }
+
+  /* 贴顶布局留的负外边距会让居中偏 8px，居中时不需要。 */
+  body:not(:has(.v2board-auth-box)) .ant-message-notice:first-child {
+    margin-top: 0;
+  }
+}

@@ -8,7 +8,9 @@
         <link rel="stylesheet" href="/theme/{{$theme}}/assets/custom.css?v={{$version}}">
     @endif
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no">
+    {{-- 与管理端同步放开捏合缩放，理由见 resources/views/admin.blade.php。
+         同样不加 viewport-fit=cover：本主题的 CSS 也没有处理安全区。 --}}
+    <meta name="viewport" content="width=device-width,initial-scale=1">
     @php ($colors = [
         'darkblue' => '#3b5998',
         'black' => '#343a40',
