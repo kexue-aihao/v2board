@@ -632,7 +632,6 @@ textarea.ant-input {
 .ace_editor {
   border: 1px solid var(--v2-border);
   border-radius: var(--v2-radius-md);
-  background: #17202f !important;
 }
 
 /* .v2board-node_mobile 已删：umi.js 输出的类名是 v2board_node_mobile（下划线），
