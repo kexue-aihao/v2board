@@ -15,7 +15,9 @@ class AuthRegister extends FormRequest
     {
         return [
             'email' => 'required|email:strict',
-            'password' => 'required|min:8'
+            'password' => 'required|min:8',
+            'arithmetic_challenge_id' => 'nullable|string|max:64',
+            'arithmetic_answer' => 'nullable|integer|min:0|max:19998'
         ];
     }
 

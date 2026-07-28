@@ -16,6 +16,8 @@ class GuestRoute
             $router->match(['get', 'post'], '/payment/notify/{method}/{uuid}', 'V1\\Guest\\PaymentController@notify');
             // Comm
             $router->get ('/comm/config', 'V1\\Guest\\CommController@config');
+            $router->get ('/comm/arithmetic', 'V1\\Guest\\CommController@arithmetic');
+            $router->post('/comm/arithmetic/verify', 'V1\\Guest\\CommController@verifyArithmetic');
             // Public plans for the signature landing page
             $router->get ('/plan/fetch', 'V1\\Guest\\PlanController@fetch');
         });

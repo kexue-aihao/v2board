@@ -6150,6 +6150,12 @@
                 }, f.a.createElement(l["a"], {
                     checked: parseInt(_.recaptcha_enable),
                     onChange: e=>this.set("safe", "recaptcha_enable", e ? 1 : 0)
+                })), f.a.createElement(m, {
+                    title: "\u7b97\u672f\u9a8c\u8bc1",
+                    description: "\u5f00\u542f\u540e\uff0c\u7528\u6237\u6ce8\u518c\u65f6\u9700\u8981\u5b8c\u6210\u52a0\u51cf\u6cd5\u7b97\u672f\u9a8c\u8bc1\u3002"
+                }, f.a.createElement(l["a"], {
+                    checked: parseInt(_.arithmetic_verification_enable),
+                    onChange: e=>this.set("safe", "arithmetic_verification_enable", e ? 1 : 0)
                 })), _.recaptcha_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                     isChildren: !0,
                     title: "\u5bc6\u94a5",

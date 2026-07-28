@@ -11,6 +11,7 @@ use App\Models\InviteCode;
 use App\Models\Plan;
 use App\Models\User;
 use App\Services\AuthService;
+use App\Services\ArithmeticVerificationService;
 use App\Services\TwoFactorService;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
@@ -112,6 +113,22 @@ class AuthController extends Controller
                 $user->group_id = $plan->group_id;
                 $user->expired_at = time() + (config('v2board.try_out_hour', 1) * 3600);
                 $user->speed_limit = $plan->speed_limit;
+            }
+        }
+
+        if ((int)config('v2board.arithmetic_verification_enable', 0)) {
+            try {
+                $verified = (new ArithmeticVerificationService())->consume(
+                    (string)$request->input('arithmetic_challenge_id'),
+                    $request->input('arithmetic_answer'),
+                    (string)$request->ip()
+                );
+            } catch (\Throwable $e) {
+                report($e);
+                abort(503, __('Arithmetic verification is temporarily unavailable'));
+            }
+            if (!$verified) {
+                abort(422, __('Incorrect arithmetic verification'));
             }
         }
 

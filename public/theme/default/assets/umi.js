@@ -35561,13 +35561,69 @@
             constructor(e) {
                 super(e),
                 this.state = {
-                    sendEmailVerifyTimeout: 60
+                    sendEmailVerifyTimeout: 60,
+                    arithmeticChallenge: null,
+                    arithmeticAnswer: "",
+                    arithmeticVerified: false,
+                    arithmeticStatus: "",
+                    arithmeticChecking: false
                 }
             }
             componentDidMount() {
                 this.props.dispatch({
                     type: "guest/getCommConfig"
+                }), this.props.guest && this.props.guest.commConfig && this.props.guest.commConfig.is_arithmetic_verification && this.loadArithmetic()
+            }
+            componentDidUpdate(e) {
+                var t = e.guest && e.guest.commConfig
+                  , n = this.props.guest && this.props.guest.commConfig;
+                n && n.is_arithmetic_verification && !(t && t.is_arithmetic_verification) && !this.state.arithmeticChallenge && this.loadArithmetic()
+            }
+            loadArithmetic() {
+                fetch("/api/v1/guest/comm/arithmetic", {
+                    headers: {
+                        Accept: "application/json"
+                    }
+                }).then(e=>e.json()).then(e=>{
+                    e.data && e.data.challenge_id && this.setState({
+                        arithmeticChallenge: e.data,
+                        arithmeticAnswer: "",
+                        arithmeticVerified: false,
+                        arithmeticStatus: ""
+                    })
                 })
+            }
+            verifyArithmetic() {
+                var e = this.state.arithmeticAnswer.trim();
+                if (!this.state.arithmeticChallenge || !/^\d+$/.test(e)) return void this.setState({
+                    arithmeticVerified: false,
+                    arithmeticStatus: "incorrect"
+                });
+                this.setState({
+                    arithmeticChecking: true,
+                    arithmeticStatus: ""
+                }), fetch("/api/v1/guest/comm/arithmetic/verify", {
+                    method: "POST",
+                    headers: {
+                        Accept: "application/json",
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        challenge_id: this.state.arithmeticChallenge.challenge_id,
+                        answer: e
+                    })
+                }).then(e=>e.json()).then(e=>{
+                    var t = Boolean(e.data && e.data.correct);
+                    this.setState({
+                        arithmeticVerified: t,
+                        arithmeticStatus: t ? "correct" : "incorrect",
+                        arithmeticChecking: false
+                    })
+                }).catch(()=>this.setState({
+                    arithmeticVerified: false,
+                    arithmeticStatus: "incorrect",
+                    arithmeticChecking: false
+                }))
             }
             sendEmailVerify(e) {
                 var t = this;
@@ -35600,13 +35656,16 @@
             }
             register(e) {
                 var t = this.props.guest.commConfig;
+                if (t.is_arithmetic_verification && (!this.state.arithmeticVerified || !this.state.arithmeticChallenge)) return void this.verifyArithmetic();
                 !t.tos_url || this.state.tosChecked ? this.refs.password.value === this.refs.repassword.value ? this.props.dispatch({
                     type: "passport/register",
                     email: this.getEmail(),
                     password: this.refs.password.value,
                     inviteCode: this.refs.invite.value,
                     emailCode: this.refs.email_code ? this.refs.email_code.value : "",
-                    recaptchaData: e
+                    recaptchaData: e,
+                    arithmeticChallengeId: this.state.arithmeticChallenge ? this.state.arithmeticChallenge.challenge_id : "",
+                    arithmeticAnswer: this.state.arithmeticAnswer
                 }) : Object(p["r"])("error", Object(l["formatMessage"])({
                     id: "\u8bf7\u6c42\u5931\u8d25"
                 }), Object(l["formatMessage"])({
@@ -35754,7 +35813,37 @@
                         id: c.is_invite_force ? "\u9080\u8bf7\u7801" : "\u9080\u8bf7\u7801(\u9009\u586b)"
                     }),
                     ref: "invite"
-                })), c.tos_url && i.a.createElement("div", {
+                })), c.is_arithmetic_verification && i.a.createElement("div", {
+                    className: "form-group"
+                }, this.state.arithmeticChallenge && i.a.createElement("div", {
+                    className: "text-primary font-w600 mb-2"
+                }, this.state.arithmeticChallenge.left, " ", this.state.arithmeticChallenge.operator, " ", this.state.arithmeticChallenge.right, " = ?"), i.a.createElement("div", {
+                    className: "input-group"
+                }, i.a.createElement("input", {
+                    type: "text",
+                    inputMode: "numeric",
+                    className: "form-control form-control-alt",
+                    placeholder: "\u8bf7\u8f93\u5165\u7b97\u672f\u7b54\u6848",
+                    value: this.state.arithmeticAnswer,
+                    onChange: e=>this.setState({
+                        arithmeticAnswer: e.target.value,
+                        arithmeticVerified: false,
+                        arithmeticStatus: ""
+                    })
+                }), i.a.createElement("button", {
+                    type: "button",
+                    className: "btn btn-primary",
+                    disabled: this.state.arithmeticChecking,
+                    onClick: ()=>this.verifyArithmetic()
+                }, this.state.arithmeticChecking ? "\u9a8c\u8bc1\u4e2d" : "\u9a8c\u8bc1")), "correct" === this.state.arithmeticStatus && i.a.createElement("small", {
+                    className: "text-success d-block mt-1"
+                }, "\u7b54\u6848\u6b63\u786e"), "incorrect" === this.state.arithmeticStatus && i.a.createElement("small", {
+                    className: "text-danger d-block mt-1"
+                }, "\u7b54\u6848\u9519\u8bef"), i.a.createElement("button", {
+                    type: "button",
+                    className: "btn btn-link btn-sm px-0",
+                    onClick: ()=>this.loadArithmetic()
+                }, "\u5237\u65b0\u9898\u76ee")), c.tos_url && i.a.createElement("div", {
                     className: "form-group"
                 }, i.a.createElement("div", {
                     className: "custom-control custom-checkbox custom-control-primary"
@@ -57726,7 +57815,7 @@
                 },
                 register(e, t) {
                     return u().mark(function n() {
-                        var r, o, a, c, l, f, p, d;
+                        var r, o, a, c, l, f, p, d, h, m;
                         return u().wrap(function(n) {
                             while (1)
                                 switch (n.prev = n.next) {
@@ -57736,6 +57825,8 @@
                                     a = e.inviteCode,
                                     c = e.emailCode,
                                     l = e.recaptchaData,
+                                    h = e.arithmeticChallengeId,
+                                    m = e.arithmeticAnswer,
                                     f = t.put,
                                     n.next = 4,
                                     f({
@@ -57752,6 +57843,8 @@
                                         email_code: c
                                     },
                                     l && (p["recaptcha_data"] = l),
+                                    h && (p["arithmetic_challenge_id"] = h),
+                                    void 0 !== m && (p["arithmetic_answer"] = m),
                                     n.next = 8,
                                     Object(i["b"])("/passport/auth/register", p);
                                 case 8:
