@@ -168,6 +168,8 @@ class ConfigController extends Controller
                 'email_gmail_limit_enable' => config('v2board.email_gmail_limit_enable', 0),
                 'recaptcha_enable' => (int)config('v2board.recaptcha_enable', 0),
                 'arithmetic_verification_enable' => (int)config('v2board.arithmetic_verification_enable', 0),
+                'reseller_enable' => (int)config('v2board.reseller_enable', 0),
+                'reseller_allowed_payment_drivers' => array_values((array)config('v2board.reseller_allowed_payment_drivers', [])),
                 'recaptcha_key' => config('v2board.recaptcha_key'),
                 'recaptcha_site_key' => config('v2board.recaptcha_site_key'),
                 'register_limit_by_ip_enable' => (int)config('v2board.register_limit_by_ip_enable', 0),

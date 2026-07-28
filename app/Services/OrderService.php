@@ -76,6 +76,9 @@ class OrderService
             DB::beginTransaction();
             try {
                 $subscription = $this->openSubscription($order, $plan);
+                // Keep the platform order linked to the subscription it opened.
+                // Reseller renewal validation and existing order detail both rely on this relation.
+                $order->subscription_id = $subscription->id;
                 $eventId = (int)$order->type === 1
                     ? config('v2board.new_order_event_id', 0)
                     : config('v2board.renew_order_event_id', 0);

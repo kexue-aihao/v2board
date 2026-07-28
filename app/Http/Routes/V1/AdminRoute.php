@@ -195,6 +195,14 @@ class AdminRoute
             $router->get ('/theme/getThemes', 'V1\\Admin\\ThemeController@getThemes');
             $router->post('/theme/saveThemeConfig', 'V1\\Admin\\ThemeController@saveThemeConfig');
             $router->post('/theme/getThemeConfig', 'V1\\Admin\\ThemeController@getThemeConfig');
+            // Reseller marketplace
+            $router->get ('/reseller/fetch', 'V1\\Admin\\ResellerController@fetch');
+            $router->post('/reseller/update', 'V1\\Admin\\ResellerController@update');
+            $router->get ('/reseller/template/fetch', 'V1\\Admin\\ResellerController@templates');
+            $router->post('/reseller/template/save', 'V1\\Admin\\ResellerController@saveTemplate');
+            $router->get ('/reseller/payment-drivers', 'V1\\Admin\\ResellerController@paymentDrivers');
+            $router->post('/reseller/payment-drivers', 'V1\\Admin\\ResellerController@savePaymentDrivers');
+            $router->get ('/reseller/orders', 'V1\\Admin\\ResellerController@orders');
         });
     }
 }

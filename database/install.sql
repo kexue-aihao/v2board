@@ -800,3 +800,99 @@ CREATE TABLE `v2_two_factor_audit` (
     KEY `user_id` (`user_id`),
     KEY `action` (`action`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_account` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `email` varchar(128) NOT NULL,
+    `password` varchar(255) NOT NULL,
+    `store_slug` varchar(32) NOT NULL,
+    `store_name` varchar(128) NOT NULL,
+    `store_description` text DEFAULT NULL,
+    `status` varchar(16) NOT NULL DEFAULT 'pending',
+    `last_login_at` bigint(20) DEFAULT NULL,
+    `last_login_ip` varchar(45) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `email` (`email`),
+    UNIQUE KEY `store_slug` (`store_slug`),
+    KEY `status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_plan_template` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `base_plan_id` int(11) NOT NULL,
+    `enabled` tinyint(1) NOT NULL DEFAULT '0',
+    `sort` int(11) NOT NULL DEFAULT '0',
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `base_plan_id` (`base_plan_id`),
+    KEY `enabled_sort` (`enabled`,`sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_plan` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `reseller_id` bigint(20) unsigned NOT NULL,
+    `base_plan_id` int(11) NOT NULL,
+    `name` varchar(255) NOT NULL,
+    `content` text DEFAULT NULL,
+    `month_price` int(11) DEFAULT NULL,
+    `quarter_price` int(11) DEFAULT NULL,
+    `half_year_price` int(11) DEFAULT NULL,
+    `year_price` int(11) DEFAULT NULL,
+    `two_year_price` int(11) DEFAULT NULL,
+    `three_year_price` int(11) DEFAULT NULL,
+    `onetime_price` int(11) DEFAULT NULL,
+    `enabled` tinyint(1) NOT NULL DEFAULT '1',
+    `sort` int(11) NOT NULL DEFAULT '0',
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `reseller_enabled_sort` (`reseller_id`,`enabled`,`sort`),
+    KEY `base_plan_id` (`base_plan_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_payment` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `reseller_id` bigint(20) unsigned NOT NULL,
+    `uuid` char(32) NOT NULL,
+    `driver` varchar(64) NOT NULL,
+    `name` varchar(255) NOT NULL,
+    `config_encrypted` text NOT NULL,
+    `enabled` tinyint(1) NOT NULL DEFAULT '0',
+    `sort` int(11) NOT NULL DEFAULT '0',
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uuid` (`uuid`),
+    KEY `reseller_enabled_sort` (`reseller_id`,`enabled`,`sort`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_customer` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `reseller_id` bigint(20) unsigned NOT NULL,
+    `user_id` int(11) NOT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `reseller_user` (`reseller_id`,`user_id`),
+    KEY `user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_order` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `reseller_id` bigint(20) unsigned NOT NULL,
+    `reseller_plan_id` bigint(20) unsigned NOT NULL,
+    `reseller_payment_id` bigint(20) unsigned DEFAULT NULL,
+    `platform_order_id` int(11) NOT NULL,
+    `user_id` int(11) NOT NULL,
+    `period` varchar(32) NOT NULL,
+    `amount_snapshot` int(11) NOT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `platform_order_id` (`platform_order_id`),
+    KEY `reseller_user_created` (`reseller_id`,`user_id`,`created_at`),
+    KEY `reseller_plan` (`reseller_id`,`reseller_plan_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

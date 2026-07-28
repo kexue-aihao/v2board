@@ -10,9 +10,11 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
 use App\Models\Subscription;
+use App\Models\ResellerPlan;
 use App\Services\PlanService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class PlanController extends Controller
 {
@@ -73,6 +75,9 @@ class PlanController extends Controller
 
     public function drop(Request $request)
     {
+        if (Schema::hasTable('v2_reseller_plan') && ResellerPlan::where('base_plan_id', $request->input('id'))->exists()) {
+            abort(500, '该套餐已被倒卖商引用，无法删除');
+        }
         if (Order::where('plan_id', $request->input('id'))->first()) {
             abort(500, '该订阅下存在订单无法删除');
         }

@@ -95,6 +95,8 @@ class ConfigSave extends FormRequest
         'email_gmail_limit_enable' => 'in:0,1',
         'recaptcha_enable' => 'in:0,1',
         'arithmetic_verification_enable' => 'in:0,1',
+        'reseller_enable' => 'in:0,1',
+        'reseller_allowed_payment_drivers' => 'nullable|array',
         'recaptcha_key' => '',
         'recaptcha_site_key' => '',
         'email_verify' => 'in:0,1',

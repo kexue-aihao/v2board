@@ -15,7 +15,8 @@ class SchemaUpgradeService
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
         'risk_rule_schema' => 'risk_rule_schema_v1',
         'token_history_schema' => 'token_history_schema_v1',
-        'password_policy_schema' => 'password_policy_schema_v1'
+        'password_policy_schema' => 'password_policy_schema_v1',
+        'reseller_schema' => 'reseller_schema_v1'
     ];
 
     public function run(): array
@@ -75,6 +76,9 @@ class SchemaUpgradeService
                 return;
             case 'password_policy_schema':
                 $this->applyPasswordPolicySchema();
+                return;
+            case 'reseller_schema':
+                $this->applyResellerSchema();
                 return;
         }
 
@@ -576,6 +580,148 @@ class SchemaUpgradeService
             ->where('is_admin', 0)
             ->where('is_staff', 0)
             ->update(['password_reset_required' => 1]);
+    }
+
+    private function applyResellerSchema(): void
+    {
+        $this->requireTable('v2_user');
+        $this->requireTable('v2_plan');
+        $this->requireTable('v2_order');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_account` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `email` varchar(128) NOT NULL,
+            `password` varchar(255) NOT NULL,
+            `store_slug` varchar(32) NOT NULL,
+            `store_name` varchar(128) NOT NULL,
+            `store_description` text DEFAULT NULL,
+            `status` varchar(16) NOT NULL DEFAULT 'pending',
+            `last_login_at` bigint(20) DEFAULT NULL,
+            `last_login_ip` varchar(45) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_plan_template` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `base_plan_id` int(11) NOT NULL,
+            `enabled` tinyint(1) NOT NULL DEFAULT '0',
+            `sort` int(11) NOT NULL DEFAULT '0',
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_plan` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `reseller_id` bigint(20) unsigned NOT NULL,
+            `base_plan_id` int(11) NOT NULL,
+            `name` varchar(255) NOT NULL,
+            `content` text DEFAULT NULL,
+            `month_price` int(11) DEFAULT NULL,
+            `quarter_price` int(11) DEFAULT NULL,
+            `half_year_price` int(11) DEFAULT NULL,
+            `year_price` int(11) DEFAULT NULL,
+            `two_year_price` int(11) DEFAULT NULL,
+            `three_year_price` int(11) DEFAULT NULL,
+            `onetime_price` int(11) DEFAULT NULL,
+            `enabled` tinyint(1) NOT NULL DEFAULT '1',
+            `sort` int(11) NOT NULL DEFAULT '0',
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_payment` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `reseller_id` bigint(20) unsigned NOT NULL,
+            `uuid` char(32) NOT NULL,
+            `driver` varchar(64) NOT NULL,
+            `name` varchar(255) NOT NULL,
+            `config_encrypted` text NOT NULL,
+            `enabled` tinyint(1) NOT NULL DEFAULT '0',
+            `sort` int(11) NOT NULL DEFAULT '0',
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_customer` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `reseller_id` bigint(20) unsigned NOT NULL,
+            `user_id` int(11) NOT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_order` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `reseller_id` bigint(20) unsigned NOT NULL,
+            `reseller_plan_id` bigint(20) unsigned NOT NULL,
+            `reseller_payment_id` bigint(20) unsigned DEFAULT NULL,
+            `platform_order_id` int(11) NOT NULL,
+            `user_id` int(11) NOT NULL,
+            `period` varchar(32) NOT NULL,
+            `amount_snapshot` int(11) NOT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'v2_reseller_account' => [
+                'email' => 'varchar(128) NOT NULL', 'password' => 'varchar(255) NOT NULL',
+                'store_slug' => 'varchar(32) NOT NULL', 'store_name' => 'varchar(128) NOT NULL',
+                'store_description' => 'text DEFAULT NULL', 'status' => "varchar(16) NOT NULL DEFAULT 'pending'",
+                'last_login_at' => 'bigint(20) DEFAULT NULL', 'last_login_ip' => 'varchar(45) DEFAULT NULL',
+                'created_at' => 'int(11) NOT NULL', 'updated_at' => 'int(11) NOT NULL'
+            ],
+            'v2_reseller_plan_template' => [
+                'base_plan_id' => 'int(11) NOT NULL', 'enabled' => "tinyint(1) NOT NULL DEFAULT '0'",
+                'sort' => "int(11) NOT NULL DEFAULT '0'", 'created_at' => 'int(11) NOT NULL', 'updated_at' => 'int(11) NOT NULL'
+            ],
+            'v2_reseller_plan' => [
+                'reseller_id' => 'bigint(20) unsigned NOT NULL', 'base_plan_id' => 'int(11) NOT NULL',
+                'name' => 'varchar(255) NOT NULL', 'content' => 'text DEFAULT NULL',
+                'month_price' => 'int(11) DEFAULT NULL', 'quarter_price' => 'int(11) DEFAULT NULL',
+                'half_year_price' => 'int(11) DEFAULT NULL', 'year_price' => 'int(11) DEFAULT NULL',
+                'two_year_price' => 'int(11) DEFAULT NULL', 'three_year_price' => 'int(11) DEFAULT NULL',
+                'onetime_price' => 'int(11) DEFAULT NULL', 'enabled' => "tinyint(1) NOT NULL DEFAULT '1'",
+                'sort' => "int(11) NOT NULL DEFAULT '0'", 'created_at' => 'int(11) NOT NULL', 'updated_at' => 'int(11) NOT NULL'
+            ],
+            'v2_reseller_payment' => [
+                'reseller_id' => 'bigint(20) unsigned NOT NULL', 'uuid' => 'char(32) NOT NULL',
+                'driver' => 'varchar(64) NOT NULL', 'name' => 'varchar(255) NOT NULL',
+                'config_encrypted' => 'text NOT NULL', 'enabled' => "tinyint(1) NOT NULL DEFAULT '0'",
+                'sort' => "int(11) NOT NULL DEFAULT '0'", 'created_at' => 'int(11) NOT NULL', 'updated_at' => 'int(11) NOT NULL'
+            ],
+            'v2_reseller_customer' => [
+                'reseller_id' => 'bigint(20) unsigned NOT NULL', 'user_id' => 'int(11) NOT NULL',
+                'created_at' => 'int(11) NOT NULL', 'updated_at' => 'int(11) NOT NULL'
+            ],
+            'v2_reseller_order' => [
+                'reseller_id' => 'bigint(20) unsigned NOT NULL', 'reseller_plan_id' => 'bigint(20) unsigned NOT NULL',
+                'reseller_payment_id' => 'bigint(20) unsigned DEFAULT NULL', 'platform_order_id' => 'int(11) NOT NULL',
+                'user_id' => 'int(11) NOT NULL', 'period' => 'varchar(32) NOT NULL',
+                'amount_snapshot' => 'int(11) NOT NULL', 'created_at' => 'int(11) NOT NULL', 'updated_at' => 'int(11) NOT NULL'
+            ]
+        ] as $table => $columns) {
+            foreach ($columns as $column => $definition) {
+                $this->ensureColumn($table, $column, $definition);
+            }
+        }
+
+        $this->ensureIndex('v2_reseller_account', 'email', ['email'], true);
+        $this->ensureIndex('v2_reseller_account', 'store_slug', ['store_slug'], true);
+        $this->ensureIndex('v2_reseller_account', 'status', ['status']);
+        $this->ensureIndex('v2_reseller_plan_template', 'base_plan_id', ['base_plan_id'], true);
+        $this->ensureIndex('v2_reseller_plan_template', 'enabled_sort', ['enabled', 'sort']);
+        $this->ensureIndex('v2_reseller_plan', 'reseller_enabled_sort', ['reseller_id', 'enabled', 'sort']);
+        $this->ensureIndex('v2_reseller_plan', 'base_plan_id', ['base_plan_id']);
+        $this->ensureIndex('v2_reseller_payment', 'uuid', ['uuid'], true);
+        $this->ensureIndex('v2_reseller_payment', 'reseller_enabled_sort', ['reseller_id', 'enabled', 'sort']);
+        $this->ensureIndex('v2_reseller_customer', 'reseller_user', ['reseller_id', 'user_id'], true);
+        $this->ensureIndex('v2_reseller_customer', 'user_id', ['user_id']);
+        $this->ensureIndex('v2_reseller_order', 'platform_order_id', ['platform_order_id'], true);
+        $this->ensureIndex('v2_reseller_order', 'reseller_user_created', ['reseller_id', 'user_id', 'created_at']);
+        $this->ensureIndex('v2_reseller_order', 'reseller_plan', ['reseller_id', 'reseller_plan_id']);
     }
 
     private function requireTable(string $table): void
