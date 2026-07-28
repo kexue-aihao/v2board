@@ -24,10 +24,10 @@ use App\Services\SubscribeAuditRetentionService;
 use App\Services\SubscriptionService;
 use App\Services\SubscriptionRiskService;
 use App\Services\IpLocationService;
+use App\Services\OnlineDeviceService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Cache;
 use App\Services\SubscriptionTokenHistoryService;
 use App\Utils\TokenRotationContext;
 use Illuminate\Support\Facades\Log;
@@ -132,6 +132,7 @@ class UserController extends Controller
             ->get();
         $plan = Plan::get();
         $riskService = new SubscriptionRiskService();
+        $onlineDeviceSummaries = (new OnlineDeviceService())->summariesForUsers($res);
         for ($i = 0; $i < count($res); $i++) {
             for ($k = 0; $k < count($plan); $k++) {
                 if ($plan[$k]['id'] == $res[$i]['plan_id']) {
@@ -139,22 +140,10 @@ class UserController extends Controller
                 }
             }
             //统计在线设备
-            $countalive = 0;
-            $ips = [];
-            $ips_array = Cache::get('ALIVE_IP_USER_'. $res[$i]['id']);
-            if ($ips_array) {
-                $countalive = $ips_array['alive_ip'];
-                foreach($ips_array as $nodetypeid => $data) {
-                    if (!is_int($data) && isset($data['aliveips'])) {
-                        foreach($data['aliveips'] as $ip_NodeId) {
-                            $ip = explode("_", $ip_NodeId)[0];
-                            $ips[] = $ip . '_' . $nodetypeid;
-                        }
-                    }
-                }
-            }
-            $res[$i]['alive_ip'] = $countalive;
-            $res[$i]['ips'] = implode(', ', $ips);
+            $onlineDevices = $onlineDeviceSummaries[(int)$res[$i]['id']];
+            $res[$i]['alive_ip'] = $onlineDevices['alive_ip'];
+            $res[$i]['ips'] = $onlineDevices['ips'];
+            $res[$i]['device_limit'] = $onlineDevices['device_limit'];
             $res[$i]['subscribe_url'] = Helper::getSubscribeUrl($res[$i]['token']);
             $res[$i]['risk'] = $riskService->summaryForUser((int)$res[$i]['id']);
         }
