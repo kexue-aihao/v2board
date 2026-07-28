@@ -20,13 +20,46 @@ use App\Models\Ticket;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class StatController extends Controller
 {
     public function getOverride(Request $request)
     {
+        $traffic = [
+            'day_traffic_total' => 0,
+            'day_traffic_upload' => 0,
+            'day_traffic_download' => 0,
+            'month_traffic_total' => 0,
+            'month_traffic_upload' => 0,
+            'month_traffic_download' => 0
+        ];
+        if (Schema::hasTable('v2_stat_user')) {
+            $sumTraffic = function ($startAt) {
+                return StatUser::where('record_type', 'd')
+                    ->where('record_at', '>=', $startAt)
+                    ->where('record_at', '<', time())
+                    ->select([
+                        DB::raw('COALESCE(SUM(u * server_rate), 0) AS upload'),
+                        DB::raw('COALESCE(SUM(d * server_rate), 0) AS download'),
+                        DB::raw('COALESCE(SUM((u + d) * server_rate), 0) AS total')
+                    ])
+                    ->first();
+            };
+            $dayTraffic = $sumTraffic(strtotime(date('Y-m-d')));
+            $monthTraffic = $sumTraffic(strtotime(date('Y-m-1')));
+            $traffic = [
+                'day_traffic_total' => (float) $dayTraffic->total,
+                'day_traffic_upload' => (float) $dayTraffic->upload,
+                'day_traffic_download' => (float) $dayTraffic->download,
+                'month_traffic_total' => (float) $monthTraffic->total,
+                'month_traffic_upload' => (float) $monthTraffic->upload,
+                'month_traffic_download' => (float) $monthTraffic->download
+            ];
+        }
+
         return [
-            'data' => [
+            'data' => array_merge([
                 'online_user' => User::where('t','>=', time() - 600)
                     ->count(),
                 'month_income' => Order::where('created_at', '>=', strtotime(date('Y-m-1')))
@@ -60,8 +93,8 @@ class StatController extends Controller
                     ->sum('get_amount'),
                 'commission_last_month_payout' => CommissionLog::where('created_at', '>=', strtotime('-1 month', strtotime(date('Y-m-1'))))
                     ->where('created_at', '<', strtotime(date('Y-m-1')))
-                    ->sum('get_amount'),
-            ]
+                    ->sum('get_amount')
+            ], $traffic)
         ];
     }
 
