@@ -55,6 +55,10 @@ Route::get('/store/{slug}', function ($slug) {
     return view('storefront', ['slug' => $slug]);
 });
 
+Route::get('/store', function () {
+    return view('store-index');
+});
+
 Route::get('/reseller', function () {
     return view('reseller', ['title' => config('v2board.app_name', 'V2Board') . ' Reseller']);
 });
