@@ -53,6 +53,7 @@ class CommController extends Controller
                     'title' => $siteStatusTitle ?: ($siteStatus === 'shutdown' ? '服务暂时停止' : '服务正在维护'),
                     'message' => $siteStatusMessage ?: '系统正在进行例行处理，请稍后再试。',
                     'recovery_at' => $siteStatusRecoveryAt,
+                    'server_time' => time(),
                     'support_url' => config('v2board.telegram_discuss_link')
                 ],
                 'app_description' => config('v2board.app_description'),
