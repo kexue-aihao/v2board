@@ -2,6 +2,14 @@
 <html>
 
 <head>
+    @php
+        $siteStatusAssets = array_filter([
+            @filemtime(public_path('theme/default/assets/site-status.css')),
+            @filemtime(public_path('theme/default/assets/site-status.js')),
+        ]);
+        $siteStatusAssetVersion = $siteStatusAssets ? max($siteStatusAssets) : $version;
+    @endphp
+    <link rel="stylesheet" href="/theme/default/assets/site-status.css?v={{$siteStatusAssetVersion}}">
     <link rel="stylesheet" href="/theme/{{$theme}}/assets/components.chunk.css?v={{$version}}">
     <link rel="stylesheet" href="/theme/{{$theme}}/assets/umi.css?v={{$version}}">
     @if (file_exists(public_path("/theme/{$theme}/assets/custom.css")))
@@ -59,14 +67,19 @@
 <body>
 <div id="root"></div>
 {!! $theme_config['custom_html'] !!}
-<script src="/theme/{{$theme}}/assets/vendors.async.js?v={{$version}}"></script>
-<script src="/theme/{{$theme}}/assets/components.async.js?v={{$version}}"></script>
-<script src="/theme/{{$theme}}/assets/umi.js?v={{$version}}"></script>
-<script src="/assets/two-factor-widget.js?v={{$version}}"></script>
-<script src="/assets/password-policy-widget.js?v={{$version}}"></script>
-@if (file_exists(public_path("/theme/{$theme}/assets/custom.js")))
-    <script src="/theme/{{$theme}}/assets/custom.js?v={{$version}}"></script>
-@endif
+<script>
+window.__v2boardSiteStatusScripts = [
+    "/theme/{{$theme}}/assets/vendors.async.js?v={{$version}}",
+    "/theme/{{$theme}}/assets/components.async.js?v={{$version}}",
+    "/theme/{{$theme}}/assets/umi.js?v={{$version}}",
+    "/assets/two-factor-widget.js?v={{$version}}",
+    "/assets/password-policy-widget.js?v={{$version}}"
+    @if (file_exists(public_path("/theme/{$theme}/assets/custom.js")))
+        , "/theme/{{$theme}}/assets/custom.js?v={{$version}}"
+    @endif
+];
+</script>
+<script src="/theme/default/assets/site-status.js?v={{$siteStatusAssetVersion}}"></script>
 </body>
 
 </html>

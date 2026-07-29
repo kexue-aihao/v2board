@@ -42,6 +42,8 @@
         .field textarea { min-height: 96px; resize: vertical; }
         .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(36,107,206,.12); }
         .field-help { color: var(--muted); font-size: 12px; font-weight: 400; }
+        .payment-fields { display: grid; gap: 15px; padding: 2px 0; }
+        .payment-fields .empty-state { padding: 12px 0; border: 1px dashed var(--line); border-radius: 5px; }
         .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .field-check { display: flex; align-items: center; grid-template-columns: 16px 1fr; gap: 8px; }
         .field-check input { width: 16px; min-height: 16px; margin: 0; }
@@ -194,7 +196,7 @@
                 </div>
                 <div>
                     <section class="panel"><div class="panel-head"><div><h2>可用基础套餐</h2><p>管理员发布后才会显示。</p></div></div><div class="panel-body"><div id="templates" class="template-list"></div></div></section>
-                    <section class="panel"><div class="panel-head"><div><h2>支付配置</h2><p>密钥由系统加密保存，接口不会返回原始配置。</p></div></div><div class="panel-body"><fieldset data-sale-control><form id="payment-form" class="form-stack"><input type="hidden" name="id"><label class="field">支付驱动<select id="payment-driver" name="driver" required></select></label><label class="field">支付名称<input name="name" placeholder="例如：支付宝" required></label><label class="field">配置 JSON<textarea name="config_json" placeholder="按支付驱动要求填写 JSON"></textarea></label><label class="field field-check"><input name="enabled" type="checkbox" value="1">启用此支付方式</label><button class="btn btn-primary" type="submit">保存支付配置</button></form></fieldset><div id="payments" class="data-list" style="margin-top:15px"></div></div></section>
+                    <section class="panel"><div class="panel-head"><div><h2>支付配置</h2><p>配置字段会按照管理员支付配置中的驱动定义生成，密钥由系统加密保存。</p></div></div><div class="panel-body"><fieldset data-sale-control><form id="payment-form" class="form-stack"><input type="hidden" name="id"><label class="field">支付驱动<select id="payment-driver" name="driver" required aria-describedby="payment-driver-help"></select><span id="payment-driver-help" class="field-help">选择驱动后填写对应的支付参数。</span></label><label class="field">支付名称<input name="name" placeholder="例如：支付宝" required></label><div id="payment-fields" class="payment-fields" aria-live="polite"><div class="empty-state">请选择支付驱动加载配置字段。</div></div><label class="field field-check"><input name="enabled" type="checkbox" value="1">启用此支付方式</label><button class="btn btn-primary" type="submit">保存支付配置</button></form></fieldset><div id="payments" class="data-list" style="margin-top:15px"></div></div></section>
                     <section class="panel"><div class="panel-head"><div><h2>销售概览</h2><p>按需读取当前店铺客户和订单数量。</p></div></div><div class="panel-body"><div class="form-actions"><button id="load-customers" class="btn btn-quiet" type="button">读取客户数</button><button id="load-orders" class="btn btn-quiet" type="button">读取订单数</button></div><div id="audit" class="data-list" style="margin-top:12px"><div class="empty-state">点击上方按钮查看统计。</div></div></div></section>
                 </div>
             </div>

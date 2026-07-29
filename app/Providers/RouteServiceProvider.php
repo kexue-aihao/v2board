@@ -69,7 +69,7 @@ class RouteServiceProvider extends ServiceProvider
     {
         Route::group([
             'prefix' => '/api/v1',
-            'middleware' => 'api',
+            'middleware' => ['api', 'site.status'],
             'namespace' => $this->namespace
         ], function ($router) {
             foreach (glob(app_path('Http//Routes//V1') . '/*.php') as $file) {
@@ -80,7 +80,7 @@ class RouteServiceProvider extends ServiceProvider
 
         Route::group([
             'prefix' => '/api/v2',
-            'middleware' => 'api',
+            'middleware' => ['api', 'site.status'],
             'namespace' => $this->namespace
         ], function ($router) {
             foreach (glob(app_path('Http//Routes//V2') . '/*.php') as $file) {

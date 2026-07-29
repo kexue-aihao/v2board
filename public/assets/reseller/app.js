@@ -10,6 +10,8 @@
     var serviceEnabled = document.body.dataset.resellerEnabled === '1';
     var messageTimer;
     var state = { account: null, saleEnabled: false };
+    var paymentFormRequest = 0;
+    var paymentFormReady = false;
 
     if (!serviceEnabled) return;
 
@@ -194,6 +196,80 @@
         });
     }
 
+    function paymentFieldLabel(definition, key) {
+        var label = definition && definition.label;
+        if (label && typeof label === 'object') label = label.custom || label.label;
+        return String(label || key);
+    }
+
+    function renderPaymentFields(fields) {
+        var container = document.getElementById('payment-fields');
+        var keys = fields && typeof fields === 'object' ? Object.keys(fields) : [];
+        container.innerHTML = '';
+        if (!keys.length) {
+            container.innerHTML = '<div class="empty-state">此支付驱动没有可配置字段。</div>';
+            paymentFormReady = true;
+            return;
+        }
+        keys.forEach(function (key) {
+            var definition = fields[key] || {};
+            var label = document.createElement('label');
+            var input = definition.type === 'textarea' ? document.createElement('textarea') : document.createElement('input');
+            label.className = 'field payment-field';
+            label.appendChild(document.createTextNode(paymentFieldLabel(definition, key)));
+            input.name = key;
+            input.setAttribute('data-payment-field', '1');
+            input.autocomplete = 'off';
+            if (input.tagName === 'INPUT') input.type = 'text';
+            if (definition.value !== undefined && definition.value !== null) input.value = String(definition.value);
+            label.appendChild(input);
+            if (definition.description) {
+                var help = document.createElement('span');
+                help.className = 'field-help';
+                help.textContent = String(definition.description);
+                label.appendChild(help);
+            }
+            container.appendChild(label);
+        });
+        paymentFormReady = true;
+    }
+
+    function renderPaymentFieldsMessage(message) {
+        var container = document.getElementById('payment-fields');
+        container.innerHTML = '';
+        var state = document.createElement('div');
+        state.className = 'empty-state';
+        state.textContent = message;
+        container.appendChild(state);
+    }
+
+    function loadPaymentForm(driver) {
+        var request = ++paymentFormRequest;
+        paymentFormReady = false;
+        if (!driver) {
+            renderPaymentFieldsMessage('暂无可用支付驱动。');
+            return Promise.resolve();
+        }
+        renderPaymentFieldsMessage('正在加载支付驱动配置字段...');
+        return api('/payments/form', {
+            method: 'POST',
+            body: JSON.stringify({driver: driver})
+        }).then(function (result) {
+            if (request === paymentFormRequest) renderPaymentFields(result.data || {});
+        }).catch(function (error) {
+            if (request === paymentFormRequest) renderPaymentFieldsMessage(error.message);
+            show(error.message, true);
+        });
+    }
+
+    function paymentConfig() {
+        var config = {};
+        document.querySelectorAll('#payment-fields [data-payment-field]').forEach(function (field) {
+            config[field.name] = field.value;
+        });
+        return config;
+    }
+
     function loadPayments() {
         return Promise.all([
             api('/payments').then(function (result) {
@@ -215,7 +291,9 @@
         return api('/me').then(function (result) {
             renderAccount(result.data || {});
             fillStore(result.data || {});
-            return Promise.all([loadTemplates(), loadPlans(), loadPayments()]);
+            return Promise.all([loadTemplates(), loadPlans(), loadPayments()]).then(function () {
+                return loadPaymentForm(document.getElementById('payment-driver').value);
+            });
         });
     }
 
@@ -292,16 +370,18 @@
         }).then(function () { setButtonLoading(button, false); });
     });
 
+    document.getElementById('payment-driver').addEventListener('change', function (event) {
+        loadPaymentForm(event.target.value);
+    });
+
     document.getElementById('payment-form').addEventListener('submit', function (event) {
         event.preventDefault();
-        var body = formBody(event.target);
-        try {
-            body.config = JSON.parse(body.config_json || '{}');
-        } catch (error) {
-            show('配置必须是合法 JSON。', true);
+        if (!paymentFormReady) {
+            show('请先选择支付驱动并加载配置字段。', true);
             return;
         }
-        delete body.config_json;
+        var body = formBody(event.target);
+        body.config = paymentConfig();
         body.enabled = event.target.elements.enabled.checked ? 1 : 0;
         var button = event.target.querySelector('button[type="submit"]');
         setButtonLoading(button, true, '保存中...');

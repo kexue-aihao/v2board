@@ -70,6 +70,7 @@ class Kernel extends HttpKernel
         'admin' => \App\Http\Middleware\Admin::class,
         'reseller' => \App\Http\Middleware\Reseller::class,
         'storefront' => \App\Http\Middleware\Storefront::class,
+        'site.status' => \App\Http\Middleware\SiteStatus::class,
         'client' => \App\Http\Middleware\Client::class,
         'staff' => \App\Http\Middleware\Staff::class,
         'log' => \App\Http\Middleware\RequestLog::class

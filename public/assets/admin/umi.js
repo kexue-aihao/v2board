@@ -6044,6 +6044,47 @@
                     checked: parseInt(t.stop_register),
                     onChange: e=>this.set("site", "stop_register", e ? 1 : 0)
                 })), f.a.createElement(m, {
+                    title: "\u7ad9\u70b9\u72b6\u6001",
+                    description: "\u7edf\u4e00\u5207\u6362\u516c\u5f00\u7ad9\u70b9\u7684\u6b63\u5e38\u8fd0\u884c\u3001\u7ef4\u62a4\u548c\u505c\u8fd0\u72b6\u6001\u3002"
+                }, f.a.createElement("select", {
+                    className: "form-control",
+                    value: t.site_status || "normal",
+                    onChange: e=>this.set("site", "site_status", e.target.value)
+                }, f.a.createElement("option", {
+                    value: "normal"
+                }, "\u6b63\u5e38\u8fd0\u884c"), f.a.createElement("option", {
+                    value: "maintenance"
+                }, "\u7ef4\u62a4\u72b6\u6001"), f.a.createElement("option", {
+                    value: "shutdown"
+                }, "\u505c\u8fd0\u72b6\u6001"))), "normal" !== (t.site_status || "normal") && f.a.createElement(m, {
+                    title: "\u72b6\u6001\u6807\u9898",
+                    description: "\u7528\u4e8e\u516c\u5f00\u72b6\u6001\u9875\u7684\u4e3b\u6807\u9898\uff0c\u4ec5\u652f\u6301\u7eaf\u6587\u672c\u3002"
+                }, f.a.createElement("input", {
+                    type: "text",
+                    className: "form-control",
+                    maxLength: 80,
+                    placeholder: "\u670d\u52a1\u6b63\u5728\u7ef4\u62a4",
+                    defaultValue: t.site_status_title,
+                    onChange: e=>this.set("site", "site_status_title", e.target.value)
+                })), "normal" !== (t.site_status || "normal") && f.a.createElement(m, {
+                    title: "\u72b6\u6001\u8bf4\u660e",
+                    description: "\u5411\u7528\u6237\u8bf4\u660e\u5f53\u524d\u72b6\u6001\u548c\u540e\u7eed\u5b89\u6392\uff0c\u4ec5\u652f\u6301\u7eaf\u6587\u672c\u3002"
+                }, f.a.createElement("textarea", {
+                    rows: "3",
+                    className: "form-control",
+                    maxLength: 500,
+                    placeholder: "\u7cfb\u7edf\u6b63\u5728\u8fdb\u884c\u4f8b\u884c\u5904\u7406\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5\u3002",
+                    defaultValue: t.site_status_message,
+                    onChange: e=>this.set("site", "site_status_message", e.target.value)
+                })), "normal" !== (t.site_status || "normal") && f.a.createElement(m, {
+                    title: "\u9884\u8ba1\u6062\u590d\u65f6\u95f4",
+                    description: "\u53ef\u9009\u3002\u7559\u7a7a\u65f6\u72b6\u6001\u9875\u4e0d\u5c55\u793a\u6062\u590d\u65f6\u95f4\u3002"
+                }, f.a.createElement("input", {
+                    type: "datetime-local",
+                    className: "form-control",
+                    defaultValue: t.site_status_recovery_at ? new Date(1e3 * parseInt(t.site_status_recovery_at)).toLocaleString("sv-SE").replace(" ", "T").slice(0, 16) : "",
+                    onChange: e=>this.set("site", "site_status_recovery_at", e.target.value ? Math.floor(new Date(e.target.value).getTime() / 1e3) : null)
+                })), f.a.createElement(m, {
                     title: "\u6ce8\u518c\u8bd5\u7528",
                     description: "\u9009\u62e9\u9700\u8981\u8bd5\u7528\u7684\u8ba2\u9605\uff0c\u5982\u679c\u6ca1\u6709\u9009\u9879\u8bf7\u5148\u524d\u5f80\u8ba2\u9605\u7ba1\u7406\u6dfb\u52a0\u3002"
                 }, f.a.createElement("select", {

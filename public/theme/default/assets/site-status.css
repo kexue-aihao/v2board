@@ -1,0 +1,28 @@
+#v2board-site-status { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; overflow: auto; padding: 32px 20px; color: #17211d; background: #f4f7f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+#v2board-site-status .site-status-shell { display: grid; grid-template-columns: minmax(170px, 220px) minmax(0, 480px); align-items: center; gap: clamp(32px, 7vw, 88px); width: min(100%, 820px); }
+#v2board-site-status.site-status-error .site-status-shell { grid-template-columns: minmax(0, 560px); justify-items: center; text-align: center; }
+#v2board-site-status .site-status-visual { position: relative; display: grid; width: min(220px, 58vw); aspect-ratio: 1; place-items: center; border: 1px solid rgba(154, 103, 19, .36); border-radius: 50%; }
+#v2board-site-status .site-status-visual::before { position: absolute; inset: 17px; border: 1px dashed rgba(154, 103, 19, .55); border-radius: 50%; content: ""; }
+#v2board-site-status .site-status-orbit { position: absolute; inset: 5px; border: 1px solid transparent; border-top-color: #9a6713; border-radius: 50%; animation: v2board-site-status-orbit 2.8s linear infinite; }
+#v2board-site-status .site-status-mark { display: grid; width: 78px; height: 78px; place-items: center; color: #9a6713; background: #f9edcc; border: 1px solid rgba(154, 103, 19, .38); border-radius: 50%; font-size: 34px; line-height: 1; }
+#v2board-site-status.site-status-shutdown .site-status-visual { border-color: rgba(185, 78, 84, .36); }
+#v2board-site-status.site-status-shutdown .site-status-visual::before { border-color: rgba(185, 78, 84, .55); }
+#v2board-site-status.site-status-shutdown .site-status-orbit { border-top-color: #b94e54; }
+#v2board-site-status.site-status-shutdown .site-status-mark { color: #b94e54; background: #fae2e1; border-color: rgba(185, 78, 84, .38); }
+#v2board-site-status .site-status-copy { max-width: 480px; }
+#v2board-site-status .site-status-kicker { color: #9a6713; font-size: 10px; font-weight: 800; letter-spacing: .16em; }
+#v2board-site-status.site-status-shutdown .site-status-kicker { color: #b94e54; }
+#v2board-site-status h1 { margin: 13px 0 0; color: inherit; font-size: clamp(30px, 5vw, 48px); letter-spacing: -.04em; line-height: 1.1; }
+#v2board-site-status p { max-width: 440px; margin: 17px 0 0; color: #71807a; font-size: 14px; line-height: 1.9; }
+#v2board-site-status .site-status-recovery { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+#v2board-site-status .site-status-recovery time { color: inherit; font-weight: 700; }
+#v2board-site-status .site-status-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+#v2board-site-status button, #v2board-site-status a { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border-radius: 8px; font: inherit; font-size: 12px; font-weight: 700; text-decoration: none; cursor: pointer; }
+#v2board-site-status button { color: #fff; background: #9a6713; border: 0; }
+#v2board-site-status button:disabled { cursor: wait; opacity: .6; }
+#v2board-site-status a { color: #4b5a53; background: transparent; border: 1px solid #cbd8d1; }
+#v2board-site-status button:focus-visible, #v2board-site-status a:focus-visible { outline: 3px solid #0665d0; outline-offset: 3px; }
+@keyframes v2board-site-status-orbit { to { transform: rotate(360deg); } }
+@media (max-width: 640px) { #v2board-site-status { padding: 28px 20px; } #v2board-site-status .site-status-shell { grid-template-columns: 1fr; gap: 30px; justify-items: center; text-align: center; } #v2board-site-status .site-status-visual { width: min(180px, 52vw); } #v2board-site-status .site-status-mark { width: 68px; height: 68px; } #v2board-site-status p { margin-right: auto; margin-left: auto; } #v2board-site-status .site-status-actions { justify-content: center; } #v2board-site-status .site-status-recovery { justify-content: center; } }
+@media (prefers-reduced-motion: reduce) { #v2board-site-status .site-status-orbit { animation: none; } }
+@media (prefers-color-scheme: dark) { #v2board-site-status { color: #f0f6f2; background: #111714; } #v2board-site-status p { color: #98aaa0; } #v2board-site-status a { color: #c1cec7; border-color: #405248; } #v2board-site-status.site-status-maintenance .site-status-mark { color: #eebd6a; background: #4a3917; } #v2board-site-status.site-status-shutdown .site-status-mark { color: #f4a09d; background: #4b292c; } }

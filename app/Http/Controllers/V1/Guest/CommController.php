@@ -25,6 +25,18 @@ class CommController extends Controller
             $themeConfig = config("theme.{$theme}", []);
         }
 
+        $siteStatus = (string)config('v2board.site_status', 'normal');
+        if (!in_array($siteStatus, ['normal', 'maintenance', 'shutdown'], true)) {
+            $siteStatus = 'normal';
+        }
+
+        $siteStatusTitle = trim(strip_tags((string)config('v2board.site_status_title', '')));
+        $siteStatusMessage = trim(strip_tags((string)config('v2board.site_status_message', '')));
+        $siteStatusRecoveryAt = config('v2board.site_status_recovery_at');
+        $siteStatusRecoveryAt = $siteStatusRecoveryAt === null || $siteStatusRecoveryAt === ''
+            ? null
+            : (int)$siteStatusRecoveryAt;
+
         return response([
             'data' => [
                 'tos_url' => config('v2board.tos_url'),
@@ -36,6 +48,13 @@ class CommController extends Controller
                 'is_recaptcha' => (int)config('v2board.recaptcha_enable', 0) ? 1 : 0,
                 'recaptcha_site_key' => config('v2board.recaptcha_site_key'),
                 'is_arithmetic_verification' => (int)config('v2board.arithmetic_verification_enable', 0) ? 1 : 0,
+                'site_status' => [
+                    'mode' => $siteStatus,
+                    'title' => $siteStatusTitle ?: ($siteStatus === 'shutdown' ? '服务暂时停止' : '服务正在维护'),
+                    'message' => $siteStatusMessage ?: '系统正在进行例行处理，请稍后再试。',
+                    'recovery_at' => $siteStatusRecoveryAt,
+                    'support_url' => config('v2board.telegram_discuss_link')
+                ],
                 'app_description' => config('v2board.app_description'),
                 'app_url' => config('v2board.app_url'),
                 'logo' => config('v2board.logo'),

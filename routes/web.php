@@ -72,5 +72,5 @@ Route::get('/reseller', function () {
 });
 
 if (!empty(config('v2board.subscribe_path'))) {
-    Route::get(config('v2board.subscribe_path'), 'V1\\Client\\ClientController@subscribe')->middleware('client');
+    Route::get(config('v2board.subscribe_path'), 'V1\\Client\\ClientController@subscribe')->middleware(['site.status', 'client']);
 }
