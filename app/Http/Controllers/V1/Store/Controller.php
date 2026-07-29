@@ -17,6 +17,7 @@ use App\Models\User;
 use App\Services\AuthService;
 use App\Services\ResellerOrderService;
 use App\Services\ResellerSharedSubscriptionService;
+use App\Utils\Helper;
 use Illuminate\Http\Request;
 
 class Controller extends BaseController
@@ -182,11 +183,65 @@ class Controller extends BaseController
         return response(['data' => true]);
     }
 
+    public function subscription(Request $request)
+    {
+        $store = $this->store($request);
+        $user = User::findOrFail($request->user['id']);
+        $sharedService = new ResellerSharedSubscriptionService();
+        $sharedGroup = $sharedService->groupForUser($user, $store);
+        if ($sharedGroup) {
+            return response(['data' => $sharedService->payload($sharedGroup, $user)])
+                ->header('Cache-Control', 'no-store, private');
+        }
+
+        $mappings = ResellerOrder::with(['platformOrder.subscription.plan', 'plan'])
+            ->where('reseller_id', $store->id)
+            ->where('user_id', $user->id)
+            ->whereHas('platformOrder', function ($query) use ($user) {
+                $query->where('user_id', $user->id)
+                    ->where('status', 3)
+                    ->whereNotNull('subscription_id');
+            })
+            ->orderByDesc('id')
+            ->get();
+
+        foreach ($mappings as $mapping) {
+            $order = $mapping->platformOrder;
+            $subscription = $order ? $order->subscription : null;
+            if (!$subscription
+                || (int)$subscription->user_id !== (int)$user->id
+                || $subscription->status === 'revoked') {
+                continue;
+            }
+
+            $total = max(0, (int)$subscription->transfer_enable);
+            $used = max(0, (int)$subscription->u + (int)$subscription->d);
+            $available = $subscription->status === 'active'
+                && (!$subscription->expired_at || (int)$subscription->expired_at >= time());
+
+            return response(['data' => [
+                'subscription_id' => (int)$subscription->id,
+                'plan_name' => optional($mapping->plan)->name ?: optional($subscription->plan)->name,
+                'status' => $subscription->status,
+                'expired_at' => $subscription->expired_at,
+                'subscribe_url' => $available ? Helper::getSubscribeUrl($subscription->token, $subscription) : null,
+                'total' => $total,
+                'used' => $used,
+                'remaining' => max(0, $total - $used),
+                'usage_percent' => $total > 0 ? min(100, (int)floor($used * 100 / $total)) : 0,
+                'shared_subscription' => false,
+            ]])->header('Cache-Control', 'no-store, private');
+        }
+
+        return response(['data' => null])->header('Cache-Control', 'no-store, private');
+    }
+
     public function sharedSubscription(Request $request)
     {
         $user = User::findOrFail($request->user['id']);
         $group = (new ResellerSharedSubscriptionService())->groupForUser($user, $this->store($request));
-        return response(['data' => $group ? (new ResellerSharedSubscriptionService())->payload($group, $user) : null]);
+        return response(['data' => $group ? (new ResellerSharedSubscriptionService())->payload($group, $user) : null])
+            ->header('Cache-Control', 'no-store, private');
     }
 
     public function sharedMembers(Request $request)

@@ -5,6 +5,8 @@
     var key = 'store_auth_' + slug;
     var auth = sessionStorage.getItem(key) || '';
     var currentTradeNo = null;
+    var paymentPollTimer = null;
+    var paymentPollAttempts = 0;
     var guestConfig = {};
     var authMode = 'login';
     var twoFactorChallenge = '';
@@ -115,17 +117,21 @@
         logout.hidden = !visible;
         if (visible) {
             loadOrders();
+            loadSubscription();
             loadSharedSubscription().then(function () {
                 return sharedInviteToken ? acceptSharedInvitation() : null;
             }).catch(function (error) { show(error.message, true); });
+            resumePaymentCheck();
         }
     }
 
     function clearAuthentication(notice) {
         auth = '';
         currentTradeNo = null;
+        stopPaymentPolling();
         sessionStorage.removeItem(key);
         document.getElementById('checkout-section').hidden = true;
+        document.getElementById('subscription-section').hidden = true;
         document.getElementById('shared-section').hidden = true;
         setAuthenticated(false);
         setAuthMode('login');
@@ -449,10 +455,134 @@
         return api('/shared/invitations/accept', {method: 'POST', body: JSON.stringify({token: token})}).then(function () {
             window.history.replaceState({}, document.title, window.location.pathname);
             show('\u5df2\u52a0\u5165\u5171\u4eab\u5957\u9910\u3002');
-            return loadSharedSubscription();
+            return Promise.all([loadSharedSubscription(), loadSubscription()]);
         }).catch(function (error) {
             show(error.message, true);
         });
+    }
+
+    function formatTimestamp(value) {
+        var timestamp = Number(value || 0);
+        if (!timestamp) return '\u672a\u8bbe\u7f6e';
+        return new Date(timestamp * 1000).toLocaleString('zh-CN', {hour12: false});
+    }
+
+    function subscriptionStatus(value) {
+        return ({active: '\u53ef\u7528', expired: '\u5df2\u8fc7\u671f', suspended: '\u5df2\u6682\u505c', revoked: '\u5df2\u64a4\u9500'})[value] || '\u6682\u4e0d\u53ef\u7528';
+    }
+
+    function copySubscriptionUrl() {
+        var input = document.getElementById('subscribe-url');
+        if (!input || !input.value) return;
+        var copied = function () { show('\u8ba2\u9605\u5730\u5740\u5df2\u590d\u5236\u3002'); };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(input.value).then(copied).catch(function () {
+                input.focus();
+                input.select();
+                if (document.execCommand('copy')) copied();
+                else show('\u590d\u5236\u5931\u8d25\uff0c\u8bf7\u624b\u52a8\u9009\u4e2d\u8ba2\u9605\u5730\u5740\u3002', true);
+            });
+            return;
+        }
+        input.focus();
+        input.select();
+        if (document.execCommand('copy')) copied();
+        else show('\u590d\u5236\u5931\u8d25\uff0c\u8bf7\u624b\u52a8\u9009\u4e2d\u8ba2\u9605\u5730\u5740\u3002', true);
+    }
+
+    function renderSubscription(subscription) {
+        var section = document.getElementById('subscription-section');
+        var summary = document.getElementById('subscription-summary');
+        if (!subscription) {
+            section.hidden = true;
+            summary.innerHTML = '';
+            return;
+        }
+
+        var total = Number(subscription.total || 0);
+        var used = Number(subscription.used || 0);
+        var remaining = Number(subscription.remaining || 0);
+        var url = subscription.subscribe_url || '';
+        var shared = subscription.shared_subscription ? '\u5171\u4eab\u5957\u9910' : '\u72ec\u4eab\u5957\u9910';
+        var address = url
+            ? '<div class="subscription-url"><input id="subscribe-url" type="text" readonly aria-label="\u8ba2\u9605\u5730\u5740" value="' + escapeHtml(url) + '"><button id="copy-subscribe-url" type="button">\u590d\u5236\u8ba2\u9605</button></div>'
+            : '<p>\u5f53\u524d\u8ba2\u9605\u6682\u4e0d\u53ef\u7528\uff0c\u8bf7\u7eed\u8d39\u6216\u8054\u7cfb\u5e97\u94fa\u3002</p>';
+        summary.innerHTML = '<div class="subscription-summary"><strong>' + escapeHtml(subscription.plan_name || '\u8ba2\u9605\u5957\u9910') + '</strong>'
+            + '<div class="subscription-meta"><span>' + shared + '</span><span>\u8ba2\u9605\u72b6\u6001\uff1a' + subscriptionStatus(subscription.status) + '</span><span>\u5230\u671f\u65f6\u95f4\uff1a' + escapeHtml(formatTimestamp(subscription.expired_at)) + '</span></div>'
+            + '<p>\u6d41\u91cf\uff1a' + formatBytes(used) + ' / ' + formatBytes(total) + ' \u00b7 \u5269\u4f59 ' + formatBytes(remaining) + ' \u00b7 ' + Number(subscription.usage_percent || 0) + '%</p>'
+            + address + '</div>';
+        section.hidden = false;
+        var copyButton = document.getElementById('copy-subscribe-url');
+        if (copyButton) copyButton.addEventListener('click', copySubscriptionUrl);
+    }
+
+    function loadSubscription() {
+        return api('/subscription').then(function (response) {
+            renderSubscription(response.data || null);
+            return response.data || null;
+        }).catch(function (error) {
+            renderSubscription(null);
+            if (error.status === 401 || error.status === 403) clearAuthentication('\u767b\u5f55\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55\u3002');
+            else show(error.message, true);
+            return null;
+        });
+    }
+
+    function stopPaymentPolling() {
+        if (paymentPollTimer !== null) window.clearTimeout(paymentPollTimer);
+        paymentPollTimer = null;
+        paymentPollAttempts = 0;
+    }
+
+    function returnedTradeNo() {
+        var match = window.location.hash.match(/^#\/order\/([^/?#]+)$/);
+        if (!match) return '';
+        try { return decodeURIComponent(match[1]); } catch (error) { return ''; }
+    }
+
+    function pollPaymentStatus(tradeNo) {
+        stopPaymentPolling();
+        currentTradeNo = tradeNo;
+        var poll = function () {
+            api('/order/check?trade_no=' + encodeURIComponent(tradeNo)).then(function (response) {
+                var orderStatus = Number(response.data);
+                if (orderStatus === 3) {
+                    stopPaymentPolling();
+                    currentTradeNo = null;
+                    document.getElementById('checkout-section').hidden = true;
+                    Promise.all([loadOrders(), loadSubscription(), loadSharedSubscription()]);
+                    show('\u652f\u4ed8\u5df2\u786e\u8ba4\uff0c\u8ba2\u9605\u5df2\u5f00\u901a\u3002');
+                    return;
+                }
+                if (orderStatus === 2 || orderStatus === 4) {
+                    stopPaymentPolling();
+                    show(orderStatus === 2 ? '\u8ba2\u5355\u5df2\u53d6\u6d88\u3002' : '\u8ba2\u5355\u5df2\u5173\u95ed\u3002', true);
+                    return;
+                }
+
+                paymentPollAttempts += 1;
+                if (paymentPollAttempts === 1) show('\u6b63\u5728\u7b49\u5f85\u652f\u4ed8\u5e73\u53f0\u786e\u8ba4\u2026');
+                if (paymentPollAttempts >= 20) {
+                    stopPaymentPolling();
+                    show('\u652f\u4ed8\u7ed3\u679c\u5c1a\u672a\u540c\u6b65\uff0c\u8bf7\u7a0d\u540e\u5237\u65b0\u8ba2\u5355\u5217\u8868\u3002', true);
+                    return;
+                }
+                paymentPollTimer = window.setTimeout(poll, 3000);
+            }).catch(function (error) {
+                stopPaymentPolling();
+                if (error.status === 401 || error.status === 403) clearAuthentication('\u767b\u5f55\u5df2\u5931\u6548\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55\u3002');
+                else show(error.message, true);
+            });
+        };
+        poll();
+    }
+
+    function resumePaymentCheck() {
+        var tradeNo = returnedTradeNo();
+        if (!tradeNo || !auth) return;
+        document.getElementById('trade-no').textContent = tradeNo;
+        document.getElementById('checkout-section').hidden = true;
+        pollPaymentStatus(tradeNo);
     }
 
     function loadOrders() {
@@ -574,6 +704,7 @@
             return;
         }
         api('/order/save', {method: 'POST', body: JSON.stringify({plan_id: button.dataset.plan, period: button.dataset.period})}).then(function (response) {
+            stopPaymentPolling();
             currentTradeNo = response.data;
             document.getElementById('trade-no').textContent = currentTradeNo;
             document.getElementById('checkout-section').hidden = false;
@@ -592,11 +723,15 @@
         }
         api('/order/checkout', {method: 'POST', body: JSON.stringify({trade_no: currentTradeNo, method: method})}).then(function (response) {
             if (response.type === 1 && response.data) window.location.href = response.data;
-            else show('\u652f\u4ed8\u8bf7\u6c42\u5df2\u521b\u5efa\uff0c\u8bf7\u6309\u9875\u9762\u63d0\u793a\u5b8c\u6210\u652f\u4ed8\u3002');
+            else {
+                show('\u652f\u4ed8\u8bf7\u6c42\u5df2\u521b\u5efa\uff0c\u8bf7\u6309\u9875\u9762\u63d0\u793a\u5b8c\u6210\u652f\u4ed8\u3002');
+                pollPaymentStatus(currentTradeNo);
+            }
         }).catch(function (error) { show(error.message, true); });
     });
 
     logout.addEventListener('click', function () { clearAuthentication('\u5df2\u9000\u51fa\u767b\u5f55\u3002'); });
+    window.addEventListener('hashchange', resumePaymentCheck);
 
     installSharedPanel();
     Promise.all([loadStoreConfig(), loadPlans(), loadGuestConfig()]).then(function () {
