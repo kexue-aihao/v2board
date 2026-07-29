@@ -4,6 +4,8 @@ namespace App\Jobs;
 
 use App\Models\Order;
 use App\Services\OrderService;
+use App\Services\ResellerSharedSubscriptionService;
+use App\Models\ResellerOrder;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -52,6 +54,13 @@ class OrderHandleJob implements ShouldQueue
                 case 1:
                     $orderService->open();
                     break;
+            }
+            $openedOrder = Order::where('id', $order->id)->first();
+            if ($openedOrder && (int)$openedOrder->status === 3) {
+                $mapping = ResellerOrder::where('platform_order_id', $openedOrder->id)->first();
+                if ($mapping) {
+                    (new ResellerSharedSubscriptionService())->synchronizePaidOrder($mapping);
+                }
             }
         } catch (\Throwable $e) {
             Log::error('Order opening job failed', [

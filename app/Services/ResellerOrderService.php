@@ -9,6 +9,7 @@ use App\Models\ResellerOrder;
 use App\Models\ResellerPayment;
 use App\Models\ResellerPlan;
 use App\Models\ResellerPlanTemplate;
+use App\Models\ResellerSharedSubscription;
 use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +29,30 @@ class ResellerOrderService
         $plan = $this->validPlan($store, $resellerPlan, $period);
         $this->ensureCustomer($store, $user);
 
+        $sharedService = new ResellerSharedSubscriptionService();
+        $sharedGroup = null;
+        $isSharedPlan = $sharedService->isSharedPlan($resellerPlan);
+        if ($isSharedPlan) {
+            if (!$sharedService->available()) abort(503, 'Shared subscription service is not installed');
+            if ($subscriptionId) {
+                $sharedGroup = ResellerSharedSubscription::where('subscription_id', $subscriptionId)
+                    ->where('reseller_id', $store->id)
+                    ->where('owner_user_id', $user->id)
+                    ->where('reseller_plan_id', $resellerPlan->id)
+                    ->whereIn('status', ['active', 'expired'])->first();
+                if (!$sharedGroup) abort(403, 'Shared subscription does not belong to this store');
+            } else {
+                $sharedGroup = $sharedService->groupForRenewal($store, $user, (int)$resellerPlan->id);
+                if ($sharedGroup) $subscriptionId = (int)$sharedGroup->subscription_id;
+            }
+            if (!$sharedGroup && $sharedService->groupForUser($user)) {
+                abort(422, 'An account can only join one active shared group');
+            }
+            if (!$sharedGroup && !$this->canCreateSharedSubscription($user)) {
+                abort(422, 'Enable multiple subscriptions before buying a separate shared package');
+            }
+        }
+
         $target = null;
         if ($subscriptionId) {
             $target = Subscription::where('id', $subscriptionId)
@@ -40,22 +65,23 @@ class ResellerOrderService
             if (!$this->subscriptionBelongsToStore($store, $user, $target)) {
                 abort(403, 'Subscription does not belong to this store');
             }
-        } elseif ($user->plan_id && (int)$user->plan_id === (int)$plan->id && $user->expired_at && $user->expired_at >= time()) {
+        } elseif ((!$isSharedPlan || $sharedGroup) && $user->plan_id && (int)$user->plan_id === (int)$plan->id && $user->expired_at && $user->expired_at >= time()) {
             $target = (new SubscriptionService())->primary($user);
             if (!$target || !$this->subscriptionBelongsToStore($store, $user, $target)) {
                 abort(403, 'Same-store renewal is required');
             }
             $subscriptionId = (int)$target->id;
-        } elseif ($user->plan_id && (int)$user->plan_id !== (int)$plan->id && (!$user->expired_at || $user->expired_at >= time())) {
+        } elseif ((!$isSharedPlan || $sharedGroup) && $user->plan_id && (int)$user->plan_id !== (int)$plan->id && (!$user->expired_at || $user->expired_at >= time())) {
             abort(422, 'Plan change is not available in the reseller store');
         }
         if ((int)$plan->show === 0 && !$target) {
             abort(422, 'This plan is available for renewal only');
         }
 
-        return DB::transaction(function () use ($user, $store, $resellerPlan, $plan, $period, $subscriptionId) {
+        return DB::transaction(function () use ($user, $store, $resellerPlan, $plan, $period, $subscriptionId, $sharedGroup, $isSharedPlan) {
             $order = new Order();
             $orderService = new OrderService($order);
+            $orderService->newSubscription = $isSharedPlan && !$sharedGroup;
             $order->user_id = $user->id;
             $order->plan_id = $plan->id;
             $order->subscription_id = $subscriptionId;
@@ -75,6 +101,7 @@ class ResellerOrderService
             $mapping->user_id = $user->id;
             $mapping->period = $period;
             $mapping->amount_snapshot = $order->total_amount;
+            $mapping->shared_subscription_id = $sharedGroup ? $sharedGroup->id : null;
             $mapping->save();
 
             return $mapping->load('platformOrder');
@@ -199,5 +226,11 @@ class ResellerOrderService
     private function enabledStore(ResellerAccount $store): bool
     {
         return (int)$store->id > 0 && $store->isFullyActive();
+    }
+
+    private function canCreateSharedSubscription(User $user): bool
+    {
+        if ((new SubscriptionService())->multiEnabled()) return true;
+        return empty($user->plan_id) || (!empty($user->expired_at) && $user->expired_at < time());
     }
 }

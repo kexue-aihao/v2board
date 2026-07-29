@@ -27,6 +27,14 @@ class StoreRoute
                 $router->get('/order/detail', 'V1\\Store\\Controller@detailOrder');
                 $router->get('/order/fetch', 'V1\\Store\\Controller@fetchOrders');
                 $router->post('/order/cancel', 'V1\\Store\\Controller@cancelOrder');
+                $router->get('/shared/subscription', 'V1\\Store\\Controller@sharedSubscription');
+                $router->get('/shared/members', 'V1\\Store\\Controller@sharedMembers');
+                $router->post('/shared/invitations', 'V1\\Store\\Controller@createSharedInvitation');
+                $router->get('/shared/invitations', 'V1\\Store\\Controller@sharedInvitations');
+                $router->post('/shared/invitations/{id}/revoke', 'V1\\Store\\Controller@revokeSharedInvitation');
+                $router->post('/shared/invitations/accept', 'V1\\Store\\Controller@acceptSharedInvitation');
+                $router->post('/shared/members/{id}/remove', 'V1\\Store\\Controller@removeSharedMember');
+                $router->post('/shared/credential/rotate', 'V1\\Store\\Controller@rotateSharedCredential');
             });
         });
     }

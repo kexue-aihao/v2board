@@ -33,4 +33,9 @@ class ResellerOrder extends Model
     {
         return $this->belongsTo(ResellerPayment::class, 'reseller_payment_id');
     }
+
+    public function sharedSubscription()
+    {
+        return $this->belongsTo(ResellerSharedSubscription::class, 'shared_subscription_id');
+    }
 }

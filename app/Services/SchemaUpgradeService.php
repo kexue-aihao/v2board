@@ -17,7 +17,8 @@ class SchemaUpgradeService
         'token_history_schema' => 'token_history_schema_v1',
         'password_policy_schema' => 'password_policy_schema_v1',
         'reseller_schema' => 'reseller_schema_v1',
-        'reseller_approval_schema' => 'reseller_approval_schema_v1'
+        'reseller_approval_schema' => 'reseller_approval_schema_v1',
+        'reseller_shared_subscription_schema' => 'reseller_shared_subscription_schema_v1'
     ];
 
     public function run(): array
@@ -83,6 +84,9 @@ class SchemaUpgradeService
                 return;
             case 'reseller_approval_schema':
                 $this->applyResellerApprovalSchema();
+                return;
+            case 'reseller_shared_subscription_schema':
+                $this->applyResellerSharedSubscriptionSchema();
                 return;
         }
 
@@ -776,6 +780,78 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_reseller_account', 'store_status', ['store_status']);
         $this->ensureIndex('v2_reseller_review_log', 'reseller_target_created', ['reseller_id', 'target_type', 'created_at']);
         $this->ensureIndex('v2_reseller_review_log', 'operator_created', ['operator_id', 'created_at']);
+    }
+
+    private function applyResellerSharedSubscriptionSchema(): void
+    {
+        $this->requireTable('v2_reseller_plan');
+        $this->requireTable('v2_reseller_order');
+        $this->requireTable('v2_subscription');
+        $this->requireTable('v2_user');
+
+        $this->ensureColumn('v2_reseller_plan', 'shared_member_limit', "int(11) unsigned NOT NULL DEFAULT '1'");
+        $this->ensureColumn('v2_reseller_order', 'shared_subscription_id', 'bigint(20) unsigned DEFAULT NULL');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_shared_subscription` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `reseller_id` bigint(20) unsigned NOT NULL,
+            `reseller_plan_id` bigint(20) unsigned NOT NULL,
+            `subscription_id` bigint(20) unsigned NOT NULL,
+            `owner_user_id` int(11) NOT NULL,
+            `member_limit` int(11) unsigned NOT NULL DEFAULT '1',
+            `member_count` int(11) unsigned NOT NULL DEFAULT '1',
+            `status` varchar(16) NOT NULL DEFAULT 'active',
+            `created_order_id` int(11) NOT NULL,
+            `last_order_id` int(11) DEFAULT NULL,
+            `suspended_reason` varchar(500) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_shared_subscription_member` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `reseller_id` bigint(20) unsigned NOT NULL,
+            `shared_subscription_id` bigint(20) unsigned NOT NULL,
+            `user_id` int(11) NOT NULL,
+            `role` varchar(16) NOT NULL DEFAULT 'member',
+            `status` varchar(16) NOT NULL DEFAULT 'active',
+            `joined_at` int(11) DEFAULT NULL,
+            `removed_at` int(11) DEFAULT NULL,
+            `removed_by_user_id` int(11) DEFAULT NULL,
+            `remove_reason` varchar(500) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_shared_invitation` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `reseller_id` bigint(20) unsigned NOT NULL,
+            `shared_subscription_id` bigint(20) unsigned NOT NULL,
+            `email` varchar(128) NOT NULL,
+            `token_hash` char(64) NOT NULL,
+            `created_by_user_id` int(11) NOT NULL,
+            `expires_at` int(11) NOT NULL,
+            `accepted_by_user_id` int(11) DEFAULT NULL,
+            `accepted_at` int(11) DEFAULT NULL,
+            `revoked_at` int(11) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        $this->ensureIndex('v2_reseller_plan', 'shared_member_limit', ['shared_member_limit']);
+        $this->ensureIndex('v2_reseller_order', 'shared_subscription_id', ['shared_subscription_id']);
+        $this->ensureIndex('v2_reseller_shared_subscription', 'subscription_id', ['subscription_id'], true);
+        $this->ensureIndex('v2_reseller_shared_subscription', 'reseller_owner_status', ['reseller_id', 'owner_user_id', 'status']);
+        $this->ensureIndex('v2_reseller_shared_subscription', 'reseller_status', ['reseller_id', 'status']);
+        $this->ensureIndex('v2_reseller_shared_subscription_member', 'shared_user', ['shared_subscription_id', 'user_id'], true);
+        $this->ensureIndex('v2_reseller_shared_subscription_member', 'user_status', ['user_id', 'status']);
+        $this->ensureIndex('v2_reseller_shared_subscription_member', 'reseller_status', ['reseller_id', 'status']);
+        $this->ensureIndex('v2_reseller_shared_invitation', 'token_hash', ['token_hash'], true);
+        $this->ensureIndex('v2_reseller_shared_invitation', 'shared_status', ['shared_subscription_id', 'revoked_at', 'expires_at']);
+        $this->ensureIndex('v2_reseller_shared_invitation', 'reseller_email', ['reseller_id', 'email']);
     }
 
     private function requireTable(string $table): void

@@ -147,6 +147,22 @@ class SubscriptionService
         return $subscription->fresh();
     }
 
+    public function rotateCredential(Subscription $subscription, string $reason = 'subscription_rotate'): Subscription
+    {
+        return TokenRotationContext::using($reason, function () use ($subscription) {
+            $subscription->token = Helper::guid();
+            $subscription->uuid = Helper::guid(true);
+            $subscription->save();
+            if ($subscription->is_primary) {
+                $user = User::findOrFail($subscription->user_id);
+                $user->token = $subscription->token;
+                $user->uuid = $subscription->uuid;
+                $user->save();
+            }
+            return $subscription->fresh();
+        });
+    }
+
     public function setPrimary(User $user, Subscription $subscription): Subscription
     {
         if ((int)$subscription->user_id !== (int)$user->id) {

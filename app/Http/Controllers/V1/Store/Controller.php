@@ -16,6 +16,7 @@ use App\Models\ResellerPlanTemplate;
 use App\Models\User;
 use App\Services\AuthService;
 use App\Services\ResellerOrderService;
+use App\Services\ResellerSharedSubscriptionService;
 use Illuminate\Http\Request;
 
 class Controller extends BaseController
@@ -56,6 +57,7 @@ class Controller extends BaseController
                 'two_year_price' => $plan->two_year_price,
                 'three_year_price' => $plan->three_year_price,
                 'onetime_price' => $plan->onetime_price,
+                'shared_member_limit' => max(1, (int)$plan->shared_member_limit),
             ];
         })->values();
         return response(['data' => $data]);
@@ -178,6 +180,72 @@ class Controller extends BaseController
         return response(['data' => true]);
     }
 
+    public function sharedSubscription(Request $request)
+    {
+        $user = User::findOrFail($request->user['id']);
+        $group = (new ResellerSharedSubscriptionService())->groupForUser($user, $this->store($request));
+        return response(['data' => $group ? (new ResellerSharedSubscriptionService())->payload($group, $user) : null]);
+    }
+
+    public function sharedMembers(Request $request)
+    {
+        return response(['data' => (new ResellerSharedSubscriptionService())->members(
+            $this->store($request), User::findOrFail($request->user['id'])
+        )]);
+    }
+
+    public function createSharedInvitation(Request $request)
+    {
+        $data = $request->validate(['email' => 'required|email|max:128']);
+        return response(['data' => (new ResellerSharedSubscriptionService())->createInvitation(
+            $this->store($request), User::findOrFail($request->user['id']), $data['email']
+        )]);
+    }
+
+    public function sharedInvitations(Request $request)
+    {
+        return response(['data' => (new ResellerSharedSubscriptionService())->invitations(
+            $this->store($request), User::findOrFail($request->user['id'])
+        )]);
+    }
+
+    public function revokeSharedInvitation(Request $request, $slug, $id)
+    {
+        (new ResellerSharedSubscriptionService())->revokeInvitation(
+            $this->store($request), User::findOrFail($request->user['id']), (int)$id
+        );
+        return response(['data' => true]);
+    }
+
+    public function acceptSharedInvitation(Request $request)
+    {
+        $data = $request->validate(['token' => 'required|string|size:64']);
+        $store = $this->store($request);
+        $user = User::findOrFail($request->user['id']);
+        if (!ResellerCustomer::where('reseller_id', $store->id)->where('user_id', $user->id)->exists()) {
+            abort(403, 'Sign in through this store before accepting an invitation');
+        }
+        $group = (new ResellerSharedSubscriptionService())->acceptInvitation($store, $user, $data['token']);
+        return response(['data' => (new ResellerSharedSubscriptionService())->payload($group, $user)]);
+    }
+
+    public function removeSharedMember(Request $request, $slug, $id)
+    {
+        $data = $request->validate(['reason' => 'nullable|string|max:500']);
+        (new ResellerSharedSubscriptionService())->removeMember(
+            $this->store($request), User::findOrFail($request->user['id']), (int)$id, $data['reason'] ?? null
+        );
+        return response(['data' => true]);
+    }
+
+    public function rotateSharedCredential(Request $request)
+    {
+        $store = $this->store($request);
+        $user = User::findOrFail($request->user['id']);
+        $group = (new ResellerSharedSubscriptionService())->rotateOwnerCredential($store, $user);
+        return response(['data' => (new ResellerSharedSubscriptionService())->payload($group, $user)]);
+    }
+
     public function notify(Request $request, $slug, $payment_uuid)
     {
         return (new ResellerOrderService())->notify($this->store($request), $payment_uuid, $request->input());
@@ -223,6 +291,7 @@ class Controller extends BaseController
             'two_year_price' => $plan->two_year_price,
             'three_year_price' => $plan->three_year_price,
             'onetime_price' => $plan->onetime_price,
+            'shared_member_limit' => max(1, (int)$plan->shared_member_limit),
         ];
     }
 

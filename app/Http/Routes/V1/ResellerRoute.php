@@ -24,6 +24,10 @@ class ResellerRoute
                 $router->post('/store', 'V1\\Reseller\\Controller@updateStore');
                 $router->get('/customers', 'V1\\Reseller\\Controller@customers');
                 $router->get('/orders', 'V1\\Reseller\\Controller@orders');
+                $router->get('/shared-subscriptions', 'V1\\Reseller\\Controller@sharedSubscriptions');
+                $router->get('/shared-subscriptions/{id}/members', 'V1\\Reseller\\Controller@sharedSubscriptionMembers');
+                $router->post('/shared-subscriptions/{id}/suspend', 'V1\\Reseller\\Controller@suspendSharedSubscription');
+                $router->post('/shared-subscriptions/{groupId}/members/{memberId}/remove', 'V1\\Reseller\\Controller@removeSharedMember');
             });
         });
     }

@@ -83,7 +83,34 @@
                 body[field] = yuanToCents(body[field]);
             }
         });
+        body.shared_member_limit = Number(body.shared_member_limit || 1);
+        if (!Number.isInteger(body.shared_member_limit) || body.shared_member_limit < 1 || body.shared_member_limit > 100) {
+            throw new Error('\u5171\u4eab\u4eba\u6570\u9700\u4e3a 1-100 \u7684\u6574\u6570');
+        }
         return body;
+    }
+
+    function installSharedPlanField() {
+        var form = document.getElementById('plan-form');
+        if (!form || form.elements.shared_member_limit) return;
+        var grids = form.querySelectorAll('.two-col');
+        if (grids.length < 2) return;
+        var label = document.createElement('label');
+        label.className = 'field';
+        label.appendChild(document.createTextNode('\u5171\u4eab\u4eba\u6570\uff08\u542b\u8d2d\u4e70\u8005\uff09'));
+        var input = document.createElement('input');
+        input.name = 'shared_member_limit';
+        input.type = 'number';
+        input.min = '1';
+        input.max = '100';
+        input.value = '1';
+        input.inputMode = 'numeric';
+        label.appendChild(input);
+        var help = document.createElement('span');
+        help.className = 'field-help';
+        help.textContent = '\u8bbe\u7f6e\u4e3a 1 \u5373\u72ec\u4eab\u5957\u9910\uff1b\u5927\u4e8e 1 \u65f6\uff0c\u7fa4\u4e3b\u53ef\u9080\u8bf7\u6210\u5458\u5171\u4eab\u540c\u4e00\u6d41\u91cf\u548c\u8bbe\u5907\u989d\u5ea6\u3002';
+        label.appendChild(help);
+        form.insertBefore(label, grids[1]);
     }
 
     function escapeHtml(value) {
@@ -465,6 +492,91 @@
         }).then(function () { setButtonLoading(button, false); });
     });
 
+    function installSharedGroupsPanel() {
+        var audit = document.getElementById('audit');
+        if (!audit || document.getElementById('load-shared-groups')) return;
+        var actions = audit.parentElement.querySelector('.form-actions');
+        if (!actions) return;
+        var button = document.createElement('button');
+        button.id = 'load-shared-groups';
+        button.className = 'btn btn-quiet';
+        button.type = 'button';
+        button.textContent = '\u5171\u4eab\u7fa4\u7ec4';
+        actions.appendChild(button);
+        var container = document.createElement('div');
+        container.id = 'shared-groups';
+        container.className = 'data-list';
+        container.style.marginTop = '12px';
+        container.hidden = true;
+        audit.parentElement.appendChild(container);
+
+        button.addEventListener('click', function () {
+            setButtonLoading(button, true, '\u52a0\u8f7d\u4e2d...');
+            api('/shared-subscriptions').then(function (result) {
+                var groups = (result.data || {}).data || [];
+                container.hidden = false;
+                container.innerHTML = groups.length ? groups.map(function (group) {
+                    var total = Number(group.transfer_enable || 0);
+                    var used = Number(group.used || 0);
+                    var progress = total > 0 ? Math.min(100, Math.floor(used * 100 / total)) : 0;
+                    var members = '<button type="button" class="btn btn-quiet" data-view-shared-members="' + Number(group.id) + '">\u6210\u5458</button>';
+                    var action = group.status === 'active' ? '<button type="button" class="btn btn-quiet" data-suspend-shared="' + Number(group.id) + '">\u505c\u7528</button>' : '';
+                    return '<div class="list-row"><div><strong>' + escapeHtml(group.plan_name || '\u5171\u4eab\u5957\u9910') + '</strong><span>' + escapeHtml(group.owner_email || '-') + ' \u00b7 ' + Number(group.member_count) + '/' + Number(group.member_limit) + ' \u4eba \u00b7 \u6d41\u91cf ' + progress + '%</span><div id="shared-group-members-' + Number(group.id) + '" hidden></div></div><em>' + escapeHtml(group.status || '-') + ' ' + members + ' ' + action + '</em></div>';
+                }).join('') : '<div class="empty-state">\u6682\u65e0\u5171\u4eab\u5957\u9910\u7fa4\u7ec4\u3002</div>';
+            }).catch(function (error) {
+                show(error.message, true);
+            }).then(function () { setButtonLoading(button, false); });
+        });
+        container.addEventListener('click', function (event) {
+            var viewMembers = event.target.closest('[data-view-shared-members]');
+            if (viewMembers) {
+                var groupId = Number(viewMembers.dataset.viewSharedMembers);
+                var memberContainer = document.getElementById('shared-group-members-' + groupId);
+                if (!memberContainer) return;
+                setButtonLoading(viewMembers, true, '\u8bfb\u53d6\u4e2d...');
+                api('/shared-subscriptions/' + encodeURIComponent(groupId) + '/members').then(function (result) {
+                    var members = result.data || [];
+                    memberContainer.hidden = false;
+                    memberContainer.innerHTML = members.length ? members.map(function (member) {
+                        var remove = member.role === 'owner' || member.status !== 'active' ? '' : '<button type="button" class="btn btn-quiet" data-force-remove-shared-member="' + Number(member.id) + '" data-shared-member-group="' + groupId + '">\u79fb\u9664</button>';
+                        return '<span>' + escapeHtml(member.email || '-') + ' \u00b7 ' + escapeHtml(member.role === 'owner' ? '\u7fa4\u4e3b' : '\u6210\u5458') + ' \u00b7 ' + escapeHtml(member.status || '-') + ' ' + remove + '</span>';
+                    }).join('<br>') : '<span>\u6682\u65e0\u6210\u5458</span>';
+                }).catch(function (error) {
+                    show(error.message, true);
+                }).then(function () { setButtonLoading(viewMembers, false); });
+                return;
+            }
+            var forceRemove = event.target.closest('[data-force-remove-shared-member]');
+            if (forceRemove) {
+                var removeReason = window.prompt('\u8bf7\u8f93\u5165\u5f3a\u5236\u79fb\u9664\u539f\u56e0');
+                if (!removeReason) return;
+                setButtonLoading(forceRemove, true, '\u5904\u7406\u4e2d...');
+                api('/shared-subscriptions/' + encodeURIComponent(forceRemove.dataset.sharedMemberGroup) + '/members/' + encodeURIComponent(forceRemove.dataset.forceRemoveSharedMember) + '/remove', {
+                    method: 'POST', body: JSON.stringify({reason: removeReason})
+                }).then(function () {
+                    show('\u6210\u5458\u5df2\u5f3a\u5236\u79fb\u9664\uff0c\u5171\u4eab\u51ed\u636e\u5df2\u8f6e\u6362\u3002');
+                    button.click();
+                }).catch(function (error) {
+                    show(error.message, true);
+                }).then(function () { setButtonLoading(forceRemove, false); });
+                return;
+            }
+            var suspend = event.target.closest('[data-suspend-shared]');
+            if (!suspend) return;
+            var reason = window.prompt('\u8bf7\u8f93\u5165\u505c\u7528\u539f\u56e0');
+            if (!reason) return;
+            setButtonLoading(suspend, true, '\u5904\u7406\u4e2d...');
+            api('/shared-subscriptions/' + encodeURIComponent(suspend.dataset.suspendShared) + '/suspend', {
+                method: 'POST', body: JSON.stringify({reason: reason})
+            }).then(function () {
+                show('\u5171\u4eab\u7fa4\u7ec4\u5df2\u505c\u7528\uff0c\u5171\u4eab\u51ed\u636e\u5df2\u8f6e\u6362\u3002');
+                button.click();
+            }).catch(function (error) {
+                show(error.message, true);
+            }).then(function () { setButtonLoading(suspend, false); });
+        });
+    }
+
     document.getElementById('logout').addEventListener('click', function () {
         api('/auth/logout', {method: 'POST' }).catch(function () {}).then(function () {
             localStorage.removeItem('reseller_auth');
@@ -497,5 +609,7 @@
         });
     }
 
+    installSharedPlanField();
+    installSharedGroupsPanel();
     boot();
 }());

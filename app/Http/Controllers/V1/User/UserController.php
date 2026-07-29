@@ -17,6 +17,7 @@ use App\Services\OrderService;
 use App\Services\PasswordPolicyService;
 use App\Services\UserService;
 use App\Services\SubscriptionService;
+use App\Services\ResellerSharedSubscriptionService;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -373,6 +374,9 @@ class UserController extends Controller
         // 派生值而不是加进上面的 select()：列可能还没迁移，且 is_admin / is_staff 不在这个
         // 列表里，判定规则只能在 PasswordPolicyService 里算。
         $user['password_reset_required'] = $this->passwordResetRequired($request);
+        $baseUser = User::find($request->user['id']);
+        $sharedGroup = $baseUser ? (new ResellerSharedSubscriptionService())->groupForUser($baseUser) : null;
+        $user['shared_subscription'] = $sharedGroup ? (new ResellerSharedSubscriptionService())->payload($sharedGroup, $baseUser) : null;
         return response([
             'data' => $user
         ]);
@@ -399,6 +403,25 @@ class UserController extends Controller
     {
         $baseUser = User::find($request->user['id']);
         $subscriptionService = new SubscriptionService();
+        $sharedService = new ResellerSharedSubscriptionService();
+        if ($baseUser && $sharedService->suspendedGroupForUser($baseUser)) {
+            abort(403, 'Shared subscription is suspended');
+        }
+        $sharedGroup = $baseUser ? $sharedService->groupForUser($baseUser) : null;
+        if ($baseUser && $sharedGroup) {
+            $shared = $sharedService->payload($sharedGroup, $baseUser);
+            $subscription = $sharedGroup->subscription;
+            $user = $subscriptionService->context($baseUser, $subscription);
+            $user['email'] = $baseUser->email;
+            $user['plan'] = Plan::find($subscription->plan_id);
+            $user['alive_ip'] = (Cache::get('ALIVE_IP_USER_' . $subscription->node_user_id)['alive_ip'] ?? 0);
+            $user['subscribe_url'] = $shared['subscribe_url'];
+            $user['reset_day'] = null;
+            $user['allow_new_period'] = 0;
+            $user['multi_subscription_enable'] = (int)config('v2board.multi_subscription_enable', 0);
+            $user['shared_subscription'] = $shared;
+            return response(['data' => $user]);
+        }
         if ($baseUser && $subscriptionService->available()) {
             $subscription = $subscriptionService->ensurePrimary($baseUser);
             if ($subscription) {
@@ -477,6 +500,9 @@ class UserController extends Controller
             abort(500, __('The user does not exist'));
         }
         // 包 using() 只为给 token 历史标注原因；捕获由 Eloquent 观察者完成。
+        if ((new ResellerSharedSubscriptionService())->suspendedGroupForUser($user)) {
+            abort(403, 'Shared subscription is suspended');
+        }
         return \App\Utils\TokenRotationContext::using('self_reset', function () use ($user) {
             $user->uuid = Helper::guid(true);
             $user->token = Helper::guid();

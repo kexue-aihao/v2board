@@ -13,6 +13,7 @@ use App\Models\ResellerPlanTemplate;
 use App\Services\ResellerAuthService;
 use App\Services\ResellerPaymentService;
 use App\Services\ResellerOrderService;
+use App\Services\ResellerSharedSubscriptionService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
@@ -65,6 +66,7 @@ class Controller extends BaseController
             'two_year_price' => 'nullable|integer|min:1',
             'three_year_price' => 'nullable|integer|min:1',
             'onetime_price' => 'nullable|integer|min:1',
+            'shared_member_limit' => 'nullable|integer|min:1|max:100',
             'enabled' => 'nullable|boolean',
             'sort' => 'nullable|integer',
         ]);
@@ -90,6 +92,7 @@ class Controller extends BaseController
             abort(422, 'A plan with existing orders cannot change its base plan');
         }
         $plan->reseller_id = $accountId;
+        $data['shared_member_limit'] = max(1, (int)($data['shared_member_limit'] ?? $plan->shared_member_limit ?? 1));
         $plan->fill($data);
         $plan->save();
         return response(['data' => $this->planData($plan->fresh('basePlan'), true)]);
@@ -193,6 +196,54 @@ class Controller extends BaseController
         return response(['data' => $orders]);
     }
 
+    public function sharedSubscriptions(Request $request)
+    {
+        $groups = (new ResellerSharedSubscriptionService())->auditGroups(
+            ResellerAccount::findOrFail($request->reseller['id'])
+        );
+        $groups->getCollection()->transform(function ($group) {
+            $subscription = $group->subscription;
+            return [
+                'id' => (int)$group->id,
+                'status' => $group->status,
+                'owner_email' => optional($group->owner)->email,
+                'plan_name' => optional($group->plan)->name ?: optional(optional($subscription)->plan)->name,
+                'member_limit' => (int)$group->member_limit,
+                'member_count' => (int)$group->member_count,
+                'transfer_enable' => (int)optional($subscription)->transfer_enable,
+                'used' => $subscription ? (int)$subscription->u + (int)$subscription->d : 0,
+                'expired_at' => optional($subscription)->expired_at,
+                'created_at' => $group->created_at,
+            ];
+        });
+        return response(['data' => $groups]);
+    }
+
+    public function suspendSharedSubscription(Request $request, $id)
+    {
+        $data = $request->validate(['reason' => 'required|string|max:500']);
+        (new ResellerSharedSubscriptionService())->suspendFromReseller(
+            ResellerAccount::findOrFail($request->reseller['id']), (int)$id, $data['reason']
+        );
+        return response(['data' => true]);
+    }
+
+    public function sharedSubscriptionMembers(Request $request, $id)
+    {
+        return response(['data' => (new ResellerSharedSubscriptionService())->auditMembers(
+            ResellerAccount::findOrFail($request->reseller['id']), (int)$id
+        )]);
+    }
+
+    public function removeSharedMember(Request $request, $groupId, $memberId)
+    {
+        $data = $request->validate(['reason' => 'required|string|max:500']);
+        (new ResellerSharedSubscriptionService())->forceRemoveFromReseller(
+            ResellerAccount::findOrFail($request->reseller['id']), (int)$groupId, (int)$memberId, $data['reason']
+        );
+        return response(['data' => true]);
+    }
+
     private function accountData(Request $request): array
     {
         $account = ResellerAccount::findOrFail($request->reseller['id']);
@@ -223,6 +274,7 @@ class Controller extends BaseController
             'two_year_price' => $plan->two_year_price,
             'three_year_price' => $plan->three_year_price,
             'onetime_price' => $plan->onetime_price,
+            'shared_member_limit' => max(1, (int)$plan->shared_member_limit),
             'enabled' => (int)$plan->enabled,
             'sort' => $plan->sort,
         ];

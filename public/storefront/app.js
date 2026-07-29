@@ -13,6 +13,7 @@
     var recaptchaToken = '';
     var emailCountdown = null;
     var arithmetic = {challenge: null, status: 'idle'};
+    var sharedInviteToken = new URLSearchParams(window.location.search).get('shared_invite') || '';
 
     var message = document.getElementById('message');
     var authSection = document.getElementById('auth-section');
@@ -114,7 +115,12 @@
         document.getElementById('orders-section').hidden = !visible;
         account.textContent = visible ? '\u5df2\u767b\u5f55' : '\u672a\u767b\u5f55';
         logout.hidden = !visible;
-        if (visible) loadOrders();
+        if (visible) {
+            loadOrders();
+            loadSharedSubscription().then(function () {
+                return sharedInviteToken ? acceptSharedInvitation() : null;
+            }).catch(function (error) { show(error.message, true); });
+        }
     }
 
     function clearAuthentication(notice) {
@@ -122,6 +128,7 @@
         currentTradeNo = null;
         sessionStorage.removeItem(key);
         document.getElementById('checkout-section').hidden = true;
+        document.getElementById('shared-section').hidden = true;
         setAuthenticated(false);
         setAuthMode('login');
         if (notice) show(notice, true);
@@ -338,6 +345,123 @@
         }).catch(function (error) { show(error.message, true); });
     }
 
+    function formatBytes(value) {
+        var size = Number(value || 0);
+        var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        var index = 0;
+        while (size >= 1024 && index < units.length - 1) { size /= 1024; index += 1; }
+        return (index === 0 ? Math.round(size) : size.toFixed(2)) + ' ' + units[index];
+    }
+
+    function decorateSharedPlans() {
+        return api('/plans').then(function (response) {
+            var plans = response.data || [];
+            var cards = document.querySelectorAll('#plans .plan');
+            plans.forEach(function (plan, index) {
+                if (Number(plan.shared_member_limit || 1) <= 1 || !cards[index]) return;
+                var badge = document.createElement('small');
+                badge.className = 'shared-plan-note';
+                badge.textContent = '\u5171\u4eab\u5957\u9910 \u00b7 \u6700\u591a ' + Number(plan.shared_member_limit) + ' \u4eba\uff08\u542b\u8d2d\u4e70\u8005\uff09\u5171\u4eab\u6d41\u91cf\u4e0e\u8bbe\u5907\u989d\u5ea6';
+                cards[index].querySelector('p').insertAdjacentElement('afterend', badge);
+            });
+        }).catch(function () {});
+    }
+
+    function installSharedPanel() {
+        if (document.getElementById('shared-section')) return;
+        var orders = document.getElementById('orders-section');
+        if (!orders) return;
+        var style = document.createElement('style');
+        style.textContent = '.shared-progress{display:grid;gap:9px;padding:14px;border:1px solid #dce5f1;border-radius:8px;background:#f8fbff}.shared-progress>strong{font-size:15px}.shared-progress>span{color:#475467;font-size:13px}.shared-progress p{margin:0;color:#475467;font-size:13px}.shared-track{height:7px;overflow:hidden;border-radius:999px;background:#e6edf5}.shared-track i{display:block;height:100%;border-radius:inherit;background:#246bce}.shared-plan-note{display:block;margin:-8px 0 12px;color:#246bce;font-size:12px;line-height:1.5}';
+        document.head.appendChild(style);
+        var section = document.createElement('section');
+        section.id = 'shared-section';
+        section.className = 'section';
+        section.hidden = true;
+        section.innerHTML = '<div class="section-head"><div><h2>\u5171\u4eab\u5957\u9910</h2><p class="subtle">\u5168\u7ec4\u5171\u4eab\u4e00\u6761\u8ba2\u9605\u3001\u6d41\u91cf\u989d\u5ea6\u548c\u8bbe\u5907\u6570\u3002</p></div></div>'
+            + '<div id="shared-summary"></div>'
+            + '<div id="shared-owner-controls" hidden><form id="shared-invite-form" class="auth-form"><label>\u9080\u8bf7\u6210\u5458\u90ae\u7bb1<input name="email" type="email" placeholder="name@example.com" required></label><div class="form-actions"><button type="submit">\u751f\u6210\u9080\u8bf7\u94fe\u63a5</button><button id="rotate-shared-credential" class="secondary" type="button">\u8f6e\u6362\u5171\u4eab\u8ba2\u9605\u51ed\u636e</button></div></form><div id="shared-members"></div><div id="shared-invitations"></div></div>';
+        orders.insertAdjacentElement('afterend', section);
+
+        document.getElementById('shared-invite-form').addEventListener('submit', function (event) {
+            event.preventDefault();
+            var button = event.target.querySelector('button[type="submit"]');
+            setButtonLoading(button, true, '\u751f\u6210\u4e2d...');
+            api('/shared/invitations', {method: 'POST', body: JSON.stringify(formBody(event.target))}).then(function (response) {
+                var data = response.data || {};
+                show('\u9080\u8bf7\u94fe\u63a5\u5df2\u751f\u6210\uff1a' + (data.invite_url || ''));
+                if (data.invite_url && navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(data.invite_url).catch(function () {});
+                event.target.reset();
+                loadSharedSubscription();
+            }).catch(function (error) { show(error.message, true); }).then(function () { setButtonLoading(button, false); });
+        });
+        document.getElementById('rotate-shared-credential').addEventListener('click', function (event) {
+            var button = event.currentTarget;
+            setButtonLoading(button, true, '\u8f6e\u6362\u4e2d...');
+            api('/shared/credential/rotate', {method: 'POST', body: '{}'}).then(function () {
+                show('\u5171\u4eab\u8ba2\u9605\u51ed\u636e\u5df2\u8f6e\u6362\uff0c\u8bf7\u6210\u5458\u91cd\u65b0\u83b7\u53d6\u8ba2\u9605\u5730\u5740\u3002');
+                loadSharedSubscription();
+            }).catch(function (error) { show(error.message, true); }).then(function () { setButtonLoading(button, false); });
+        });
+        document.getElementById('shared-members').addEventListener('click', function (event) {
+            var button = event.target.closest('[data-remove-shared-member]');
+            if (!button) return;
+            if (!window.confirm('\u79fb\u9664\u540e\u4f1a\u7acb\u5373\u8f6e\u6362\u5168\u7ec4\u8ba2\u9605\u51ed\u636e\u3002\u662f\u5426\u7ee7\u7eed\uff1f')) return;
+            setButtonLoading(button, true, '\u79fb\u9664\u4e2d...');
+            api('/shared/members/' + encodeURIComponent(button.dataset.removeSharedMember) + '/remove', {method: 'POST', body: '{}'}).then(function () {
+                show('\u6210\u5458\u5df2\u79fb\u9664\uff0c\u5171\u4eab\u51ed\u636e\u5df2\u8f6e\u6362\u3002');
+                loadSharedSubscription();
+            }).catch(function (error) { show(error.message, true); }).then(function () { setButtonLoading(button, false); });
+        });
+    }
+
+    function renderSharedGroup(group) {
+        var section = document.getElementById('shared-section');
+        var summary = document.getElementById('shared-summary');
+        var ownerControls = document.getElementById('shared-owner-controls');
+        if (!group) {
+            section.hidden = true;
+            ownerControls.hidden = true;
+            return;
+        }
+        section.hidden = false;
+        var percent = Number(group.usage_percent || 0);
+        summary.innerHTML = '<div class="shared-progress"><strong>' + escapeHtml(group.plan_name || '\u5171\u4eab\u5957\u9910') + '</strong><span>' + Number(group.member_count) + '/' + Number(group.member_limit) + ' \u4eba</span><div class="shared-track"><i style="width:' + percent + '%"></i></div><p>' + formatBytes(group.used) + ' / ' + formatBytes(group.total) + ' \u00b7 \u5269\u4f59 ' + formatBytes(group.remaining) + ' \u00b7 ' + percent + '%</p><p class="field-note">\u5171\u4eab\u5957\u9910\u4e0d\u63d0\u4f9b\u4e2a\u4eba\u6d41\u91cf\u4f7f\u7528\u8bb0\u5f55\u3002</p></div>';
+        ownerControls.hidden = !group.is_owner;
+    }
+
+    function loadSharedSubscription() {
+        return api('/shared/subscription').then(function (response) {
+            var group = response.data || null;
+            renderSharedGroup(group);
+            if (!group || !group.is_owner) return null;
+            return Promise.all([api('/shared/members'), api('/shared/invitations')]).then(function (results) {
+                var members = results[0].data || [];
+                var invitations = results[1].data || [];
+                document.getElementById('shared-members').innerHTML = members.map(function (member) {
+                    var action = member.role === 'owner' || member.status !== 'active' ? '' : '<button class="text-button" type="button" data-remove-shared-member="' + Number(member.id) + '">\u79fb\u9664</button>';
+                    return '<div class="order-row"><strong>' + escapeHtml(member.email || '-') + '</strong><span>' + escapeHtml(member.role === 'owner' ? '\u7fa4\u4e3b' : '\u6210\u5458') + ' \u00b7 ' + escapeHtml(member.status || '-') + ' ' + action + '</span></div>';
+                }).join('');
+                document.getElementById('shared-invitations').innerHTML = invitations.length ? invitations.map(function (invite) {
+                    return '<div class="order-row"><strong>' + escapeHtml(invite.email || '-') + '</strong><span>' + escapeHtml(invite.status || '-') + '</span></div>';
+                }).join('') : '';
+            });
+        });
+    }
+
+    function acceptSharedInvitation() {
+        var token = sharedInviteToken;
+        if (!token) return Promise.resolve();
+        sharedInviteToken = '';
+        return api('/shared/invitations/accept', {method: 'POST', body: JSON.stringify({token: token})}).then(function () {
+            window.history.replaceState({}, document.title, window.location.pathname);
+            show('\u5df2\u52a0\u5165\u5171\u4eab\u5957\u9910\u3002');
+            return loadSharedSubscription();
+        }).catch(function (error) {
+            show(error.message, true);
+        });
+    }
+
     function loadOrders() {
         return api('/order/fetch').then(function (response) {
             var result = response.data || {};
@@ -526,7 +650,9 @@
 
     logout.addEventListener('click', function () { clearAuthentication('\u5df2\u9000\u51fa\u767b\u5f55\u3002'); });
 
+    installSharedPanel();
     Promise.all([loadStoreConfig(), loadPlans(), loadGuestConfig()]).then(function () {
+        decorateSharedPlans();
         if (auth) setAuthenticated(true);
         else setAuthMode('login');
     });

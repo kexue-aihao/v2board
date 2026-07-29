@@ -11,6 +11,7 @@ class ResellerPlan extends Model
     protected $guarded = ['id'];
     protected $casts = [
         'enabled' => 'boolean',
+        'shared_member_limit' => 'integer',
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp',
     ];
