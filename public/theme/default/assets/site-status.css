@@ -22,7 +22,7 @@
 #v2board-site-status .site-status-message { max-width: 500px; margin: 17px 0 0; color: #71807a; font-size: 14px; line-height: 1.9; }
 #v2board-site-status .site-status-recovery { max-width: 500px; margin-top: 24px; padding: 15px 16px 16px; border: 1px solid rgba(33, 57, 47, .16); }
 #v2board-site-status .site-status-recovery-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; color: #71807a; font-size: 12px; }
-#v2board-site-status .site-status-recovery-head time { color: inherit; font-weight: 700; }
+#v2board-site-status .site-status-recovery-time { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 #v2board-site-status .site-status-countdown { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
 #v2board-site-status .site-status-countdown-unit { display: flex; align-items: baseline; justify-content: center; gap: 5px; min-width: 0; padding: 9px 6px; border-left: 1px solid rgba(33, 57, 47, .16); }
 #v2board-site-status .site-status-countdown-unit:first-child { border-left: 0; }

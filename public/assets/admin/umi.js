@@ -82493,7 +82493,7 @@
                                     return e.abrupt("return");
                                 case 2:
                                     return e.next = 4,
-                                    Object(a["a"])("/user/checkLogin");
+                                    Object(a["a"])("/" + window.settings.secure_path + "/user/checkLogin");
                                 case 4:
                                     if (t = e.sent,
                                     200 === t.code) {
@@ -82536,7 +82536,7 @@
                                     });
                                 case 2:
                                     return e.next = 4,
-                                    Object(a["a"])("/user/info");
+                                    Object(a["a"])("/" + window.settings.secure_path + "/user/info");
                                 case 4:
                                     return t = e.sent,
                                     e.next = 7,

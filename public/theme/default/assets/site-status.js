@@ -16,6 +16,7 @@
         readFailed: '\u6682\u65f6\u65e0\u6cd5\u8bfb\u53d6\u7ad9\u70b9\u72b6\u6001\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002',
         resourceFailed: '\u9875\u9762\u8d44\u6e90\u52a0\u8f7d\u5931\u8d25\uff0c\u8bf7\u5237\u65b0\u9875\u9762\u540e\u91cd\u8bd5\u3002',
         recovery: '\u9884\u8ba1\u6062\u590d',
+        countdown: '\u5012\u8ba1\u65f6',
         days: '\u5929',
         hours: '\u65f6',
         minutes: '\u5206',
@@ -186,8 +187,8 @@
             recovery.className = 'site-status-recovery';
             var recoveryHead = document.createElement('div');
             recoveryHead.className = 'site-status-recovery-head';
-            appendText(recoveryHead, 'span', '', labels.recovery);
-            var time = appendText(recoveryHead, 'time', '', formatRecoveryTime(status.recovery_at));
+            appendText(recoveryHead, 'span', '', labels.recovery + labels.countdown);
+            var time = appendText(recoveryHead, 'time', 'site-status-recovery-time', formatRecoveryTime(status.recovery_at));
             time.dateTime = new Date(status.recovery_at * 1000).toISOString();
             recovery.appendChild(recoveryHead);
             var countdownElement = document.createElement('div');

@@ -110,6 +110,11 @@ class AdminRoute
             $router->post('/order/cancel', 'V1\\Admin\\OrderController@cancel');
             $router->post('/order/detail', 'V1\\Admin\\OrderController@detail');
             // User
+            // These two routes are used by the compiled admin client immediately
+            // after authentication. They must stay under the secure admin path so
+            // maintenance mode does not block the administrator session refresh.
+            $router->get ('/user/checkLogin', 'V1\\User\\UserController@checkLogin');
+            $router->get ('/user/info', 'V1\\User\\UserController@info');
             $router->get ('/user/fetch', 'V1\\Admin\\UserController@fetch');
             $router->post('/user/update', 'V1\\Admin\\UserController@update');
             $router->get ('/user/getUserInfoById', 'V1\\Admin\\UserController@getUserInfoById');
