@@ -8,7 +8,7 @@
         $adminAssetVersions = array_filter(array_map(function ($file) {
             $path = public_path("assets/admin/{$file}");
             return is_file($path) ? filemtime($path) : null;
-        }, ['umi.js', 'umi.css', 'custom.css', 'vendors.async.js', 'components.async.js', 'reseller.js']));
+        }, ['umi.js', 'umi.css', 'custom.css', 'vendors.async.js', 'components.async.js']));
         $adminAssetVersion = $adminAssetVersions ? max($adminAssetVersions) : $version;
     @endphp
     <link rel="stylesheet" href="/assets/admin/components.chunk.css?v={{$adminAssetVersion}}">
@@ -46,7 +46,6 @@
 <script src="/assets/admin/vendors.async.js?v={{$adminAssetVersion}}"></script>
 <script src="/assets/admin/components.async.js?v={{$adminAssetVersion}}"></script>
 <script src="/assets/admin/umi.js?v={{$adminAssetVersion}}"></script>
-<script src="/assets/admin/reseller.js?v={{$adminAssetVersion}}"></script>
 </body>
 
 </html>

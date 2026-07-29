@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 class ResellerAuthService
 {
     private const SESSION_KEY = 'RESELLER_SESSIONS';
+    private const SESSION_TTL = 2592000;
 
     public function generate(ResellerAccount $account, Request $request): array
     {
@@ -20,6 +21,8 @@ class ResellerAuthService
             'reseller_id' => $account->id,
             'session' => $session,
             'scope' => 'reseller',
+            'iat' => time(),
+            'exp' => time() + self::SESSION_TTL,
         ], config('app.key'), 'HS256');
 
         $sessions = (array)Cache::get($this->sessionKey($account->id), []);
@@ -29,7 +32,7 @@ class ResellerAuthService
             'ua' => $request->userAgent(),
             'auth_data' => $token,
         ];
-        Cache::put($this->sessionKey($account->id), $sessions);
+        Cache::put($this->sessionKey($account->id), $sessions, self::SESSION_TTL);
 
         return [
             'auth_data' => $token,
@@ -40,7 +43,10 @@ class ResellerAuthService
     public function resolve(string $token): ?array
     {
         try {
-            $payload = (array)JWT::decode($token, new Key(config('app.key'), 'HS256'));
+            $payload = $this->decode($this->normalizeToken($token));
+            if (!$payload) {
+                return null;
+            }
             if (($payload['scope'] ?? null) !== 'reseller' || empty($payload['reseller_id'])) {
                 return null;
             }
@@ -62,18 +68,14 @@ class ResellerAuthService
 
     public function forget(string $token): void
     {
-        $data = $this->resolve($token);
-        Cache::forget($token);
-        if (!$data || empty($data['id'])) {
+        $payload = $this->decode($this->normalizeToken($token));
+        if (!$payload || empty($payload['reseller_id']) || empty($payload['session'])) {
             return;
         }
-        $sessions = (array)Cache::get($this->sessionKey((int)$data['id']), []);
-        foreach ($sessions as $id => $session) {
-            if (($session['auth_data'] ?? null) === $token) {
-                unset($sessions[$id]);
-            }
-        }
-        Cache::put($this->sessionKey((int)$data['id']), $sessions);
+        $key = $this->sessionKey((int)$payload['reseller_id']);
+        $sessions = (array)Cache::get($key, []);
+        unset($sessions[$payload['session']]);
+        Cache::put($key, $sessions, self::SESSION_TTL);
     }
 
     public function safeAccount(ResellerAccount $account): array
@@ -84,9 +86,35 @@ class ResellerAuthService
             'store_slug' => $account->store_slug,
             'store_name' => $account->store_name,
             'status' => $account->status,
+            'account_status' => $account->accountStatus(),
             'reseller_status' => $account->accountStatus(),
             'store_status' => $account->storeStatus(),
+            'store_available' => $account->isFullyActive(),
+            'can_sell' => $account->isFullyActive(),
+            'reseller_review_reason' => $account->reseller_review_reason,
+            'store_review_reason' => $account->store_review_reason,
         ];
+    }
+
+    private function normalizeToken(string $token): string
+    {
+        $token = trim($token);
+        if (stripos($token, 'bearer ') === 0) {
+            return trim(substr($token, 7));
+        }
+        return $token;
+    }
+
+    private function decode(string $token): ?array
+    {
+        if ($token === '') {
+            return null;
+        }
+        try {
+            return (array)JWT::decode($token, new Key(config('app.key'), 'HS256'));
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     private function sessionKey(int $id): string

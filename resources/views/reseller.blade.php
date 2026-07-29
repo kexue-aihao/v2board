@@ -5,117 +5,188 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{ $title }}</title>
     <style>
-        :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #182230; background: #f5f7fa; }
+        :root {
+            --ink: #172033; --muted: #667085; --line: #e3e8ef; --canvas: #f4f7fb; --surface: #fff;
+            --nav: #142235; --primary: #246bce; --primary-soft: #edf5ff; --teal: #087f72; --teal-soft: #e7f7f3;
+            --amber: #9a5b00; --amber-soft: #fff5dc; --red: #b42318; --red-soft: #fff0ee;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
         * { box-sizing: border-box; }
-        body { margin: 0; min-width: 320px; }
+        [hidden] { display: none !important; }
+        body { min-width: 320px; margin: 0; color: var(--ink); background: var(--canvas); }
         button, input, select, textarea { font: inherit; }
-        button { border: 0; border-radius: 7px; padding: 10px 14px; color: #fff; background: #246bce; cursor: pointer; }
-        button:hover { background: #1d5bb1; }
-        button.secondary { color: #344054; border: 1px solid #d0d5dd; background: #fff; }
-        button.secondary:hover { background: #f8fafc; }
-        button.danger { background: #b54708; }
-        input, select, textarea { width: 100%; border: 1px solid #d0d5dd; border-radius: 7px; padding: 10px 11px; color: #182230; background: #fff; }
-        textarea { min-height: 92px; resize: vertical; }
-        label { display: block; color: #475467; font-size: 13px; font-weight: 600; }
-        label input, label textarea, label select { margin-top: 7px; font-weight: 400; }
-        .app { min-height: 100vh; display: grid; grid-template-columns: 238px minmax(0, 1fr); }
-        .sidebar { display: flex; flex-direction: column; padding: 26px 18px; color: #d9e2f0; background: #162333; }
-        .brand { display: flex; align-items: center; gap: 10px; margin: 0 8px 44px; color: #fff; font-size: 16px; font-weight: 750; }
-        .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; color: #162333; background: #8ed1c5; font-weight: 800; }
-        .nav-label { margin: 0 10px 10px; color: #8ea0b8; font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
-        .nav-item { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 7px; color: #f2f5fa; background: rgba(255,255,255,.1); font-size: 14px; }
-        .sidebar-note { margin: auto 10px 0; color: #8ea0b8; font-size: 12px; line-height: 1.7; }
-        .main { min-width: 0; padding: 34px clamp(18px, 4vw, 54px); }
-        .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 28px; }
-        h1, h2, h3, p { margin-top: 0; }
-        h1 { margin-bottom: 7px; font-size: 28px; letter-spacing: 0; }
-        h2 { margin-bottom: 6px; font-size: 17px; }
-        h3 { margin-bottom: 5px; font-size: 15px; }
-        .subtle, .muted { color: #667085; }
-        .subtle { margin-bottom: 0; font-size: 14px; }
-        #message { min-height: 23px; margin-bottom: 12px; font-size: 13px; }
-        .workspace { max-width: 1180px; }
-        .dashboard { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); gap: 18px; align-items: start; }
-        .panel { min-width: 0; margin-bottom: 18px; border: 1px solid #e1e7ef; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(16,24,40,.035); }
-        .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 18px 20px; border-bottom: 1px solid #eaecf0; }
-        .panel-head p { margin-bottom: 0; color: #667085; font-size: 13px; line-height: 1.6; }
-        .panel-body { padding: 18px 20px; }
-        .stack { display: grid; gap: 12px; }
-        .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-        .form-grid .wide { grid-column: 1 / -1; }
-        .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-        .choice-list { display: flex; flex-wrap: wrap; gap: 8px; }
-        .choice-list button { color: #344054; border: 1px solid #d0d5dd; background: #fff; font-size: 13px; }
-        .choice-list button:hover { border-color: #246bce; color: #246bce; background: #f5f9ff; }
-        .data-list { display: grid; gap: 8px; margin-top: 15px; }
-        .data-row { display: flex; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid #eaecf0; border-radius: 7px; font-size: 13px; }
-        .data-row strong { color: #182230; }
-        .data-row span { color: #667085; text-align: right; }
-        .empty { padding: 18px 0; color: #667085; text-align: center; font-size: 13px; }
-        .auth-shell { max-width: 960px; margin: 7vh auto 0; display: grid; grid-template-columns: .85fr 1.15fr; overflow: hidden; border: 1px solid #dfe6ee; border-radius: 14px; background: #fff; box-shadow: 0 18px 50px rgba(16,24,40,.08); }
-        .auth-intro { padding: 42px; color: #e8eef7; background: #162333; }
-        .auth-intro .brand { margin: 0 0 56px; }
-        .auth-intro h1 { color: #fff; font-size: 30px; line-height: 1.25; }
-        .auth-intro p { color: #b6c4d6; line-height: 1.8; }
-        .auth-copy { margin-top: 45px; font-size: 13px; }
-        .auth-forms { padding: 34px; }
-        .auth-forms h2 { margin-bottom: 18px; }
-        .auth-divider { height: 1px; margin: 28px 0; background: #eaecf0; }
-        @media (max-width: 880px) { .dashboard { grid-template-columns: 1fr; } .auth-shell { grid-template-columns: 1fr; margin: 20px auto; } .auth-intro { padding: 28px; } .auth-intro .brand { margin-bottom: 28px; } .auth-copy { margin-top: 24px; } }
-        @media (max-width: 680px) { .app { display: block; } .sidebar { padding: 16px 18px; } .brand { margin-bottom: 18px; } .sidebar-note { display: none; } .main { padding: 24px 16px; } .topbar { display: block; } .topbar .actions { margin-top: 14px; } .form-grid { grid-template-columns: 1fr; } .form-grid .wide { grid-column: auto; } .panel-head { display: block; } .panel-head .actions { margin-top: 12px; } .auth-forms { padding: 24px 20px; } }
+        button { cursor: pointer; }
+        button:disabled, fieldset:disabled button, fieldset:disabled input, fieldset:disabled select, fieldset:disabled textarea { cursor: not-allowed; opacity: .58; }
+        a { color: var(--primary); }
+        .toast { position: fixed; z-index: 50; top: 20px; right: 20px; max-width: min(420px, calc(100vw - 40px)); padding: 11px 14px; border: 1px solid; border-radius: 6px; box-shadow: 0 10px 30px rgba(16,24,40,.14); font-size: 13px; }
+        .toast-success { color: var(--teal); border-color: #b9e6de; background: var(--teal-soft); }
+        .toast-error { color: var(--red); border-color: #f2c8c3; background: var(--red-soft); }
+        .auth-shell { display: grid; grid-template-columns: minmax(280px, .9fr) minmax(360px, 1.1fr); width: min(980px, calc(100% - 32px)); min-height: 590px; margin: 7vh auto 32px; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 22px 60px rgba(20,34,53,.1); }
+        .auth-aside { display: flex; flex-direction: column; padding: 42px 38px; color: #dbe6f4; background: var(--nav); }
+        .brand { display: flex; align-items: center; gap: 10px; color: #fff; font-size: 16px; font-weight: 750; }
+        .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 8px; color: var(--nav); background: #8ed1c5; font-weight: 800; }
+        .auth-aside h1 { max-width: 330px; margin: auto 0 14px; color: #fff; font-size: clamp(28px, 4vw, 38px); line-height: 1.2; letter-spacing: 0; }
+        .auth-aside p { max-width: 330px; margin: 0; color: #aebed2; font-size: 14px; line-height: 1.8; }
+        .aside-points { display: grid; gap: 11px; margin-top: 32px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.13); color: #dbe6f4; font-size: 13px; }
+        .aside-point { display: flex; gap: 10px; align-items: center; }
+        .aside-point i { display: grid; flex: 0 0 22px; width: 22px; height: 22px; place-items: center; border-radius: 50%; color: var(--nav); background: #8ed1c5; font-style: normal; font-size: 12px; font-weight: 800; }
+        .auth-main { padding: 42px 44px; }
+        .auth-main h2 { margin: 0 0 7px; font-size: 24px; }
+        .auth-caption { margin: 0 0 24px; color: var(--muted); font-size: 14px; }
+        .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 24px; padding: 4px; border-radius: 6px; background: #f1f4f8; }
+        .auth-tab { min-height: 38px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; font-size: 13px; font-weight: 650; }
+        .auth-tab.is-active { color: var(--primary); background: #fff; box-shadow: 0 1px 4px rgba(16,24,40,.1); }
+        .form-stack { display: grid; gap: 15px; }
+        .field { display: grid; gap: 6px; color: #475467; font-size: 13px; font-weight: 650; }
+        .field input, .field textarea, .field select { width: 100%; min-height: 40px; padding: 9px 11px; border: 1px solid #cfd7e3; border-radius: 5px; outline: 0; color: var(--ink); background: #fff; }
+        .field textarea { min-height: 96px; resize: vertical; }
+        .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(36,107,206,.12); }
+        .field-help { color: var(--muted); font-size: 12px; font-weight: 400; }
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .field-check { display: flex; align-items: center; grid-template-columns: 16px 1fr; gap: 8px; }
+        .field-check input { width: 16px; min-height: 16px; margin: 0; }
+        .btn { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 0 15px; border: 1px solid transparent; border-radius: 5px; font-size: 13px; font-weight: 700; }
+        .btn-primary { color: #fff; background: var(--primary); }
+        .btn-primary:hover:not(:disabled) { background: #1d5bb2; }
+        .btn-quiet { color: #344054; border-color: #d2dae5; background: #fff; }
+        .btn-quiet:hover:not(:disabled) { background: #f8fafc; }
+        .btn-block { width: 100%; }
+        .auth-footnote { margin: 22px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+        .workspace { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100vh; }
+        .sidebar { display: flex; flex-direction: column; padding: 26px 18px; color: #d9e2f0; background: var(--nav); }
+        .sidebar .brand { margin: 0 8px 46px; }
+        .nav-caption { margin: 0 10px 9px; color: #8ea0b8; font-size: 11px; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+        .nav-item { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 5px; color: #f3f6fa; background: rgba(255,255,255,.1); font-size: 13px; font-weight: 650; }
+        .nav-item i { color: #8ed1c5; font-style: normal; }
+        .sidebar-note { margin: auto 10px 0; color: #8ea0b8; font-size: 12px; line-height: 1.8; }
+        .main { min-width: 0; padding: 32px clamp(18px, 4vw, 54px); }
+        .content { max-width: 1180px; margin: 0 auto; }
+        .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+        .eyebrow { margin: 0 0 6px; color: var(--primary); font-size: 11px; font-weight: 750; letter-spacing: .12em; }
+        .topbar h1 { margin: 0; font-size: 25px; letter-spacing: 0; }
+        .topbar p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+        .topbar-actions { display: flex; gap: 8px; align-items: center; }
+        .approval-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding: 13px 15px; border: 1px solid; border-radius: 6px; }
+        .approval-banner strong, .approval-banner span { display: block; }
+        .approval-banner strong { margin-bottom: 3px; font-size: 13px; }
+        .approval-banner span { font-size: 12px; }
+        .approval-banner-warning { color: var(--amber); border-color: #f0d293; background: var(--amber-soft); }
+        .approval-banner-ready { color: var(--teal); border-color: #b9e6de; background: var(--teal-soft); }
+        .status-overview { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+        .status-card { padding: 14px 15px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+        .status-label { margin-bottom: 8px; color: var(--muted); font-size: 12px; }
+        .status-pill { display: inline-flex; min-height: 24px; align-items: center; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+        .status-active { color: var(--teal); background: var(--teal-soft); }
+        .status-pending { color: var(--amber); background: var(--amber-soft); }
+        .status-rejected { color: var(--red); background: var(--red-soft); }
+        .status-suspended, .status-neutral { color: #5d6879; background: #eef1f5; }
+        .status-card small { display: block; margin-top: 7px; color: var(--muted); font-size: 12px; }
+        .dashboard { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(290px, .88fr); gap: 14px; align-items: start; }
+        .panel { min-width: 0; margin-bottom: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: 0 5px 18px rgba(16,24,40,.035); }
+        .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 16px 17px; border-bottom: 1px solid var(--line); }
+        .panel-head h2 { margin: 0; font-size: 15px; }
+        .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+        .panel-body { padding: 16px 17px; }
+        .form-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+        .form-actions .hint { color: var(--muted); font-size: 12px; }
+        .template-list, .data-list { display: grid; gap: 8px; }
+        .template-option { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 5px; color: var(--ink); background: #fbfcfe; text-align: left; }
+        .template-option:hover { border-color: var(--primary); background: var(--primary-soft); }
+        .template-option span, .list-row span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; font-weight: 400; }
+        .list-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 5px; font-size: 13px; }
+        .list-row em { color: var(--muted); font-size: 12px; font-style: normal; text-align: right; }
+        .status-dot { color: #697586; font-size: 12px; }
+        .status-dot:before { display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: #98a2b3; content: ''; }
+        .status-dot.is-on { color: var(--teal); }
+        .status-dot.is-on:before { background: var(--teal); }
+        .empty-state { padding: 22px 10px; color: var(--muted); text-align: center; font-size: 12px; line-height: 1.7; }
+        .audit-stat { display: flex; align-items: center; justify-content: space-between; padding: 13px; border: 1px solid var(--line); border-radius: 5px; }
+        .audit-stat span { color: var(--primary); font-weight: 750; }
+        .review-note { color: var(--muted); font-size: 12px; line-height: 1.7; }
+        @media (max-width: 860px) { .auth-shell { grid-template-columns: 1fr; margin-top: 20px; } .auth-aside { min-height: 300px; padding: 28px; } .auth-aside h1 { margin-top: 56px; } .auth-main { padding: 30px 26px; } .workspace { grid-template-columns: 1fr; } .sidebar { padding: 16px 18px; } .sidebar .brand { margin-bottom: 18px; } .sidebar-note { display: none; } .main { padding: 24px 16px; } }
+        @media (max-width: 680px) { .dashboard { grid-template-columns: 1fr; } .topbar { display: block; } .topbar-actions { margin-top: 14px; } .topbar-actions .btn { flex: 1; } .status-overview { grid-template-columns: 1fr; } .two-col { grid-template-columns: 1fr; } .approval-banner { display: block; } .auth-main { padding: 25px 20px; } }
+        @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
     </style>
 </head>
 <body>
-<div id="message" style="position:fixed;top:18px;right:22px;z-index:20;max-width:min(420px,calc(100vw - 44px));padding:10px 13px;border:1px solid #dfe6ee;border-radius:7px;background:#fff;box-shadow:0 8px 24px rgba(16,24,40,.1);font-size:13px"></div>
-<div id="login" class="auth-shell">
-    <section class="auth-intro">
-        <div class="brand"><span class="brand-mark">R</span><span>Reseller Portal</span></div>
-        <h1>管理你的专属销售店铺</h1>
-        <p>配置可售套餐和支付方式，使用独立店铺向客户提供订阅服务。</p>
-        <p class="auth-copy">倒卖商账号需先提交申请，经管理员审核通过后才能登录和销售。</p>
-    </section>
-    <section class="auth-forms">
-        <h2>登录倒卖商中心</h2>
-        <form id="login-form" class="stack">
-            <label>邮箱<input name="email" type="email" placeholder="name@example.com" autocomplete="email" required></label>
-            <label>密码<input name="password" type="password" placeholder="请输入密码" autocomplete="current-password" required></label>
-            <button type="submit">登录</button>
-        </form>
-        <div class="auth-divider"></div>
-        <h2>申请成为倒卖商</h2>
-        <form id="register-form" class="stack">
-            <label>邮箱<input name="email" type="email" placeholder="用于登录和接收通知" autocomplete="email" required></label>
-            <label>密码<input name="password" type="password" minlength="8" placeholder="至少 8 位" autocomplete="new-password" required></label>
-            <div class="form-grid">
-                <label>店铺标识<input name="store_slug" placeholder="demo-store" pattern="[a-z0-9][a-z0-9-]{2,31}" required></label>
-                <label>店铺名称<input name="store_name" placeholder="我的订阅店" required></label>
-            </div>
-            <button type="submit" class="secondary">提交申请</button>
-        </form>
-        <div id="message"></div>
-    </section>
-</div>
-<div id="panel" class="app" hidden>
-    <aside class="sidebar">
-        <div class="brand"><span class="brand-mark">R</span><span>Reseller Portal</span></div>
-        <p class="nav-label">工作台</p><span class="nav-item">店铺与销售</span>
-        <p class="sidebar-note">只可使用管理员发布的基础套餐。基础流量、节点和权限由平台统一控制。</p>
+<div id="message" class="toast" hidden role="status" aria-live="polite"></div>
+<section id="auth-shell" class="auth-shell">
+    <aside class="auth-aside">
+        <div class="brand"><span class="brand-mark">R</span><span>Reseller Workspace</span></div>
+        <h1>把你的销售店铺管理得更清楚。</h1>
+        <p>从平台允许的基础套餐开始，设置展示价格与收款方式，统一管理店铺运营状态。</p>
+        <div class="aside-points">
+            <div class="aside-point"><i>1</i><span>注册账号和店铺，等待管理员分别审核</span></div>
+            <div class="aside-point"><i>2</i><span>选择已发布的基础套餐并设置销售价格</span></div>
+            <div class="aside-point"><i>3</i><span>配置白名单支付驱动后开放销售页</span></div>
+        </div>
     </aside>
-    <main class="main"><div class="workspace">
-        <header class="topbar"><div><h1>倒卖商工作台</h1><p class="subtle">管理店铺展示、销售套餐和收款方式。</p></div><div class="actions"><a class="muted" href="/store" style="padding:10px 4px;font-size:13px">查看店铺入口</a><button id="logout" class="secondary" type="button">退出登录</button></div></header>
-        <div class="dashboard">
-            <div>
-                <section class="panel"><div class="panel-head"><div><h2>店铺设置</h2><p>客户将通过你的店铺标识访问销售页面。</p></div></div><div class="panel-body"><form id="store-form" class="stack"><div class="form-grid"><label>店铺标识<input name="store_slug" placeholder="demo-store" pattern="[a-z0-9][a-z0-9-]{2,31}" required></label><label>店铺名称<input name="store_name" placeholder="我的订阅店" required></label><label class="wide">店铺说明<textarea name="store_description" placeholder="介绍你的服务内容"></textarea></label></div><div class="actions"><button type="submit">保存店铺设置</button><span class="muted">访问地址：/store/{slug}</span></div></form></div></section>
-                <section class="panel"><div class="panel-head"><div><h2>我的销售套餐</h2><p>节点、流量和设备限制继承基础套餐，你只需设置展示信息和价格。</p></div></div><div class="panel-body"><form id="plan-form" class="stack"><input type="hidden" name="id"><div class="form-grid"><label>基础套餐 ID<input name="base_plan_id" type="number" min="1" placeholder="从右侧模板选择" required></label><label>展示名称<input name="name" placeholder="例如：高速月付" required></label><label class="wide">展示内容<textarea name="content" placeholder="面向客户展示的套餐说明"></textarea></label></div><div class="form-grid"><label>月付（分）<input name="month_price" type="number" min="1" placeholder="不销售可留空"></label><label>季付（分）<input name="quarter_price" type="number" min="1" placeholder="不销售可留空"></label><label>半年付（分）<input name="half_year_price" type="number" min="1" placeholder="不销售可留空"></label><label>年付（分）<input name="year_price" type="number" min="1" placeholder="不销售可留空"></label><label>两年付（分）<input name="two_year_price" type="number" min="1" placeholder="不销售可留空"></label><label>一次性（分）<input name="onetime_price" type="number" min="1" placeholder="不销售可留空"></label></div><div class="actions"><button type="submit">保存销售套餐</button><span class="muted">价格单位为分，必须大于 0。</span></div></form><div id="plans" class="data-list"></div></div></section>
+    <main class="auth-main">
+        <div class="auth-tabs" role="tablist" aria-label="倒卖商认证">
+            <button class="auth-tab is-active" type="button" data-auth-tab="login" role="tab" aria-selected="true">登录</button>
+            <button class="auth-tab" type="button" data-auth-tab="register" role="tab" aria-selected="false">申请入驻</button>
+        </div>
+        <h2 id="auth-heading">登录倒卖商工作台</h2>
+        <p id="auth-caption" class="auth-caption">使用已审核的账号继续管理你的店铺。</p>
+        <form id="login-form" class="form-stack">
+            <label class="field">邮箱<input name="email" type="email" autocomplete="email" placeholder="name@example.com" required></label>
+            <label class="field">密码<input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label>
+            <button class="btn btn-primary btn-block" type="submit">登录工作台</button>
+        </form>
+        <form id="register-form" class="form-stack" hidden>
+            <label class="field">登录邮箱<input name="email" type="email" autocomplete="email" placeholder="用于登录和接收通知" required></label>
+            <div class="two-col">
+                <label class="field">密码<input name="password" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="至少 8 位" required></label>
+                <label class="field">确认密码<input name="password_confirmation" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="再次输入密码" required></label>
             </div>
-            <div>
-                <section class="panel"><div class="panel-head"><div><h2>可用基础套餐</h2><p>管理员发布后才会出现在这里。</p></div></div><div class="panel-body"><div id="templates" class="choice-list"></div></div></section>
-                <section class="panel"><div class="panel-head"><div><h2>支付配置</h2><p>使用管理员允许的支付驱动，密钥由系统加密保存。</p></div></div><div class="panel-body"><form id="payment-form" class="stack"><input type="hidden" name="id"><label>支付驱动<select name="driver" id="payment-driver" required></select></label><label>支付名称<input name="name" placeholder="例如：支付宝" required></label><label>配置 JSON<textarea name="config_json" placeholder="按支付驱动要求填写 JSON"></textarea></label><label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="enabled" value="1" style="width:16px;margin:0"> 启用此支付方式</label><button type="submit">保存支付配置</button></form><div id="payments" class="data-list"></div></div></section>
-                <section class="panel"><div class="panel-head"><div><h2>销售概览</h2><p>查看当前店铺的客户和订单数量。</p></div></div><div class="panel-body"><div class="actions"><button id="load-customers" class="secondary" type="button">刷新客户</button><button id="load-orders" class="secondary" type="button">刷新订单</button></div><div id="audit" class="data-list"></div></div></section>
+            <div class="two-col">
+                <label class="field">店铺 Slug<input name="store_slug" pattern="[a-z0-9][a-z0-9-]{2,31}" placeholder="demo-store" required><span class="field-help">仅使用小写字母、数字和连字符</span></label>
+                <label class="field">店铺名称<input name="store_name" maxlength="128" placeholder="我的订阅店" required></label>
+            </div>
+            <button class="btn btn-primary btn-block" type="submit">提交入驻申请</button>
+            <p class="auth-footnote">账号审核和店铺审核相互独立。两者都通过后，店铺才会对客户开放销售。</p>
+        </form>
+    </main>
+</section>
+<section id="workspace" class="workspace" hidden>
+    <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">R</span><span>Reseller Workspace</span></div>
+        <p class="nav-caption">工作台</p>
+        <span class="nav-item"><i>◆</i>店铺与销售</span>
+        <p class="sidebar-note">基础套餐、节点能力和平台权限由管理员统一控制，你只需管理展示信息、价格和收款配置。</p>
+    </aside>
+    <main class="main">
+        <div class="content">
+            <header class="topbar">
+                <div><p class="eyebrow">CHANNEL OPERATIONS</p><h1>倒卖商工作台</h1><p>先确认审核状态，再开始配置销售内容。</p></div>
+                <div class="topbar-actions"><a id="store-url-link" class="btn btn-quiet" href="/store" target="_blank" rel="noreferrer">打开销售页</a><button id="refresh-workspace" class="btn btn-quiet" type="button">刷新</button><button id="logout" class="btn btn-quiet" type="button">退出</button></div>
+            </header>
+            <div id="approval-banner" class="approval-banner" role="status"></div>
+            <section class="status-overview" aria-label="审核状态">
+                <div class="status-card"><div class="status-label">登录账号</div><div id="account-email">-</div><small id="account-status"></small></div>
+                <div class="status-card"><div class="status-label">店铺审核</div><div id="store-status">-</div><small id="store-url">-</small></div>
+                <div class="status-card"><div class="status-label">审核备注</div><div id="review-note" class="review-note">-</div></div>
+            </section>
+            <div class="dashboard">
+                <div>
+                    <section class="panel">
+                        <div class="panel-head"><div><h2>店铺信息</h2><p>客户将通过店铺 Slug访问你的销售页面。</p></div></div>
+                        <div class="panel-body"><form id="store-form" class="form-stack"><div class="two-col"><label class="field">店铺 Slug<input name="store_slug" pattern="[a-z0-9][a-z0-9-]{2,31}" required></label><label class="field">店铺名称<input name="store_name" maxlength="128" required></label></div><label class="field">店铺介绍<textarea name="store_description" placeholder="向客户介绍你的服务内容"></textarea></label><div class="form-actions"><button class="btn btn-primary" type="submit">保存店铺信息</button><span class="hint">公开地址：<span id="store-url-inline">/store/{slug}</span></span></div></form></div>
+                    </section>
+                    <section class="panel">
+                        <div class="panel-head"><div><h2>销售套餐</h2><p>节点、流量和设备限制继承管理员发布的基础套餐。</p></div></div>
+                        <div class="panel-body"><fieldset data-sale-control><form id="plan-form" class="form-stack"><input type="hidden" name="id"><div class="two-col"><label class="field">基础套餐 ID<input name="base_plan_id" type="number" min="1" placeholder="从右侧选择" required></label><label class="field">展示名称<input name="name" placeholder="例如：高速月付" required></label></div><label class="field">展示内容<textarea name="content" placeholder="面向客户展示的套餐说明"></textarea></label><div class="two-col"><label class="field">月付（分）<input name="month_price" type="number" min="1"></label><label class="field">季付（分）<input name="quarter_price" type="number" min="1"></label><label class="field">半年付（分）<input name="half_year_price" type="number" min="1"></label><label class="field">年付（分）<input name="year_price" type="number" min="1"></label><label class="field">两年付（分）<input name="two_year_price" type="number" min="1"></label><label class="field">一次性（分）<input name="onetime_price" type="number" min="1"></label></div><div class="form-actions"><button class="btn btn-primary" type="submit">保存销售套餐</button><span class="hint">至少设置一个大于 0 的周期价格</span></div></form></fieldset><div id="plans" class="data-list" style="margin-top:15px"></div></div>
+                    </section>
+                </div>
+                <div>
+                    <section class="panel"><div class="panel-head"><div><h2>可用基础套餐</h2><p>管理员发布后才会显示。</p></div></div><div class="panel-body"><div id="templates" class="template-list"></div></div></section>
+                    <section class="panel"><div class="panel-head"><div><h2>支付配置</h2><p>密钥由系统加密保存，接口不会返回原始配置。</p></div></div><div class="panel-body"><fieldset data-sale-control><form id="payment-form" class="form-stack"><input type="hidden" name="id"><label class="field">支付驱动<select id="payment-driver" name="driver" required></select></label><label class="field">支付名称<input name="name" placeholder="例如：支付宝" required></label><label class="field">配置 JSON<textarea name="config_json" placeholder="按支付驱动要求填写 JSON"></textarea></label><label class="field field-check"><input name="enabled" type="checkbox" value="1">启用此支付方式</label><button class="btn btn-primary" type="submit">保存支付配置</button></form></fieldset><div id="payments" class="data-list" style="margin-top:15px"></div></div></section>
+                    <section class="panel"><div class="panel-head"><div><h2>销售概览</h2><p>按需读取当前店铺客户和订单数量。</p></div></div><div class="panel-body"><div class="form-actions"><button id="load-customers" class="btn btn-quiet" type="button">读取客户数</button><button id="load-orders" class="btn btn-quiet" type="button">读取订单数</button></div><div id="audit" class="data-list" style="margin-top:12px"><div class="empty-state">点击上方按钮查看统计。</div></div></div></section>
+                </div>
             </div>
         </div>
-    </div></main>
-</div>
+    </main>
+</section>
 <script src="/reseller/app.js"></script>
 </body>
 </html>

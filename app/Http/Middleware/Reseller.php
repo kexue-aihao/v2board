@@ -9,7 +9,10 @@ class Reseller
 {
     public function handle($request, Closure $next)
     {
-        $authorization = $request->input('auth_data') ?? $request->header('authorization');
+        $authorization = trim((string)$request->input('auth_data', ''));
+        if ($authorization === '') {
+            $authorization = trim((string)$request->header('authorization', ''));
+        }
         if (!$authorization) {
             abort(403, 'Reseller authentication required');
         }

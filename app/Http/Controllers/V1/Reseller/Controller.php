@@ -52,6 +52,7 @@ class Controller extends BaseController
 
     public function savePlan(Request $request)
     {
+        $this->ensureStoreCanSell($request);
         $data = $request->validate([
             'id' => 'nullable|integer',
             'base_plan_id' => 'required|integer',
@@ -120,6 +121,7 @@ class Controller extends BaseController
 
     public function savePayment(Request $request)
     {
+        $this->ensureStoreCanSell($request);
         $data = $request->validate([
             'id' => 'nullable|integer',
             'driver' => 'required|string|max:64',
@@ -198,6 +200,13 @@ class Controller extends BaseController
             'store_description' => $account->store_description,
             'allowed_payment_drivers' => array_values((array)config('v2board.reseller_allowed_payment_drivers', [])),
         ];
+    }
+
+    private function ensureStoreCanSell(Request $request): void
+    {
+        if (empty($request->reseller['can_sell'])) {
+            abort(403, 'Account and store approval are both required before selling');
+        }
     }
 
     private function planData(ResellerPlan $plan, bool $includeBase): array

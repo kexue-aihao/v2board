@@ -43,30 +43,26 @@ JS;
     $bundle = str_replace($routeAnchor, $routeItem . "\n" . $routeAnchor, $bundle);
 }
 
-if (strpos($bundle, '    resellerpage: function(e, t, n) {') === false) {
-    $moduleBoundary = "\n});\n\n(function () {\n";
-    $modulePosition = strpos($bundle, $moduleBoundary);
-    if ($modulePosition === false) {
-        fwrite(STDERR, "Admin module boundary not found.\n");
-        exit(1);
-    }
-    $module = <<<'JS'
-,
-    resellerpage: function(e, t, n) {
-        "use strict";
-        n.r(t);
-        var r = n("q1tI")
-          , i = n.n(r);
-        function ResellerPage() {
-            return i.a.createElement("div", {
-                id: "reseller-admin-module",
-                className: "content"
-            });
-        }
-        t.default = ResellerPage;
-    }
-JS;
-    $bundle = substr_replace($bundle, $module, $modulePosition, 0);
+$modulePath = __DIR__ . '/admin-reseller-module.js';
+$moduleSource = file_get_contents($modulePath);
+if ($moduleSource === false || strpos($moduleSource, 'resellerpage: function') === false) {
+    fwrite(STDERR, "Admin reseller module source is invalid.\n");
+    exit(1);
+}
+$moduleSource = trim($moduleSource);
+
+$moduleStart = strpos($bundle, "    resellerpage: function(e, t, n) {");
+$moduleEndMarker = "\n});\n\n(function () {\n";
+$moduleEnd = strpos($bundle, $moduleEndMarker);
+if ($moduleEnd === false) {
+    fwrite(STDERR, "Admin module boundary not found.\n");
+    exit(1);
+}
+
+if ($moduleStart !== false && $moduleStart < $moduleEnd) {
+    $bundle = substr_replace($bundle, "    " . $moduleSource, $moduleStart, $moduleEnd - $moduleStart);
+} else {
+    $bundle = substr_replace($bundle, ",\n    " . $moduleSource, $moduleEnd, 0);
 }
 
 if (file_put_contents($bundlePath, $bundle) === false) {
