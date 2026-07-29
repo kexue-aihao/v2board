@@ -11,7 +11,6 @@
     var recaptchaLoader = null;
     var recaptchaWidget = null;
     var recaptchaToken = '';
-    var emailCountdown = null;
     var arithmetic = {challenge: null, status: 'idle'};
     var sharedInviteToken = new URLSearchParams(window.location.search).get('shared_invite') || '';
 
@@ -24,7 +23,6 @@
     var twoFactorForm = document.getElementById('two-factor-form');
     var authTitle = document.getElementById('auth-title');
     var authCaption = document.getElementById('auth-caption');
-    var sendEmailButton = document.getElementById('send-email-code');
     var arithmeticAnswer = document.getElementById('arithmetic-answer');
     var arithmeticStatus = document.getElementById('arithmetic-status');
 
@@ -281,11 +279,6 @@
         inviteInput.required = inviteRequired;
         document.getElementById('invite-note').textContent = inviteRequired ? '\u5f53\u524d\u7ad9\u70b9\u6ce8\u518c\u9700\u8981\u9080\u8bf7\u7801\u3002' : '\u6ca1\u6709\u9080\u8bf7\u7801\u53ef\u7559\u7a7a\u3002';
 
-        var emailVerification = isEnabled('is_email_verify');
-        var emailCodeField = document.getElementById('email-code-field');
-        emailCodeField.hidden = !emailVerification;
-        registerForm.elements.email_code.required = emailVerification;
-
         var arithmeticField = document.getElementById('arithmetic-field');
         arithmeticField.hidden = !registerActive || !isEnabled('is_arithmetic_verification');
         if (!arithmeticField.hidden && !arithmetic.challenge) {
@@ -484,24 +477,6 @@
         }).catch(function (error) { show(error.message, true); });
     }
 
-    function startEmailCountdown() {
-        var left = 60;
-        window.clearInterval(emailCountdown);
-        sendEmailButton.disabled = true;
-        sendEmailButton.textContent = left + '\u79d2\u540e\u91cd\u53d1';
-        emailCountdown = window.setInterval(function () {
-            left -= 1;
-            if (left <= 0) {
-                window.clearInterval(emailCountdown);
-                emailCountdown = null;
-                sendEmailButton.disabled = false;
-                sendEmailButton.textContent = '\u53d1\u9001\u9a8c\u8bc1\u7801';
-                return;
-            }
-            sendEmailButton.textContent = left + '\u79d2\u540e\u91cd\u53d1';
-        }, 1000);
-    }
-
     document.querySelectorAll('[data-auth-mode]').forEach(function (button) {
         button.addEventListener('click', function () { setAuthMode(button.dataset.authMode); });
     });
@@ -523,10 +498,6 @@
         var body = formBody(event.target);
         if (body.password !== body.password_confirmation) {
             show('\u4e24\u6b21\u8f93\u5165\u7684\u5bc6\u7801\u4e0d\u4e00\u81f4\u3002', true);
-            return;
-        }
-        if (isEnabled('is_email_verify') && !/^\d{6}$/.test(body.email_code || '')) {
-            show('\u8bf7\u8f93\u5165 6 \u4f4d\u90ae\u7bb1\u9a8c\u8bc1\u7801\u3002', true);
             return;
         }
         if (isEnabled('is_invite_force') && !body.invite_code) {
@@ -561,29 +532,6 @@
                 show(error.message, true);
                 resetRecaptcha();
             }).then(function () { setButtonLoading(button, false); });
-        });
-    });
-
-    sendEmailButton.addEventListener('click', function () {
-        var email = registerForm.elements.email.value.trim();
-        if (!email) {
-            show('\u8bf7\u5148\u8f93\u5165\u90ae\u7bb1\u5730\u5740\u3002', true);
-            return;
-        }
-        if (isEnabled('is_recaptcha') && !recaptchaToken) {
-            show('\u8bf7\u5148\u5b8c\u6210 reCAPTCHA \u9a8c\u8bc1\u3002', true);
-            return;
-        }
-        setButtonLoading(sendEmailButton, true, '\u53d1\u9001\u4e2d...');
-        var body = {email: email, isforget: 0};
-        if (recaptchaToken) body.recaptcha_data = recaptchaToken;
-        guestApi('/passport/comm/sendEmailVerify', {method: 'POST', body: JSON.stringify(body)}).then(function () {
-            show('\u9a8c\u8bc1\u7801\u5df2\u53d1\u9001\u3002');
-            resetRecaptcha();
-            startEmailCountdown();
-        }).catch(function (error) {
-            show(error.message, true);
-            setButtonLoading(sendEmailButton, false);
         });
     });
 

@@ -75,7 +75,9 @@ class Controller extends BaseController
 
     public function register(Request $request)
     {
-        $response = (new PassportAuthController())->register($this->passportRequest($request, AuthRegister::class));
+        // Store registrations use the store-specific policy: email is the account identifier,
+        // but the platform-wide email verification switch does not apply here.
+        $response = (new PassportAuthController())->register($this->passportRequest($request, AuthRegister::class), true);
         $this->linkAuthenticatedUser($request, $response);
         return $response;
     }

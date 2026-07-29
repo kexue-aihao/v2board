@@ -22,7 +22,7 @@ use ReCaptcha\ReCaptcha;
 
 class AuthController extends Controller
 {
-    public function register(AuthRegister $request)
+    public function register(AuthRegister $request, bool $skipEmailVerification = false)
     {
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
@@ -63,7 +63,7 @@ class AuthController extends Controller
         }
         $email = $request->input('email');
         $cacheKeyEmail = is_string($email) ? strtolower(trim($email)) : '';
-        if ((int)config('v2board.email_verify', 0)) {
+        if (!$skipEmailVerification && (int)config('v2board.email_verify', 0)) {
             $inputCode = $request->input('email_code');
             if (!is_string($inputCode) || !preg_match('/^\d{6}$/', $inputCode)) {
                 abort(500, __('Incorrect email verification code'));
@@ -138,7 +138,7 @@ class AuthController extends Controller
         if (!$registered) {
             abort(500, __('Register failed'));
         }
-        if ((int)config('v2board.email_verify', 0)) {
+        if (!$skipEmailVerification && (int)config('v2board.email_verify', 0)) {
             Cache::forget(CacheKey::get('EMAIL_VERIFY_CODE', $cacheKeyEmail));
         }
 
