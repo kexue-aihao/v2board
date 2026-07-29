@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ResellerPayment;
+use App\Models\ResellerOrder;
 use Illuminate\Support\Facades\Crypt;
 
 class ResellerPaymentService
@@ -57,17 +58,22 @@ class ResellerPaymentService
         return (new $class([]))->form();
     }
 
-    public function pay($order, string $storeSlug, ?string $stripeToken = null): array
+    public function pay(ResellerOrder $order, string $storeSlug, ?string $stripeToken = null): array
     {
+        $platformOrder = $order->platformOrder;
+        if (!$platformOrder || empty($platformOrder->trade_no)) {
+            abort(500, 'Payment order is unavailable');
+        }
+
         $notifyUrl = url("/api/v1/store/{$storeSlug}/payment/notify/{$order->payment->uuid}");
-        $returnUrl = url("/store/{$storeSlug}#/order/{$order->trade_no}");
+        $returnUrl = url("/store/{$storeSlug}#/order/{$platformOrder->trade_no}");
 
         return $this->payment->pay([
             'notify_url' => $notifyUrl,
             'return_url' => $returnUrl,
-            'trade_no' => $order->trade_no,
-            'total_amount' => $order->total_amount,
-            'user_id' => $order->user_id,
+            'trade_no' => $platformOrder->trade_no,
+            'total_amount' => $platformOrder->total_amount,
+            'user_id' => $platformOrder->user_id,
             'stripe_token' => $stripeToken,
         ]);
     }
