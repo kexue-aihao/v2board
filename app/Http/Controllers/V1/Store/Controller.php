@@ -4,6 +4,8 @@ namespace App\Http\Controllers\V1\Store;
 
 use App\Http\Controllers\Controller as BaseController;
 use App\Http\Controllers\V1\Passport\AuthController as PassportAuthController;
+use App\Http\Requests\Passport\AuthLogin;
+use App\Http\Requests\Passport\AuthRegister;
 use App\Models\Order;
 use App\Models\ResellerAccount;
 use App\Models\ResellerCustomer;
@@ -71,14 +73,21 @@ class Controller extends BaseController
 
     public function register(Request $request)
     {
-        $response = (new PassportAuthController())->register($request);
+        $response = (new PassportAuthController())->register($this->passportRequest($request, AuthRegister::class));
         $this->linkAuthenticatedUser($request, $response);
         return $response;
     }
 
     public function login(Request $request)
     {
-        $response = (new PassportAuthController())->login($request);
+        $response = (new PassportAuthController())->login($this->passportRequest($request, AuthLogin::class));
+        $this->linkAuthenticatedUser($request, $response);
+        return $response;
+    }
+
+    public function verify2fa(Request $request)
+    {
+        $response = (new PassportAuthController())->verify2fa($request);
         $this->linkAuthenticatedUser($request, $response);
         return $response;
     }
@@ -229,5 +238,14 @@ class Controller extends BaseController
                 ['created_at' => time(), 'updated_at' => time()]
             );
         }
+    }
+
+    private function passportRequest(Request $request, string $requestClass): Request
+    {
+        /** @var \Illuminate\Foundation\Http\FormRequest $passportRequest */
+        $passportRequest = $requestClass::createFrom($request);
+        $passportRequest->setContainer(app())->setRedirector(app('redirect'));
+        $passportRequest->validateResolved();
+        return $passportRequest;
     }
 }

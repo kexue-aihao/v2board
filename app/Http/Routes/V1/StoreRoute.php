@@ -17,6 +17,7 @@ class StoreRoute
             $router->get('/payments', 'V1\\Store\\Controller@payments');
             $router->post('/passport/register', 'V1\\Store\\Controller@register');
             $router->post('/passport/login', 'V1\\Store\\Controller@login');
+            $router->post('/passport/verify2fa', 'V1\\Store\\Controller@verify2fa');
             $router->match(['get', 'post'], '/payment/notify/{payment_uuid}', 'V1\\Store\\Controller@notify');
 
             $router->group(['middleware' => 'user'], function ($router) {
