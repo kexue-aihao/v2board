@@ -22,6 +22,16 @@
         @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } .hero { display: block; } .hero-account { margin-top: 15px; text-align: left; } }
     </style>
 </head>
+@if (!$reseller_enabled)
+<body>
+<main class="page">
+    <section class="section" style="max-width:680px;margin:15vh auto;text-align:center">
+        <h1>倒卖商服务暂未开放</h1>
+        <p class="subtle">当前暂未开放店铺销售和客户购买，请稍后再试。</p>
+    </section>
+</main>
+</body>
+@else
 <body>
 <main class="page">
     <header class="hero"><div><p class="eyebrow">Subscription Store</p><h1 id="store-name">订阅店铺</h1><p id="store-description" class="hero-copy">正在加载店铺信息...</p></div><div id="account" class="hero-account">未登录</div></header>
@@ -38,4 +48,5 @@
 <script>window.STORE_SLUG = @json($slug);</script>
 <script src="/storefront/app.js"></script>
 </body>
+@endif
 </html>

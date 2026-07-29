@@ -7,8 +7,11 @@
 
     var auth = localStorage.getItem('reseller_auth') || '';
     var message = document.getElementById('message');
+    var serviceEnabled = document.body.dataset.resellerEnabled === '1';
     var messageTimer;
     var state = { account: null, saleEnabled: false };
+
+    if (!serviceEnabled) return;
 
     function show(text, bad) {
         window.clearTimeout(messageTimer);

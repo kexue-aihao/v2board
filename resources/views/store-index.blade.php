@@ -11,7 +11,11 @@
         #message { min-height:22px; color:#b42318; margin-top:12px; }
     </style>
 </head>
+@if (!$reseller_enabled)
+<body><main><h1>倒卖商服务暂未开放</h1><p>当前暂未开放店铺销售和客户购买，请稍后再试。</p></main>
+@else
 <body><main><h1>进入店铺</h1><p>请输入倒卖商提供的店铺标识，进入专属套餐和支付页面。</p><form id="store-form"><input name="slug" placeholder="例如 demo-store" pattern="[a-z0-9][a-z0-9-]{2,31}" required><button>进入</button></form><div id="message"></div></main>
 <script>document.getElementById('store-form').addEventListener('submit',function(e){e.preventDefault();var slug=e.target.slug.value.trim().toLowerCase();if(!/^[a-z0-9][a-z0-9-]{2,31}$/.test(slug)){document.getElementById('message').textContent='店铺标识格式不正确';return;}window.location.href='/store/'+encodeURIComponent(slug);});</script>
+@endif
 </body>
 </html>

@@ -9,6 +9,10 @@ class Reseller
 {
     public function handle($request, Closure $next)
     {
+        if (!(int)config('v2board.reseller_enable', 0)) {
+            abort(503, 'Reseller service is disabled');
+        }
+
         $authorization = trim((string)$request->input('auth_data', ''));
         if ($authorization === '') {
             $authorization = trim((string)$request->header('authorization', ''));

@@ -52,15 +52,23 @@ Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_pa
 });
 
 Route::get('/store/{slug}', function ($slug) {
-    return view('storefront', ['slug' => $slug]);
+    return view('storefront', [
+        'slug' => $slug,
+        'reseller_enabled' => (int)config('v2board.reseller_enable', 0),
+    ]);
 });
 
 Route::get('/store', function () {
-    return view('store-index');
+    return view('store-index', [
+        'reseller_enabled' => (int)config('v2board.reseller_enable', 0),
+    ]);
 });
 
 Route::get('/reseller', function () {
-    return view('reseller', ['title' => config('v2board.app_name', 'V2Board') . ' Reseller']);
+    return view('reseller', [
+        'title' => config('v2board.app_name', 'V2Board') . ' Reseller',
+        'reseller_enabled' => (int)config('v2board.reseller_enable', 0),
+    ]);
 });
 
 if (!empty(config('v2board.subscribe_path'))) {

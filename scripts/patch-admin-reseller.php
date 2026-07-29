@@ -43,6 +43,29 @@ JS;
     $bundle = str_replace($routeAnchor, $routeItem . "\n" . $routeAnchor, $bundle);
 }
 
+$settingMarker = 'onChange: e=>this.set("safe", "reseller_enable", e ? 1 : 0)';
+if (strpos($bundle, $settingMarker) === false) {
+    $settingAnchor = <<<'JS'
+                    onChange: e=>this.set("safe", "arithmetic_verification_enable", e ? 1 : 0)
+                })), _.recaptcha_enable ?
+JS;
+    $setting = <<<'JS'
+                    onChange: e=>this.set("safe", "arithmetic_verification_enable", e ? 1 : 0)
+                })), f.a.createElement(m, {
+                    title: "\u5012\u5356\u5546\u670d\u52a1",
+                    description: "\u5f00\u542f\u540e\u5141\u8bb8\u5916\u90e8\u7533\u8bf7\u5012\u5356\u5546\u8d26\u53f7\uff0c\u5e76\u5f00\u653e\u5df2\u5ba1\u6838\u5e97\u94fa\u7684\u9500\u552e\u9875\u3002"
+                }, f.a.createElement(l["a"], {
+                    checked: parseInt(_.reseller_enable),
+                    onChange: e=>this.set("safe", "reseller_enable", e ? 1 : 0)
+                })), _.recaptcha_enable ?
+JS;
+    if (strpos($bundle, $settingAnchor) === false) {
+        fwrite(STDERR, "Admin reseller setting anchor not found.\n");
+        exit(1);
+    }
+    $bundle = str_replace($settingAnchor, $setting, $bundle);
+}
+
 $modulePath = __DIR__ . '/admin-reseller-module.js';
 $moduleSource = file_get_contents($modulePath);
 if ($moduleSource === false || strpos($moduleSource, 'resellerpage: function') === false) {

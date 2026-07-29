@@ -103,14 +103,25 @@
         .audit-stat { display: flex; align-items: center; justify-content: space-between; padding: 13px; border: 1px solid var(--line); border-radius: 5px; }
         .audit-stat span { color: var(--primary); font-weight: 750; }
         .review-note { color: var(--muted); font-size: 12px; line-height: 1.7; }
+        .service-closed { display: grid; width: min(680px, calc(100% - 32px)); min-height: 260px; margin: 12vh auto 32px; padding: 42px 34px; place-items: center; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 22px 60px rgba(20,34,53,.08); text-align: center; }
+        .service-closed h1 { margin: 0 0 10px; font-size: 26px; }
+        .service-closed p { max-width: 480px; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.8; }
         @media (max-width: 860px) { .auth-shell { grid-template-columns: 1fr; margin-top: 20px; } .auth-aside { min-height: 300px; padding: 28px; } .auth-aside h1 { margin-top: 56px; } .auth-main { padding: 30px 26px; } .workspace { grid-template-columns: 1fr; } .sidebar { padding: 16px 18px; } .sidebar .brand { margin-bottom: 18px; } .sidebar-note { display: none; } .main { padding: 24px 16px; } }
         @media (max-width: 680px) { .dashboard { grid-template-columns: 1fr; } .topbar { display: block; } .topbar-actions { margin-top: 14px; } .topbar-actions .btn { flex: 1; } .status-overview { grid-template-columns: 1fr; } .two-col { grid-template-columns: 1fr; } .approval-banner { display: block; } .auth-main { padding: 25px 20px; } }
         @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
     </style>
 </head>
-<body>
+<body data-reseller-enabled="{{ $reseller_enabled ? '1' : '0' }}">
 <div id="message" class="toast" hidden role="status" aria-live="polite"></div>
-<section id="auth-shell" class="auth-shell">
+@if (!$reseller_enabled)
+<main class="service-closed" role="status">
+    <div>
+        <h1>倒卖商服务暂未开放</h1>
+        <p>当前暂未开放倒卖商账号注册、登录和店铺销售，请稍后再试。</p>
+    </div>
+</main>
+@endif
+<section id="auth-shell" class="auth-shell" @if (!$reseller_enabled) hidden @endif>
     <aside class="auth-aside">
         <div class="brand"><span class="brand-mark">R</span><span>Reseller Workspace</span></div>
         <h1>把你的销售店铺管理得更清楚。</h1>
