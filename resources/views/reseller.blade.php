@@ -198,6 +198,6 @@
         </div>
     </main>
 </section>
-<script src="/reseller/app.js"></script>
+<script src="/assets/reseller/app.js"></script>
 </body>
 </html>

@@ -45,6 +45,13 @@ git show-ref --verify --quiet "refs/remotes/origin/$DEPLOY_BRANCH" || {
 }
 git reset --hard "origin/$DEPLOY_BRANCH"
 
+# The reseller page used to share its URL with public/reseller/. Remove only
+# the now-empty legacy asset directory so Nginx does not redirect /reseller
+# to a directory instead of the Laravel route.
+if [ -d "$ROOT_DIR/public/reseller" ] && [ -z "$(find "$ROOT_DIR/public/reseller" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    rmdir "$ROOT_DIR/public/reseller"
+fi
+
 deploy_setup
 deploy_check_runtime
 deploy_download_composer
