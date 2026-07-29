@@ -5915,21 +5915,29 @@
                 })
             }
             set(e, t, n) {
-                var r = this.props.config;
+                var r = this.props.config
+                  , o = (this.pendingConfig || {})[e] || r[e]
+                  , i = u()({}, o, {
+                    [t]: n
+                });
+                this.pendingConfig = u()({}, this.pendingConfig, {
+                    [e]: i
+                }),
                 this.props.dispatch({
                     type: "config/setState",
                     payload: {
-                        [e]: u()({}, r[e], {
-                            [t]: n
-                        })
+                        [e]: i
                     }
                 }),
                 this.inputDelayTimer && clearTimeout(this.inputDelayTimer),
                 this.inputDelayTimer = setTimeout(function() {
+                    var t = this.pendingConfig && this.pendingConfig[e] || i;
                     this.inputDelayTimer = null,
+                    this.pendingConfig && delete this.pendingConfig[e],
                     this.props.dispatch({
                         type: "config/save",
-                        parentKey: e
+                        parentKey: e,
+                        payload: t
                     })
                 }
                 .bind(this), 1500)
@@ -17239,8 +17247,9 @@
                 },
                 save(e, t) {
                     var n = e.parentKey
-                      , r = t.put
-                      , o = t.select;
+                      , r = e.payload
+                      , o = t.put
+                      , l = t.select;
                     return u().mark(function e() {
                         var t, s;
                         return u().wrap(function(e) {
@@ -17248,11 +17257,12 @@
                                 switch (e.prev = e.next) {
                                 case 0:
                                     return e.next = 2,
-                                    o(e=>e.config);
+                                    l(e=>e.config);
                                 case 2:
                                     return t = e.sent,
+                                    t = r || t[n],
                                     e.next = 5,
-                                    Object(c["b"])("/" + window.settings.secure_path + "/config/save", a()({}, t[n]));
+                                    Object(c["b"])("/" + window.settings.secure_path + "/config/save", a()({}, t));
                                 case 5:
                                     if (s = e.sent,
                                     200 === s.code) {
@@ -17263,7 +17273,7 @@
                                 case 8:
                                     return i["a"].success("\u4fdd\u5b58\u6210\u529f"),
                                     e.next = 11,
-                                    r({
+                                    o({
                                         type: "fetch"
                                     });
                                 case 11:
