@@ -47,10 +47,7 @@ class EPay {
         if (!empty($this->config['type'])) {
             $params['type'] = $this->config['type'];
         }
-        ksort($params);
-        reset($params);
-        $str = stripslashes(urldecode(http_build_query($params))) . $this->config['key'];
-        $params['sign'] = md5($str);
+        $params['sign'] = $this->sign($params);
         $params['sign_type'] = 'MD5';
         return [
             'type' => 1, // 0:qrcode 1:url
@@ -60,26 +57,33 @@ class EPay {
 
     public function notify($params)
     {
-        $sign = $params['sign'];
-        unset($params['sign']);
-        unset($params['sign_type']);
-        ksort($params);
-        reset($params);
-        $str = stripslashes(urldecode(http_build_query($params))) . $this->config['key'];
-        $generateSignature = md5($str);
-        if (!hash_equals($generateSignature, $sign)) {
+        if (!is_array($params) || empty($params['sign'])) {
             return false;
         }
+        $sign = strtolower(trim((string)$params['sign']));
+        if (!hash_equals($this->sign($params), $sign)) return false;
 
-        // 强制要求交易状态为成功，避免未支付/处理中状态被误入账
-        $tradeStatus = $params['trade_status'] ?? '';
-        if ($tradeStatus !== 'TRADE_SUCCESS') {
-            return('fail');
+        $tradeStatus = strtoupper(trim((string)($params['trade_status'] ?? '')));
+        if (!in_array($tradeStatus, ['TRADE_SUCCESS', 'TRADE_FINISHED'], true)) {
+            return false;
         }
+        if (empty($params['out_trade_no']) || empty($params['trade_no'])) return false;
 
         return [
             'trade_no' => $params['out_trade_no'],
             'callback_no' => $params['trade_no']
         ];
+    }
+
+    private function sign(array $params): string
+    {
+        unset($params['sign'], $params['sign_type']);
+        ksort($params);
+        $parts = [];
+        foreach ($params as $key => $value) {
+            if ($value === '' || $value === null || is_array($value) || is_object($value)) continue;
+            $parts[] = $key . '=' . (string)$value;
+        }
+        return md5(implode('&', $parts) . (string)$this->config['key']);
     }
 }

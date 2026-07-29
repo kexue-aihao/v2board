@@ -13,6 +13,7 @@ use App\Models\ResellerSharedSubscription;
 use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class ResellerOrderService
 {
@@ -150,6 +151,14 @@ class ResellerOrderService
 
         $result = (new ResellerPaymentService($payment))->notify($params);
         if (!$result || !is_array($result) || empty($result['trade_no'])) {
+            Log::warning('Reseller payment callback verification failed', [
+                'reseller_id' => (int)$store->id,
+                'payment_id' => (int)$payment->id,
+                'driver' => $payment->driver,
+                'parameter_keys' => array_keys($params),
+                'trade_status' => $params['trade_status'] ?? null,
+                'out_trade_no' => $params['out_trade_no'] ?? null,
+            ]);
             abort(500, 'Payment verification failed');
         }
 

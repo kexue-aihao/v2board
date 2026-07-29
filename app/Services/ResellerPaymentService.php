@@ -35,7 +35,7 @@ class ResellerPaymentService
             abort(500, 'Payment configuration is invalid');
         }
 
-        $this->config = $decoded;
+        $this->config = $this->normalizeConfig($decoded);
         $this->payment = new $this->class($this->config);
     }
 
@@ -108,5 +108,20 @@ class ResellerPaymentService
             return (int)round((float)$params['amount'] * 100);
         }
         return null;
+    }
+
+    private function normalizeConfig(array $config): array
+    {
+        if ($this->driver !== 'EPay') return $config;
+
+        foreach (['url', 'pid', 'key', 'type'] as $key) {
+            if (isset($config[$key]) && is_string($config[$key])) {
+                $config[$key] = trim($config[$key]);
+            }
+        }
+        if (!empty($config['url'])) {
+            $config['url'] = rtrim($config['url'], '/');
+        }
+        return $config;
     }
 }

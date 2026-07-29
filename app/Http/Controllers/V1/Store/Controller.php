@@ -305,7 +305,11 @@ class Controller extends BaseController
 
     public function notify(Request $request, $slug, $payment_uuid)
     {
-        return (new ResellerOrderService())->notify($this->store($request), $payment_uuid, $request->input());
+        return (new ResellerOrderService())->notify(
+            $this->store($request),
+            $payment_uuid,
+            $this->callbackParams($request)
+        );
     }
 
     private function ownedMapping(Request $request): ResellerOrder
@@ -373,5 +377,14 @@ class Controller extends BaseController
         $passportRequest->setContainer(app())->setRedirector(app('redirect'));
         $passportRequest->validateResolved();
         return $passportRequest;
+    }
+
+    private function callbackParams(Request $request): array
+    {
+        $params = array_replace($request->query->all(), $request->request->all(), $request->input());
+        if ($params) return $params;
+
+        $decoded = json_decode((string)$request->getContent(), true);
+        return is_array($decoded) ? $decoded : [];
     }
 }
