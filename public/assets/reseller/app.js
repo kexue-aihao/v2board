@@ -12,6 +12,7 @@
     var state = { account: null, saleEnabled: false };
     var paymentFormRequest = 0;
     var paymentFormReady = false;
+    var priceFields = ['month_price', 'quarter_price', 'half_year_price', 'year_price', 'two_year_price', 'three_year_price', 'onetime_price'];
 
     if (!serviceEnabled) return;
 
@@ -58,6 +59,29 @@
         var body = {};
         new FormData(form).forEach(function (value, key) {
             if (value !== '') body[key] = value;
+        });
+        return body;
+    }
+
+    function yuanToCents(value) {
+        var normalized = String(value).trim();
+        if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) {
+            throw new Error('\u4ef7\u683c\u9700\u4e3a\u5927\u4e8e 0 \u7684\u91d1\u989d\uff0c\u6700\u591a\u4fdd\u7559\u4e24\u4f4d\u5c0f\u6570');
+        }
+        var parts = normalized.split('.');
+        var cents = Number(parts[0]) * 100 + Number((parts[1] || '').padEnd(2, '0'));
+        if (!Number.isSafeInteger(cents) || cents < 1) {
+            throw new Error('\u4ef7\u683c\u9700\u5927\u4e8e 0 \u5143');
+        }
+        return cents;
+    }
+
+    function planBody(form) {
+        var body = formBody(form);
+        priceFields.forEach(function (field) {
+            if (Object.prototype.hasOwnProperty.call(body, field)) {
+                body[field] = yuanToCents(body[field]);
+            }
         });
         return body;
     }
@@ -111,7 +135,7 @@
     }
 
     function money(value) {
-        return value === null || value === undefined || value === '' ? '-' : '¥' + (Number(value) / 100).toFixed(2);
+        return value === null || value === undefined || value === '' ? '-' : '\u00a5' + (Number(value) / 100).toFixed(2);
     }
 
     function statusText(status) {
@@ -180,8 +204,17 @@
     function loadTemplates() {
         return api('/plan-template').then(function (result) {
             var list = result.data || [];
+            var select = document.getElementById('plan-template-select');
+            var selected = select.value;
+            select.innerHTML = '<option value="">\u8bf7\u9009\u62e9\u7ba1\u7406\u5458\u5df2\u4e0a\u67b6\u5957\u9910</option>' + list.map(function (template) {
+                return '<option value="' + Number(template.id) + '">' + escapeHtml(template.name) + '</option>';
+            }).join('');
+            select.disabled = !list.length;
+            if (list.some(function (template) { return String(template.id) === selected; })) {
+                select.value = selected;
+            }
             document.getElementById('templates').innerHTML = list.length ? list.map(function (template) {
-                return '<button class="template-option" type="button" data-template-id="' + Number(template.id) + '"><strong>' + escapeHtml(template.name) + '</strong><span>模板 #' + Number(template.id) + '</span></button>';
+                return '<button class="template-option" type="button" data-template-id="' + Number(template.id) + '" data-template-name="' + escapeHtml(template.name) + '"><strong>' + escapeHtml(template.name) + '</strong><span>管理员已上架套餐</span></button>';
             }).join('') : '<div class="empty-state">管理员还没有发布可销售的基础套餐。</div>';
         });
     }
@@ -190,8 +223,12 @@
         return api('/plans').then(function (result) {
             var list = result.data || [];
             document.getElementById('plans').innerHTML = list.length ? list.map(function (plan) {
-                var prices = [money(plan.month_price) + ' 月付', money(plan.quarter_price) + ' 季付', money(plan.year_price) + ' 年付'].join(' · ');
-                return '<div class="list-row"><div><strong>' + escapeHtml(plan.name) + '</strong><span>基础套餐 #' + Number(plan.base_plan_id) + '</span></div><em>' + prices + '</em></div>';
+                var labels = {month_price: '\u6708\u4ed8', quarter_price: '\u5b63\u4ed8', half_year_price: '\u534a\u5e74\u4ed8', year_price: '\u5e74\u4ed8', two_year_price: '\u4e24\u5e74\u4ed8', three_year_price: '\u4e09\u5e74\u4ed8', onetime_price: '\u4e00\u6b21\u6027'};
+                var prices = priceFields.filter(function (field) { return Number(plan[field] || 0) > 0; }).map(function (field) {
+                    return money(plan[field]) + ' ' + labels[field];
+                }).join(' \u00b7 ') || '-';
+                var baseName = plan.base && plan.base.name ? plan.base.name : ('#' + Number(plan.base_plan_id));
+                return '<div class="list-row"><div><strong>' + escapeHtml(plan.name) + '</strong><span>\u57fa\u7840\u5957\u9910\uff1a' + escapeHtml(baseName) + '</span></div><em>' + prices + '</em></div>';
             }).join('') : '<div class="empty-state">还没有销售套餐。先从右侧选择基础套餐并设置价格。</div>';
         });
     }
@@ -360,9 +397,16 @@
 
     document.getElementById('plan-form').addEventListener('submit', function (event) {
         event.preventDefault();
+        var body;
+        try {
+            body = planBody(event.target);
+        } catch (error) {
+            show(error.message, true);
+            return;
+        }
         var button = event.target.querySelector('button[type="submit"]');
         setButtonLoading(button, true, '保存中...');
-        api('/plans', {method: 'POST', body: JSON.stringify(formBody(event.target))}).then(function () {
+        api('/plans', {method: 'POST', body: JSON.stringify(body)}).then(function () {
             show('销售套餐已保存。');
             return loadPlans();
         }).catch(function (error) {
@@ -398,7 +442,7 @@
         if (!option) return;
         document.getElementById('plan-form').elements.base_plan_id.value = option.dataset.templateId;
         document.getElementById('plan-form').elements.name.focus();
-        show('已选择基础套餐 #' + option.dataset.templateId + '，请继续填写销售名称和价格。');
+        show('已选择“' + (option.dataset.templateName || '基础套餐') + '”，请继续填写销售名称和价格。');
     });
 
     document.getElementById('load-customers').addEventListener('click', function (event) {
