@@ -6,7 +6,7 @@
     <title>订阅店铺</title>
     <style>
         :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #182230; background: #f5f7fa; }
-        * { box-sizing: border-box; } body { margin: 0; }
+        * { box-sizing: border-box; } [hidden] { display: none !important; } body { margin: 0; }
         button, input, select { font: inherit; } button { border: 0; border-radius: 7px; padding: 10px 14px; color: #fff; background: #246bce; cursor: pointer; } button:hover { background: #1d5bb1; } button:disabled { cursor: not-allowed; opacity: .62; } button.secondary, button.text-button { color: #344054; border: 1px solid #d0d5dd; background: #fff; } button.text-button { padding: 0; border: 0; color: #246bce; background: transparent; font-size: 13px; font-weight: 600; }
         input, select { width: 100%; margin-top: 7px; padding: 10px 11px; border: 1px solid #d0d5dd; border-radius: 7px; background: #fff; }
         label { display: block; color: #475467; font-size: 13px; font-weight: 600; } form { display: grid; gap: 12px; }
@@ -46,7 +46,13 @@
     </div>
 </main>
 <script>window.STORE_SLUG = @json($slug);</script>
-<script src="/storefront/app.js"></script>
+@php
+    $storefrontAssetPath = public_path('storefront/app.js');
+    $storefrontAssetVersion = is_file($storefrontAssetPath)
+        ? filemtime($storefrontAssetPath) . '-' . substr(hash_file('sha256', $storefrontAssetPath), 0, 12)
+        : config('app.version');
+@endphp
+<script src="/storefront/app.js?v={{ $storefrontAssetVersion }}"></script>
 </body>
 @endif
 </html>

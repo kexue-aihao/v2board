@@ -52,10 +52,10 @@ Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_pa
 });
 
 Route::get('/store/{slug}', function ($slug) {
-    return view('storefront', [
+    return response()->view('storefront', [
         'slug' => $slug,
         'reseller_enabled' => (int)config('v2board.reseller_enable', 0),
-    ]);
+    ])->header('Cache-Control', 'no-store, no-cache, must-revalidate');
 });
 
 Route::get('/store', function () {
