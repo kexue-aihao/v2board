@@ -809,6 +809,14 @@ CREATE TABLE `v2_reseller_account` (
     `store_name` varchar(128) NOT NULL,
     `store_description` text DEFAULT NULL,
     `status` varchar(16) NOT NULL DEFAULT 'pending',
+    `reseller_status` varchar(16) DEFAULT 'pending',
+    `store_status` varchar(16) DEFAULT 'pending',
+    `reseller_review_reason` varchar(500) DEFAULT NULL,
+    `store_review_reason` varchar(500) DEFAULT NULL,
+    `reseller_reviewed_by` int(11) DEFAULT NULL,
+    `reseller_reviewed_at` int(11) DEFAULT NULL,
+    `store_reviewed_by` int(11) DEFAULT NULL,
+    `store_reviewed_at` int(11) DEFAULT NULL,
     `last_login_at` bigint(20) DEFAULT NULL,
     `last_login_ip` varchar(45) DEFAULT NULL,
     `created_at` int(11) NOT NULL,
@@ -816,7 +824,23 @@ CREATE TABLE `v2_reseller_account` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `email` (`email`),
     UNIQUE KEY `store_slug` (`store_slug`),
-    KEY `status` (`status`)
+    KEY `status` (`status`),
+    KEY `reseller_status` (`reseller_status`),
+    KEY `store_status` (`store_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_review_log` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `reseller_id` bigint(20) unsigned NOT NULL,
+    `target_type` varchar(16) NOT NULL,
+    `from_status` varchar(16) DEFAULT NULL,
+    `to_status` varchar(16) NOT NULL,
+    `reason` varchar(500) DEFAULT NULL,
+    `operator_id` int(11) NOT NULL,
+    `created_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `reseller_target_created` (`reseller_id`,`target_type`,`created_at`),
+    KEY `operator_created` (`operator_id`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `v2_reseller_plan_template` (

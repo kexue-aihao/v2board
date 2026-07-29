@@ -198,6 +198,6 @@ class ResellerOrderService
 
     private function enabledStore(ResellerAccount $store): bool
     {
-        return (int)$store->id > 0 && $store->status === 'active';
+        return (int)$store->id > 0 && $store->isFullyActive();
     }
 }

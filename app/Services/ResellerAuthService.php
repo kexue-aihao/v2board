@@ -50,7 +50,7 @@ class ResellerAuthService
             }
 
             $account = ResellerAccount::find((int)$payload['reseller_id']);
-            if (!$account || $account->status !== 'active') {
+            if (!$account || !$account->isAccountActive()) {
                 return null;
             }
 
@@ -84,6 +84,8 @@ class ResellerAuthService
             'store_slug' => $account->store_slug,
             'store_name' => $account->store_name,
             'status' => $account->status,
+            'reseller_status' => $account->accountStatus(),
+            'store_status' => $account->storeStatus(),
         ];
     }
 

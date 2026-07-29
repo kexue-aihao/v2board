@@ -35,6 +35,8 @@ class AuthController extends Controller
         $account->store_slug = $data['store_slug'];
         $account->store_name = $data['store_name'];
         $account->status = 'pending';
+        $account->reseller_status = 'pending';
+        $account->store_status = 'pending';
         $account->save();
 
         return response(['data' => [
@@ -56,10 +58,10 @@ class AuthController extends Controller
         if (!$account || !Hash::check($data['password'], $account->password)) {
             abort(403, 'Incorrect email or password');
         }
-        if ($account->status === 'pending') {
+        if ($account->accountStatus() === 'pending') {
             abort(403, 'Reseller account awaits administrator approval');
         }
-        if ($account->status !== 'active') {
+        if (!$account->isAccountActive()) {
             abort(403, 'Reseller account is unavailable');
         }
 

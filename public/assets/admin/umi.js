@@ -21442,6 +21442,16 @@
                             className: "nav-main-link-icon si si-bulb"
                         })
                     }, {
+                        title: "\u6e20\u9053\u7ba1\u7406",
+                        type: "heading"
+                    }, {
+                        title: "\u5012\u5356\u5546\u7ba1\u7406",
+                        type: "item",
+                        href: "/reseller",
+                        icon: o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-layers"
+                        })
+                    }, {
                         title: "风控",
                         type: "heading"
                     }, {
@@ -83336,6 +83346,10 @@
             exact: !0,
             component: n("d1ca").default
         }, {
+            path: "/reseller",
+            exact: !0,
+            component: n("resellerpage").default
+        }, {
             path: "/risk/rule",
             exact: !0,
             component: n("riskrulepage").default
@@ -117555,6 +117569,19 @@
             }
         }
         t["default"] = Object(k["c"])()(RiskTracePage)
+    },
+    resellerpage: function(e, t, n) {
+        "use strict";
+        n.r(t);
+        var r = n("q1tI")
+          , i = n.n(r);
+        function ResellerPage() {
+            return i.a.createElement("div", {
+                id: "reseller-admin-module",
+                className: "content"
+            });
+        }
+        t.default = ResellerPage;
     }
 });
 

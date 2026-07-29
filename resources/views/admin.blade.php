@@ -8,7 +8,7 @@
         $adminAssetVersions = array_filter(array_map(function ($file) {
             $path = public_path("assets/admin/{$file}");
             return is_file($path) ? filemtime($path) : null;
-        }, ['umi.js', 'umi.css', 'custom.css', 'vendors.async.js', 'components.async.js']));
+        }, ['umi.js', 'umi.css', 'custom.css', 'vendors.async.js', 'components.async.js', 'reseller.js']));
         $adminAssetVersion = $adminAssetVersions ? max($adminAssetVersions) : $version;
     @endphp
     <link rel="stylesheet" href="/assets/admin/components.chunk.css?v={{$adminAssetVersion}}">
@@ -43,14 +43,10 @@
 
 <body>
 <div id="root"></div>
-<a class="reseller-entry" href="/{{$secure_path}}/reseller" title="打开倒卖商审批">倒卖商审批</a>
-<style>
-    .reseller-entry { position: fixed; right: 24px; bottom: 24px; z-index: 9999; padding: 9px 13px; border: 1px solid rgba(255,255,255,.35); border-radius: 6px; color: #fff; background: #2671d9; box-shadow: 0 4px 12px rgba(16,24,40,.18); font: 13px/1.2 system-ui, sans-serif; text-decoration: none; }
-    .reseller-entry:hover { background: #1f5fb8; }
-</style>
 <script src="/assets/admin/vendors.async.js?v={{$adminAssetVersion}}"></script>
 <script src="/assets/admin/components.async.js?v={{$adminAssetVersion}}"></script>
 <script src="/assets/admin/umi.js?v={{$adminAssetVersion}}"></script>
+<script src="/assets/admin/reseller.js?v={{$adminAssetVersion}}"></script>
 </body>
 
 </html>

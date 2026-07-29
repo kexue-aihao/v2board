@@ -18,9 +18,8 @@ class Storefront
         }
 
         $store = ResellerAccount::where('store_slug', $slug)
-            ->where('status', 'active')
             ->first();
-        if (!$store) {
+        if (!$store || !$store->isFullyActive()) {
             abort(404, 'Store does not exist');
         }
 

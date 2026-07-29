@@ -16,7 +16,8 @@ class SchemaUpgradeService
         'risk_rule_schema' => 'risk_rule_schema_v1',
         'token_history_schema' => 'token_history_schema_v1',
         'password_policy_schema' => 'password_policy_schema_v1',
-        'reseller_schema' => 'reseller_schema_v1'
+        'reseller_schema' => 'reseller_schema_v1',
+        'reseller_approval_schema' => 'reseller_approval_schema_v1'
     ];
 
     public function run(): array
@@ -79,6 +80,9 @@ class SchemaUpgradeService
                 return;
             case 'reseller_schema':
                 $this->applyResellerSchema();
+                return;
+            case 'reseller_approval_schema':
+                $this->applyResellerApprovalSchema();
                 return;
         }
 
@@ -722,6 +726,56 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_reseller_order', 'platform_order_id', ['platform_order_id'], true);
         $this->ensureIndex('v2_reseller_order', 'reseller_user_created', ['reseller_id', 'user_id', 'created_at']);
         $this->ensureIndex('v2_reseller_order', 'reseller_plan', ['reseller_id', 'reseller_plan_id']);
+    }
+
+    private function applyResellerApprovalSchema(): void
+    {
+        $this->requireTable('v2_reseller_account');
+
+        foreach ([
+            'reseller_status' => 'varchar(16) DEFAULT NULL',
+            'store_status' => 'varchar(16) DEFAULT NULL',
+            'reseller_review_reason' => 'varchar(500) DEFAULT NULL',
+            'store_review_reason' => 'varchar(500) DEFAULT NULL',
+            'reseller_reviewed_by' => 'int(11) DEFAULT NULL',
+            'reseller_reviewed_at' => 'int(11) DEFAULT NULL',
+            'store_reviewed_by' => 'int(11) DEFAULT NULL',
+            'store_reviewed_at' => 'int(11) DEFAULT NULL',
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_reseller_account', $column, $definition);
+        }
+
+        DB::statement("UPDATE `v2_reseller_account`
+            SET `reseller_status` = CASE
+                WHEN `status` IN ('active', 'suspended', 'rejected', 'pending') THEN `status`
+                ELSE 'pending'
+            END
+            WHERE `reseller_status` IS NULL OR `reseller_status` = ''");
+        DB::statement("UPDATE `v2_reseller_account`
+            SET `store_status` = CASE
+                WHEN `status` IN ('active', 'suspended', 'rejected', 'pending') THEN `status`
+                ELSE 'pending'
+            END
+            WHERE `store_status` IS NULL OR `store_status` = ''");
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_reseller_review_log` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `reseller_id` bigint(20) unsigned NOT NULL,
+            `target_type` varchar(16) NOT NULL,
+            `from_status` varchar(16) DEFAULT NULL,
+            `to_status` varchar(16) NOT NULL,
+            `reason` varchar(500) DEFAULT NULL,
+            `operator_id` int(11) NOT NULL,
+            `created_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `reseller_target_created` (`reseller_id`,`target_type`,`created_at`),
+            KEY `operator_created` (`operator_id`,`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        $this->ensureIndex('v2_reseller_account', 'reseller_status', ['reseller_status']);
+        $this->ensureIndex('v2_reseller_account', 'store_status', ['store_status']);
+        $this->ensureIndex('v2_reseller_review_log', 'reseller_target_created', ['reseller_id', 'target_type', 'created_at']);
+        $this->ensureIndex('v2_reseller_review_log', 'operator_created', ['operator_id', 'created_at']);
     }
 
     private function requireTable(string $table): void

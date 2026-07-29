@@ -24,4 +24,44 @@ class ResellerAccount extends Model
     {
         return $this->hasMany(ResellerOrder::class, 'reseller_id');
     }
+
+    public function reviewLogs()
+    {
+        return $this->hasMany(ResellerReviewLog::class, 'reseller_id');
+    }
+
+    public function plans()
+    {
+        return $this->hasMany(ResellerPlan::class, 'reseller_id');
+    }
+
+    public function payments()
+    {
+        return $this->hasMany(ResellerPayment::class, 'reseller_id');
+    }
+
+    public function accountStatus(): string
+    {
+        return (string)($this->attributes['reseller_status'] ?? $this->attributes['status'] ?? 'pending');
+    }
+
+    public function storeStatus(): string
+    {
+        return (string)($this->attributes['store_status'] ?? $this->attributes['status'] ?? 'pending');
+    }
+
+    public function isAccountActive(): bool
+    {
+        return $this->accountStatus() === 'active';
+    }
+
+    public function isStoreActive(): bool
+    {
+        return $this->storeStatus() === 'active';
+    }
+
+    public function isFullyActive(): bool
+    {
+        return $this->isAccountActive() && $this->isStoreActive();
+    }
 }
