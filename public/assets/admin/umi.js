@@ -117812,6 +117812,10 @@
             this.setState({modal: {id: item.id, target: target, status: status, name: target === "account" ? item.email : item.store_name, reason: ""}, error: ""});
         }
 
+        resetPasswordAction(item) {
+            this.setState({modal: {type: "password", id: item.id, name: item.email, password: ""}, error: ""});
+        }
+
         closeModal() {
             this.setState({modal: null, saving: false});
         }
@@ -117832,6 +117836,43 @@
             }).catch(function (error) {
                 if (!self.unmounted) self.setState({saving: false, error: error.message || "审批失败，请重试"});
             });
+        }
+
+        submitPasswordReset() {
+            var modal = this.state.modal;
+            if (!modal || modal.type !== "password") return;
+            var self = this;
+            this.setState({saving: true, error: ""});
+            this.api("/reseller/accounts/reset-password", {method: "POST", body: JSON.stringify({id: modal.id})}).then(function (result) {
+                var data = result.data || {};
+                if (!data.password) throw new Error("\u672a\u80fd\u83b7\u53d6\u65b0\u5bc6\u7801");
+                if (!self.unmounted) self.setState({saving: false, modal: assign()({}, self.state.modal, {password: data.password})});
+            }).catch(function (error) {
+                if (!self.unmounted) self.setState({saving: false, error: error.message || "\u5bc6\u7801\u91cd\u7f6e\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5"});
+            });
+        }
+
+        copyResetPassword() {
+            var modal = this.state.modal;
+            var password = modal && modal.password;
+            if (!password) return;
+            var self = this;
+            var copied = function () {
+                if (!self.unmounted) self.setState({notice: "\u65b0\u5bc6\u7801\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f"});
+            };
+            var fallback = function () {
+                var field = document.getElementById("reseller-reset-password");
+                if (!field) return;
+                field.focus();
+                field.select();
+                document.execCommand("copy");
+                copied();
+            };
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(password).then(copied).catch(fallback);
+            } else {
+                fallback();
+            }
         }
 
         saveTemplate(event) {
@@ -117873,6 +117914,9 @@
         actionButtons(item, target) {
             var status = target === "account" ? (item.reseller_status || item.status) : (item.store_status || item.status);
             var buttons = [];
+            if (target === "account") {
+                buttons.push(h("a", {key: "password", onClick: this.resetPasswordAction.bind(this, item)}, "\u91cd\u7f6e\u5bc6\u7801"));
+            }
             if (status === "pending") {
                 buttons.push(h("a", {key: "approve", onClick: this.reviewAction.bind(this, item, target, "active")}, "审核通过"));
                 buttons.push(h("a", {key: "reject", className: "ra-danger", onClick: this.reviewAction.bind(this, item, target, "rejected")}, "拒绝"));
@@ -117928,6 +117972,12 @@
             var self = this;
             var modal = this.state.modal;
             if (!modal) return null;
+            if (modal.type === "password") {
+                if (modal.password) {
+                    return h(Modal["a"], {title: "\u8bf7\u5b89\u5168\u4fdd\u5b58\u65b0\u5bc6\u7801", visible: true, onCancel: this.closeModal.bind(this), onOk: this.closeModal.bind(this), okText: "\u6211\u5df2\u4fdd\u5b58", cancelText: "\u5173\u95ed"}, h("div", {className: "ra-modal-body"}, h("p", {className: "text-muted"}, "\u65b0\u5bc6\u7801\u4ec5\u663e\u793a\u4e00\u6b21\uff0c\u5173\u95ed\u7a97\u53e3\u540e\u65e0\u6cd5\u518d\u6b21\u67e5\u770b\u3002"), h("textarea", {id: "reseller-reset-password", readOnly: true, value: modal.password, onFocus: function (event) { event.target.select(); }}), h(Button["a"], {type: "primary", onClick: this.copyResetPassword.bind(this), style: {marginTop: 12}}, "\u590d\u5236\u5bc6\u7801")));
+                }
+                return h(Modal["a"], {title: "\u91cd\u7f6e\u5012\u5356\u5546\u5bc6\u7801", visible: true, onCancel: this.closeModal.bind(this), onOk: this.submitPasswordReset.bind(this), confirmLoading: this.state.saving, okText: "\u751f\u6210\u65b0\u5bc6\u7801", cancelText: "\u53d6\u6d88"}, h("div", {className: "ra-modal-body"}, h("p", {className: "text-muted"}, "\u5c06\u7acb\u5373\u4f7f\u8be5\u8d26\u53f7\u7684\u6240\u6709\u5df2\u767b\u5f55\u4f1a\u8bdd\u5931\u6548\uff0c\u5e76\u751f\u6210\u65b0\u7684 64 \u4f4d\u968f\u673a\u5bc6\u7801\u3002")));
+            }
             var required = modal.status === "rejected" || modal.status === "suspended";
             return h(Modal["a"], {title: statusLabel(modal.status) + "：" + modal.name, visible: true, onCancel: this.closeModal.bind(this), onOk: this.submitReview.bind(this), confirmLoading: this.state.saving, okText: "确认", cancelText: "取消"}, h("div", {className: "ra-modal-body"}, h("p", {className: "text-muted"}, "审批操作会记录管理员、时间和备注。"), h("textarea", {value: modal.reason, required: required, onChange: function (event) { self.setState({modal: assign()({}, self.state.modal, {reason: event.target.value})}); }, placeholder: required ? "请填写拒绝或停用原因" : "可选：填写本次审核备注"})));
         }

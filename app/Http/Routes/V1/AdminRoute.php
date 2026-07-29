@@ -204,6 +204,7 @@ class AdminRoute
             $router->get ('/reseller/summary', 'V1\\Admin\\ResellerController@summary');
             $router->get ('/reseller/accounts', 'V1\\Admin\\ResellerController@accounts');
             $router->post('/reseller/accounts/review', 'V1\\Admin\\ResellerController@review');
+            $router->post('/reseller/accounts/reset-password', 'V1\\Admin\\ResellerController@resetPassword');
             $router->get ('/reseller/stores', 'V1\\Admin\\ResellerController@stores');
             $router->post('/reseller/stores/review', 'V1\\Admin\\ResellerController@review');
             $router->get ('/reseller/review-logs', 'V1\\Admin\\ResellerController@reviewLogs');

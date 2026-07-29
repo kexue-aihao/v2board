@@ -8,6 +8,8 @@ use App\Models\ResellerAccount;
 use App\Models\ResellerOrder;
 use App\Models\ResellerPlanTemplate;
 use App\Models\ResellerReviewLog;
+use App\Services\PasswordPolicyService;
+use App\Services\ResellerAuthService;
 use App\Services\ResellerPaymentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
@@ -139,6 +141,45 @@ class ResellerController extends Controller
         return response(['data' => $query->paginate(
             $this->pageSize($request), ['*'], 'page', $this->currentPage($request)
         )]);
+    }
+
+    public function resetPassword(Request $request)
+    {
+        $data = $request->validate([
+            'id' => 'required|integer',
+        ]);
+        $password = PasswordPolicyService::generate();
+
+        $account = DB::transaction(function () use ($data, $password, $request) {
+            $account = ResellerAccount::where('id', $data['id'])->lockForUpdate()->first();
+            if (!$account) {
+                abort(404, 'Reseller account does not exist');
+            }
+
+            $status = $account->accountStatus();
+            $account->password = password_hash($password, PASSWORD_DEFAULT);
+            $account->save();
+
+            ResellerReviewLog::create([
+                'reseller_id' => $account->id,
+                'target_type' => 'account',
+                'from_status' => $status,
+                'to_status' => $status,
+                'reason' => 'Password reset by administrator',
+                'operator_id' => (int)$request->user['id'],
+                'created_at' => time(),
+            ]);
+
+            return $account;
+        });
+
+        (new ResellerAuthService())->revokeAll($account);
+
+        return response(['data' => [
+            'id' => (int)$account->id,
+            'password' => $password,
+            'password_length' => PasswordPolicyService::LENGTH,
+        ]]);
     }
 
     public function fetch()

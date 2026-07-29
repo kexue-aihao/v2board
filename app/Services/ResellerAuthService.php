@@ -78,6 +78,11 @@ class ResellerAuthService
         Cache::put($key, $sessions, self::SESSION_TTL);
     }
 
+    public function revokeAll(ResellerAccount $account): void
+    {
+        Cache::forget($this->sessionKey((int)$account->id));
+    }
+
     public function safeAccount(ResellerAccount $account): array
     {
         return [
