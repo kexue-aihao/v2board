@@ -17,6 +17,7 @@ use App\Services\ResellerSharedSubscriptionService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 
 class Controller extends BaseController
 {
@@ -167,39 +168,58 @@ class Controller extends BaseController
         }
         ResellerPaymentService::form($data['driver']);
         $accountId = (int)$request->reseller['id'];
-        $payment = !empty($data['id'])
-            ? ResellerPayment::where('id', $data['id'])->where('reseller_id', $accountId)->first()
-            : new ResellerPayment();
-        if (!$payment) abort(404, 'Payment method does not exist');
-        if ($payment->exists && $payment->driver !== $data['driver']) {
-            abort(422, 'Payment driver cannot be changed. Delete this configuration and create a new one.');
-        }
-        $data['config'] = $this->validatePaymentConfig(
-            $data['driver'], $this->mergedPaymentConfig($payment, $data['config'])
-        );
-        $payment->reseller_id = $accountId;
-        $payment->driver = $data['driver'];
-        $payment->name = $data['name'];
-        $payment->config_encrypted = Crypt::encryptString(json_encode($data['config'], JSON_UNESCAPED_UNICODE));
-        $payment->enabled = (int)($data['enabled'] ?? 0);
-        $payment->sort = (int)($data['sort'] ?? 0);
-        $payment->uuid = $payment->uuid ?: Helper::randomChar(32);
-        $payment->save();
-        return response(['data' => ['id' => $payment->id, 'uuid' => $payment->uuid]]);
+        $result = DB::transaction(function () use ($data, $accountId) {
+            $payment = !empty($data['id'])
+                ? ResellerPayment::where('id', $data['id'])
+                    ->where('reseller_id', $accountId)
+                    ->lockForUpdate()
+                    ->first()
+                : new ResellerPayment();
+            if (!$payment) abort(404, 'Payment method does not exist');
+            if ($payment->exists && $payment->driver !== $data['driver']) {
+                abort(422, 'Payment driver cannot be changed. Delete this configuration and create a new one.');
+            }
+
+            $config = $this->validatePaymentConfig(
+                $data['driver'], $this->mergedPaymentConfig($payment, $data['config'])
+            );
+            $enabled = (int)($data['enabled'] ?? 0);
+            if ($payment->exists
+                && $this->hasPaymentOrders($accountId, (int)$payment->id)
+                && $this->paymentConfig($payment) != $config) {
+                abort(422, 'Payment configuration cannot be changed after it has been used by an order');
+            }
+
+            $payment->reseller_id = $accountId;
+            $payment->driver = $data['driver'];
+            $payment->name = $data['name'];
+            $payment->config_encrypted = Crypt::encryptString(json_encode($config, JSON_UNESCAPED_UNICODE));
+            $payment->enabled = $enabled;
+            $payment->sort = (int)($data['sort'] ?? 0);
+            $payment->uuid = $payment->uuid ?: Helper::randomChar(32);
+            $payment->save();
+
+            return ['id' => $payment->id, 'uuid' => $payment->uuid];
+        });
+
+        return response(['data' => $result]);
     }
 
     public function deletePayment(Request $request, $id)
     {
-        $payment = $this->resellerPayment($request, (int)$id);
-        $hasUnsettledOrder = ResellerOrder::where('reseller_id', $request->reseller['id'])
-            ->where('reseller_payment_id', $payment->id)
-            ->whereHas('platformOrder', function ($query) {
-                $query->whereIn('status', [0, 1]);
-            })->exists();
-        if ($hasUnsettledOrder) {
-            abort(422, 'This payment method has pending orders and cannot be deleted');
-        }
-        $payment->delete();
+        $accountId = (int)$request->reseller['id'];
+        DB::transaction(function () use ($accountId, $id) {
+            $payment = ResellerPayment::where('id', (int)$id)
+                ->where('reseller_id', $accountId)
+                ->lockForUpdate()
+                ->first();
+            if (!$payment) abort(404, 'Payment method does not exist');
+            if ($this->hasPaymentOrders($accountId, (int)$payment->id)) {
+                abort(422, 'This payment method has order history and cannot be deleted; disable it instead');
+            }
+            $payment->delete();
+        });
+
         return response(['data' => true]);
     }
 
@@ -210,20 +230,35 @@ class Controller extends BaseController
             'store_name' => 'required|string|max:128',
             'store_description' => 'nullable|string|max:10000',
         ]);
-        $account = ResellerAccount::findOrFail($request->reseller['id']);
-        if (ResellerAccount::where('store_slug', $data['store_slug'])->where('id', '!=', $account->id)->exists()) {
-            abort(422, 'Store slug already exists');
-        }
-        $account->fill($data);
-        $account->save();
+        $account = DB::transaction(function () use ($request, $data) {
+            $account = ResellerAccount::where('id', $request->reseller['id'])->lockForUpdate()->firstOrFail();
+            if (ResellerAccount::where('store_slug', $data['store_slug'])->where('id', '!=', $account->id)->exists()) {
+                abort(422, 'Store slug already exists');
+            }
+            if ($account->store_slug !== $data['store_slug'] && $this->hasPendingCallbackOrders((int)$account->id)) {
+                abort(422, 'Store slug cannot be changed while payment callbacks are pending');
+            }
+            $account->fill($data);
+            $account->save();
+            return $account;
+        });
+
         return response(['data' => (new ResellerAuthService())->safeAccount($account)]);
     }
 
     public function customers(Request $request)
     {
-        $customers = ResellerCustomer::with('user')
+        $customers = ResellerCustomer::with('user:id,email')
             ->where('reseller_id', $request->reseller['id'])
             ->orderByDesc('id')->paginate(50);
+        $customers->getCollection()->transform(function (ResellerCustomer $customer) {
+            return [
+                'id' => (int)$customer->id,
+                'user_id' => (int)$customer->user_id,
+                'email' => optional($customer->user)->email,
+                'created_at' => $customer->created_at,
+            ];
+        });
         return response(['data' => $customers]);
     }
 
@@ -328,6 +363,22 @@ class Controller extends BaseController
         }
         if (!is_array($config)) abort(500, 'Payment configuration is invalid');
         return $config;
+    }
+
+    private function hasPaymentOrders(int $resellerId, int $paymentId): bool
+    {
+        return ResellerOrder::where('reseller_id', $resellerId)
+            ->where('reseller_payment_id', $paymentId)
+            ->exists();
+    }
+
+    private function hasPendingCallbackOrders(int $resellerId): bool
+    {
+        return ResellerOrder::where('reseller_id', $resellerId)
+            ->whereNotNull('reseller_payment_id')
+            ->whereHas('platformOrder', function ($query) {
+                $query->whereIn('status', [0, 1]);
+            })->exists();
     }
 
     private function mergedPaymentConfig(ResellerPayment $payment, array $config): array

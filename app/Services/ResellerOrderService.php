@@ -111,45 +111,62 @@ class ResellerOrderService
 
     public function checkout(ResellerAccount $store, User $user, string $tradeNo, int $paymentId, ?string $stripeToken = null): array
     {
-        $mapping = ResellerOrder::with(['platformOrder', 'payment'])
-            ->where('reseller_id', $store->id)
-            ->where('user_id', $user->id)
-            ->whereHas('platformOrder', function ($query) use ($tradeNo) {
-                $query->where('trade_no', $tradeNo)->where('status', 0);
-            })
-            ->first();
-        if (!$mapping || !$mapping->platformOrder) {
-            abort(500, 'Order does not exist or has been paid');
-        }
+        return DB::transaction(function () use ($store, $user, $tradeNo, $paymentId, $stripeToken) {
+            $store = ResellerAccount::where('id', $store->id)->lockForUpdate()->first();
+            if (!$store || !$this->enabledStore($store)) {
+                abort(403, 'Store is not available');
+            }
 
-        $payment = ResellerPayment::where('id', $paymentId)
-            ->where('reseller_id', $store->id)
-            ->whereIn('driver', (array)config('v2board.reseller_allowed_payment_drivers', []))
-            ->where('enabled', 1)
-            ->first();
-        if (!$payment) {
-            abort(422, 'Payment method is not available');
-        }
+            // This lock serializes checkout with payment configuration changes and deletion.
+            $payment = ResellerPayment::where('id', $paymentId)
+                ->where('reseller_id', $store->id)
+                ->whereIn('driver', (array)config('v2board.reseller_allowed_payment_drivers', []))
+                ->where('enabled', 1)
+                ->lockForUpdate()
+                ->first();
+            if (!$payment) {
+                abort(422, 'Payment method is not available');
+            }
 
-        $mapping->reseller_payment_id = $payment->id;
-        $mapping->save();
-        $mapping->setRelation('payment', $payment);
+            $mapping = ResellerOrder::where('reseller_id', $store->id)
+                ->where('user_id', $user->id)
+                ->lockForUpdate()
+                ->whereHas('platformOrder', function ($query) use ($tradeNo) {
+                    $query->where('trade_no', $tradeNo);
+                })
+                ->first();
+            if (!$mapping) {
+                abort(404, 'Order does not exist');
+            }
 
-        $result = (new ResellerPaymentService($payment))->pay($mapping, $store->store_slug, $stripeToken);
-        return ['type' => $result['type'], 'data' => $result['data']];
+            $order = Order::where('id', $mapping->platform_order_id)->lockForUpdate()->first();
+            if (!$order || (int)$order->status !== 0) {
+                abort(422, 'Order does not exist or has been paid');
+            }
+            if ($mapping->reseller_payment_id) {
+                abort(422, 'A payment checkout has already been created for this order');
+            }
+
+            $mapping->reseller_payment_id = $payment->id;
+            $mapping->save();
+            $mapping->setRelation('platformOrder', $order);
+            $mapping->setRelation('payment', $payment);
+
+            $result = (new ResellerPaymentService($payment))->pay($mapping, $store->store_slug, $stripeToken);
+            return ['type' => $result['type'], 'data' => $result['data']];
+        });
     }
 
     public function notify(ResellerAccount $store, string $uuid, array $params): string
     {
         $payment = ResellerPayment::where('uuid', $uuid)
             ->where('reseller_id', $store->id)
-            ->where('enabled', 1)
             ->first();
         if (!$payment) {
             abort(404, 'Payment method does not exist');
         }
 
-        $result = (new ResellerPaymentService($payment))->notify($params);
+        $result = (new ResellerPaymentService($payment, true))->notify($params);
         if (!$result || !is_array($result) || empty($result['trade_no'])) {
             Log::warning('Reseller payment callback verification failed', [
                 'reseller_id' => (int)$store->id,
@@ -164,6 +181,7 @@ class ResellerOrderService
 
         $mapping = ResellerOrder::with('platformOrder')
             ->where('reseller_id', $store->id)
+            ->where('reseller_payment_id', $payment->id)
             ->whereHas('platformOrder', function ($query) use ($result) {
                 $query->where('trade_no', $result['trade_no']);
             })->first();

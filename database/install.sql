@@ -868,13 +868,15 @@ CREATE TABLE `v2_reseller_plan` (
     `two_year_price` int(11) DEFAULT NULL,
     `three_year_price` int(11) DEFAULT NULL,
     `onetime_price` int(11) DEFAULT NULL,
+    `shared_member_limit` int(11) unsigned NOT NULL DEFAULT '1',
     `enabled` tinyint(1) NOT NULL DEFAULT '1',
     `sort` int(11) NOT NULL DEFAULT '0',
     `created_at` int(11) NOT NULL,
     `updated_at` int(11) NOT NULL,
     PRIMARY KEY (`id`),
     KEY `reseller_enabled_sort` (`reseller_id`,`enabled`,`sort`),
-    KEY `base_plan_id` (`base_plan_id`)
+    KEY `base_plan_id` (`base_plan_id`),
+    KEY `shared_member_limit` (`shared_member_limit`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE `v2_reseller_payment` (
@@ -909,6 +911,7 @@ CREATE TABLE `v2_reseller_order` (
     `reseller_id` bigint(20) unsigned NOT NULL,
     `reseller_plan_id` bigint(20) unsigned NOT NULL,
     `reseller_payment_id` bigint(20) unsigned DEFAULT NULL,
+    `shared_subscription_id` bigint(20) unsigned DEFAULT NULL,
     `platform_order_id` int(11) NOT NULL,
     `user_id` int(11) NOT NULL,
     `period` varchar(32) NOT NULL,
@@ -918,5 +921,64 @@ CREATE TABLE `v2_reseller_order` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `platform_order_id` (`platform_order_id`),
     KEY `reseller_user_created` (`reseller_id`,`user_id`,`created_at`),
-    KEY `reseller_plan` (`reseller_id`,`reseller_plan_id`)
+    KEY `reseller_plan` (`reseller_id`,`reseller_plan_id`),
+    KEY `shared_subscription_id` (`shared_subscription_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_shared_subscription` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `reseller_id` bigint(20) unsigned NOT NULL,
+    `reseller_plan_id` bigint(20) unsigned NOT NULL,
+    `subscription_id` bigint(20) unsigned NOT NULL,
+    `owner_user_id` int(11) NOT NULL,
+    `member_limit` int(11) unsigned NOT NULL DEFAULT '1',
+    `member_count` int(11) unsigned NOT NULL DEFAULT '1',
+    `status` varchar(16) NOT NULL DEFAULT 'active',
+    `created_order_id` int(11) NOT NULL,
+    `last_order_id` int(11) DEFAULT NULL,
+    `suspended_reason` varchar(500) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `subscription_id` (`subscription_id`),
+    KEY `reseller_owner_status` (`reseller_id`,`owner_user_id`,`status`),
+    KEY `reseller_status` (`reseller_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_shared_subscription_member` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `reseller_id` bigint(20) unsigned NOT NULL,
+    `shared_subscription_id` bigint(20) unsigned NOT NULL,
+    `user_id` int(11) NOT NULL,
+    `role` varchar(16) NOT NULL DEFAULT 'member',
+    `status` varchar(16) NOT NULL DEFAULT 'active',
+    `joined_at` int(11) DEFAULT NULL,
+    `removed_at` int(11) DEFAULT NULL,
+    `removed_by_user_id` int(11) DEFAULT NULL,
+    `remove_reason` varchar(500) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `shared_user` (`shared_subscription_id`,`user_id`),
+    KEY `user_status` (`user_id`,`status`),
+    KEY `reseller_status` (`reseller_id`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_reseller_shared_invitation` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `reseller_id` bigint(20) unsigned NOT NULL,
+    `shared_subscription_id` bigint(20) unsigned NOT NULL,
+    `email` varchar(128) NOT NULL,
+    `token_hash` char(64) NOT NULL,
+    `created_by_user_id` int(11) NOT NULL,
+    `expires_at` int(11) NOT NULL,
+    `accepted_by_user_id` int(11) DEFAULT NULL,
+    `accepted_at` int(11) DEFAULT NULL,
+    `revoked_at` int(11) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `token_hash` (`token_hash`),
+    KEY `shared_status` (`shared_subscription_id`,`revoked_at`,`expires_at`),
+    KEY `reseller_email` (`reseller_id`,`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

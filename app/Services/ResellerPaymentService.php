@@ -13,11 +13,11 @@ class ResellerPaymentService
     private $class;
     private $driver;
 
-    public function __construct(ResellerPayment $payment)
+    public function __construct(ResellerPayment $payment, bool $allowInactive = false)
     {
         $this->driver = $payment->driver;
         $allowed = (array)config('v2board.reseller_allowed_payment_drivers', []);
-        if (!$payment->enabled || !in_array($payment->driver, $allowed, true)) {
+        if (!$allowInactive && (!$payment->enabled || !in_array($payment->driver, $allowed, true))) {
             abort(422, 'Payment driver is not allowed');
         }
 

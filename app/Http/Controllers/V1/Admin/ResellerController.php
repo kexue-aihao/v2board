@@ -124,6 +124,10 @@ class ResellerController extends Controller
             return $account->fresh();
         });
 
+        if ($data['target'] === 'account') {
+            (new ResellerAuthService())->revokeAll($account);
+        }
+
         return response(['data' => $this->accountData($account)]);
     }
 
@@ -206,6 +210,11 @@ class ResellerController extends Controller
             if (isset($data['store_slug']) && ResellerAccount::where('store_slug', $data['store_slug'])->where('id', '!=', $account->id)->exists()) {
                 abort(422, 'Store slug already exists');
             }
+            if (isset($data['store_slug'])
+                && $account->store_slug !== $data['store_slug']
+                && $this->hasPendingCallbackOrders((int)$account->id)) {
+                abort(422, 'Store slug cannot be changed while payment callbacks are pending');
+            }
 
             $fromAccountStatus = $account->accountStatus();
             $fromStoreStatus = $account->storeStatus();
@@ -235,6 +244,7 @@ class ResellerController extends Controller
 
             return $account;
         });
+        (new ResellerAuthService())->revokeAll($account);
         return response(['data' => $account->makeHidden(['password'])]);
     }
 
@@ -362,6 +372,15 @@ class ResellerController extends Controller
                     ->orWhere('store_slug', 'like', '%' . $keyword . '%');
             });
         }
+    }
+
+    private function hasPendingCallbackOrders(int $resellerId): bool
+    {
+        return ResellerOrder::where('reseller_id', $resellerId)
+            ->whereNotNull('reseller_payment_id')
+            ->whereHas('platformOrder', function ($query) {
+                $query->whereIn('status', [0, 1]);
+            })->exists();
     }
 
     private function accountData(ResellerAccount $account): array
