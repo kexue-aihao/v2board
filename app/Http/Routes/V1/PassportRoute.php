@@ -7,6 +7,24 @@ class PassportRoute
 {
     public function map(Registrar $router)
     {
+        // The public login endpoint is intentionally blocked while the site is
+        // in maintenance mode. Keep the administrator entry point under the
+        // secure path so the SiteStatus middleware can exempt operations work.
+        $securePath = trim((string)config(
+            'v2board.secure_path',
+            config('v2board.frontend_admin_path', hash('crc32b', (string)config('app.key')))
+        ), '/');
+        if ($securePath !== '') {
+            $router->group([
+                'prefix' => $securePath
+            ], function ($router) {
+                $router->post('/passport/auth/login', 'V1\\Passport\\AuthController@adminLogin');
+                $router->post('/passport/auth/verify2fa', 'V1\\Passport\\AuthController@adminVerify2fa');
+                $router->post('/passport/auth/2fa/setup', 'V1\\Passport\\AuthController@adminSetup2fa');
+                $router->post('/passport/auth/2fa/confirm', 'V1\\Passport\\AuthController@adminConfirmSetup2fa');
+            });
+        }
+
         $router->group([
             'prefix' => 'passport'
         ], function ($router) {

@@ -72769,7 +72769,7 @@
                                     });
                                 case 2:
                                     return e.next = 4,
-                                    Object(o["b"])("/passport/auth/login", n);
+                                    Object(o["b"])("/" + window.settings.secure_path + "/passport/auth/login", n);
                                 case 4:
                                     return t = e.sent,
                                     t.data && (t.data.two_factor_required || t.data.two_factor_setup_required) ? e.abrupt("return", window.__v2board2fa(t.data, "/dashboard")) : e.next = 7,
@@ -110039,7 +110039,7 @@
                                     });
                                 case 2:
                                     return e.next = 4,
-                                    Object(o["b"])("/passport/auth/login", {
+                                    Object(o["b"])("/" + window.settings.secure_path + "/passport/auth/login", {
                                         email: n,
                                         password: r
                                     });
@@ -118036,7 +118036,7 @@
         }
         if (data.two_factor_setup_required) {
             body.textContent = '\u6b63\u5728\u52a0\u8f7d\u7ed1\u5b9a\u4fe1\u606f...';
-            post('/passport/auth/2fa/setup', { setup_token: data.challenge }).then(function (setup) {
+            post('/' + window.settings.secure_path + '/passport/auth/2fa/setup', { setup_token: data.challenge }).then(function (setup) {
                 body.innerHTML = '';
                 var guide = document.createElement('p');
                 guide.textContent = '\u8bf7\u4f7f\u7528 Google Authenticator \u6216 Microsoft Authenticator \u626b\u63cf\u4e8c\u7ef4\u7801\uff0c\u4e5f\u53ef\u4f7f\u7528\u624b\u52a8\u5bc6\u94a5\u3002';
@@ -118064,7 +118064,7 @@
                 var code = input('000000');
                 body.appendChild(code);
                 action('\u786e\u8ba4\u5e76\u767b\u5f55', function () {
-                    return post('/passport/auth/2fa/confirm', { setup_token: data.challenge, code: code.value }).then(function (result) {
+                    return post('/' + window.settings.secure_path + '/passport/auth/2fa/confirm', { setup_token: data.challenge, code: code.value }).then(function (result) {
                         if (!result.auth_data) throw new Error('\u767b\u5f55\u51ed\u8bc1\u65e0\u6548');
                         body.innerHTML = '';
                         var warning = document.createElement('p');
@@ -118095,7 +118095,7 @@
                 var payload = { challenge: data.challenge };
                 if (/^\d{6}$/.test(value.value)) payload.code = value.value;
                 else payload.recovery_code = value.value;
-                return post('/passport/auth/verify2fa', payload).then(function (result) { finish(result.auth_data); });
+                return post('/' + window.settings.secure_path + '/passport/auth/verify2fa', payload).then(function (result) { finish(result.auth_data); });
             });
         }
     }

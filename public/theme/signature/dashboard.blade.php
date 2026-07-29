@@ -14,11 +14,16 @@
             $signatureThemeColor = 'default';
         }
         $signaturePalettePath = public_path("theme/{$theme}/assets/theme/{$signatureThemeColor}.css");
-        $signatureAssetVersions = array_filter([
-            is_file($signatureAssetPath) ? filemtime($signatureAssetPath) : null,
-            is_file($signaturePalettePath) ? filemtime($signaturePalettePath) : null
-        ]);
-        $signatureAssetVersion = $signatureAssetVersions ? max($signatureAssetVersions) : $version;
+        $signatureAssetPaths = [$signatureAssetPath, $signaturePalettePath];
+        $signatureAssetVersions = array_filter(array_map(function ($path) {
+            return is_file($path) ? filemtime($path) : null;
+        }, $signatureAssetPaths));
+        $signatureAssetFingerprints = array_filter(array_map(function ($path) {
+            return is_file($path) ? hash_file('sha256', $path) : null;
+        }, $signatureAssetPaths));
+        $signatureAssetVersion = $signatureAssetVersions
+            ? max($signatureAssetVersions) . '-' . substr(hash('sha256', implode('|', $signatureAssetFingerprints)), 0, 12)
+            : $version;
     @endphp
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">

@@ -14,11 +14,16 @@
             $modernThemeColor = 'default';
         }
         $modernPalettePath = public_path("theme/{$theme}/assets/theme/{$modernThemeColor}.css");
-        $modernAssetVersions = array_filter([
-            is_file($modernAssetPath) ? filemtime($modernAssetPath) : null,
-            is_file($modernPalettePath) ? filemtime($modernPalettePath) : null
-        ]);
-        $modernAssetVersion = $modernAssetVersions ? max($modernAssetVersions) : $version;
+        $modernAssetPaths = [$modernAssetPath, $modernPalettePath];
+        $modernAssetVersions = array_filter(array_map(function ($path) {
+            return is_file($path) ? filemtime($path) : null;
+        }, $modernAssetPaths));
+        $modernAssetFingerprints = array_filter(array_map(function ($path) {
+            return is_file($path) ? hash_file('sha256', $path) : null;
+        }, $modernAssetPaths));
+        $modernAssetVersion = $modernAssetVersions
+            ? max($modernAssetVersions) . '-' . substr(hash('sha256', implode('|', $modernAssetFingerprints)), 0, 12)
+            : $version;
     @endphp
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">

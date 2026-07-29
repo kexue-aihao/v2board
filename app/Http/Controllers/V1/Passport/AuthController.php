@@ -162,6 +162,16 @@ class AuthController extends Controller
 
     public function login(AuthLogin $request)
     {
+        return $this->performLogin($request, false);
+    }
+
+    public function adminLogin(AuthLogin $request)
+    {
+        return $this->performLogin($request, true);
+    }
+
+    private function performLogin(AuthLogin $request, $adminOnly = false)
+    {
         $email = $request->input('email');
         $password = $request->input('password');
 
@@ -197,6 +207,9 @@ class AuthController extends Controller
         if ($user->banned) {
             abort(500, __('Your account has been suspended'));
         }
+        if ($adminOnly && !(bool)$user->is_admin) {
+            abort(403, __('Administrator access required'));
+        }
 
         $authService = new AuthService($user);
         $twoFactor = (new TwoFactorService())->issueLoginResult($user, $request);
@@ -206,6 +219,35 @@ class AuthController extends Controller
         return response([
             'data' => $authService->generateAuthData($request)
         ]);
+    }
+
+    public function adminVerify2fa(Request $request)
+    {
+        $this->assertAdminChallenge($request->input('challenge'), 'login');
+        return $this->verify2fa($request);
+    }
+
+    public function adminSetup2fa(Request $request)
+    {
+        $this->assertAdminChallenge($request->input('setup_token'), 'setup');
+        return $this->setup2fa($request);
+    }
+
+    public function adminConfirmSetup2fa(Request $request)
+    {
+        $this->assertAdminChallenge($request->input('setup_token'), 'setup');
+        return $this->confirmSetup2fa($request);
+    }
+
+    private function assertAdminChallenge($token, $type)
+    {
+        $challenge = (new TwoFactorService())->getChallenge($token, $type);
+        $user = $challenge && !empty($challenge['user_id'])
+            ? User::find($challenge['user_id'])
+            : null;
+        if (!$user || !(bool)$user->is_admin) {
+            abort(403, __('Administrator access required'));
+        }
     }
 
     public function verify2fa(Request $request)

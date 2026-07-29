@@ -9,6 +9,26 @@
     var booted = false;
     var countdownTimer = null;
 
+    var labels = {
+        shutdown: '\u670d\u52a1\u6682\u65f6\u505c\u6b62',
+        maintenance: '\u670d\u52a1\u6b63\u5728\u7ef4\u62a4',
+        message: '\u7cfb\u7edf\u6b63\u5728\u8fdb\u884c\u4f8b\u884c\u5904\u7406\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5\u3002',
+        readFailed: '\u6682\u65f6\u65e0\u6cd5\u8bfb\u53d6\u7ad9\u70b9\u72b6\u6001\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002',
+        resourceFailed: '\u9875\u9762\u8d44\u6e90\u52a0\u8f7d\u5931\u8d25\uff0c\u8bf7\u5237\u65b0\u9875\u9762\u540e\u91cd\u8bd5\u3002',
+        recovery: '\u9884\u8ba1\u6062\u590d',
+        days: '\u5929',
+        hours: '\u65f6',
+        minutes: '\u5206',
+        seconds: '\u79d2',
+        pending: '\u6062\u590d\u65f6\u95f4\u5f85\u5b9a',
+        remaining: '\u5269\u4f59',
+        reached: '\u6062\u590d\u65f6\u95f4\u5df2\u5230\uff0c\u8bf7\u518d\u6b21\u68c0\u67e5',
+        retry: '\u518d\u6b21\u68c0\u67e5',
+        checking: '\u6b63\u5728\u68c0\u67e5',
+        support: '\u8054\u7cfb\u652f\u6301',
+        checkingMessage: '\u6b63\u5728\u68c0\u67e5\u6700\u65b0\u72b6\u6001\u3002'
+    };
+
     function text(value, fallback) {
         return typeof value === 'string' && value.trim() ? value.trim() : fallback;
     }
@@ -18,8 +38,8 @@
         var mode = status.mode === 'maintenance' || status.mode === 'shutdown' ? status.mode : 'normal';
         return {
             mode: mode,
-            title: text(status.title, mode === 'shutdown' ? '服务暂时停止' : '服务正在维护'),
-            message: text(status.message, '系统正在进行例行处理，请稍后再试。'),
+            title: text(status.title, mode === 'shutdown' ? labels.shutdown : labels.maintenance),
+            message: text(status.message, labels.message),
             recovery_at: Number(status.recovery_at || 0),
             server_time: Number(status.server_time || 0),
             support_url: /^https?:\/\//i.test(status.support_url || '') ? status.support_url : ''
@@ -57,7 +77,7 @@
             var script = document.createElement('script');
             script.src = scripts[index];
             script.onload = function () { load(index + 1); };
-            script.onerror = function () { renderError('页面资源加载失败，请刷新页面后重试。'); };
+            script.onerror = function () { renderError(labels.resourceFailed); };
             document.body.appendChild(script);
         };
         load(0);
@@ -76,13 +96,13 @@
         var copy = document.createElement('section');
         copy.className = 'site-status-copy';
         appendText(copy, 'span', 'site-status-kicker', 'SERVICE STATUS');
-        appendText(copy, 'h1', '', '暂时无法读取站点状态');
-        appendText(copy, 'p', '', message);
+        appendText(copy, 'h1', '', '\u6682\u65f6\u65e0\u6cd5\u8bfb\u53d6\u7ad9\u70b9\u72b6\u6001');
+        appendText(copy, 'p', 'site-status-message', message);
         var actions = document.createElement('div');
         actions.className = 'site-status-actions';
         var retry = document.createElement('button');
         retry.type = 'button';
-        retry.textContent = '再次检查';
+        retry.textContent = labels.retry;
         retry.addEventListener('click', refresh);
         actions.appendChild(retry);
         copy.appendChild(actions);
@@ -90,6 +110,13 @@
         overlay.appendChild(shell);
         document.body.appendChild(overlay);
         root.style.visibility = 'hidden';
+    }
+
+    function formatRecoveryTime(timestamp) {
+        return new Date(timestamp * 1000).toLocaleString('zh-CN', {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
     }
 
     function countdownUnit(parent, label) {
@@ -104,17 +131,18 @@
     function updateCountdown(status, countdown, clockOffset) {
         if (!countdown) return;
         var total = Math.max(0, Math.floor((status.recovery_at * 1000 - (Date.now() + clockOffset)) / 1000));
-        var days = Math.floor(total / 86400);
-        var hours = Math.floor((total % 86400) / 3600);
-        var minutes = Math.floor((total % 3600) / 60);
-        var seconds = total % 60;
-        var values = [String(days).padStart(2, '0'), String(hours).padStart(2, '0'), String(minutes).padStart(2, '0'), String(seconds).padStart(2, '0')];
+        var values = [
+            String(Math.floor(total / 86400)).padStart(2, '0'),
+            String(Math.floor((total % 86400) / 3600)).padStart(2, '0'),
+            String(Math.floor((total % 3600) / 60)).padStart(2, '0'),
+            String(total % 60).padStart(2, '0')
+        ];
         for (var index = 0; index < countdown.values.length; index += 1) {
             countdown.values[index].textContent = values[index];
         }
-        countdown.element.setAttribute('aria-label', '剩余 ' + values[0] + ' 天 ' + values[1] + ' 小时 ' + values[2] + ' 分 ' + values[3] + ' 秒');
+        countdown.element.setAttribute('aria-label', labels.remaining + ' ' + values[0] + labels.days + values[1] + labels.hours + values[2] + labels.minutes + values[3] + labels.seconds);
         if (total === 0) {
-            countdown.note.textContent = '恢复时间已到，请再次检查';
+            countdown.note.textContent = labels.reached;
             countdown.note.hidden = false;
         }
     }
@@ -132,6 +160,7 @@
         overlay.id = 'v2board-site-status';
         overlay.className = 'site-status-' + status.mode;
         overlay.setAttribute('aria-labelledby', 'v2board-site-status-title');
+        overlay.setAttribute('aria-live', 'polite');
 
         var shell = document.createElement('div');
         shell.className = 'site-status-shell';
@@ -141,7 +170,7 @@
         appendText(visual, 'span', 'site-status-orbit', '');
         appendText(visual, 'span', 'site-status-signal site-status-signal-one', '');
         appendText(visual, 'span', 'site-status-signal site-status-signal-two', '');
-        appendText(visual, 'span', 'site-status-mark', status.mode === 'shutdown' ? '×' : '⌁');
+        appendText(visual, 'span', 'site-status-mark', status.mode === 'shutdown' ? '\u00d7' : '\u231d');
         shell.appendChild(visual);
 
         var copy = document.createElement('section');
@@ -157,17 +186,21 @@
             recovery.className = 'site-status-recovery';
             var recoveryHead = document.createElement('div');
             recoveryHead.className = 'site-status-recovery-head';
-            appendText(recoveryHead, 'span', '', '预计恢复');
-            var time = appendText(recoveryHead, 'time', '', new Date(status.recovery_at * 1000).toLocaleString('zh-CN'));
+            appendText(recoveryHead, 'span', '', labels.recovery);
+            var time = appendText(recoveryHead, 'time', '', formatRecoveryTime(status.recovery_at));
             time.dateTime = new Date(status.recovery_at * 1000).toISOString();
             recovery.appendChild(recoveryHead);
             var countdownElement = document.createElement('div');
             countdownElement.className = 'site-status-countdown';
             countdownElement.setAttribute('role', 'timer');
-            var values = [countdownUnit(countdownElement, '天'), countdownUnit(countdownElement, '时'), countdownUnit(countdownElement, '分'), countdownUnit(countdownElement, '秒')];
+            var values = [
+                countdownUnit(countdownElement, labels.days),
+                countdownUnit(countdownElement, labels.hours),
+                countdownUnit(countdownElement, labels.minutes),
+                countdownUnit(countdownElement, labels.seconds)
+            ];
             var note = appendText(recovery, 'p', 'site-status-recovery-note', '');
             note.hidden = true;
-            countdownElement.setAttribute('aria-label', '恢复倒计时');
             recovery.appendChild(countdownElement);
             recovery.appendChild(note);
             copy.appendChild(recovery);
@@ -182,7 +215,7 @@
         if (status.mode !== 'shutdown') {
             var retry = document.createElement('button');
             retry.type = 'button';
-            retry.textContent = refreshing ? '正在检查' : '再次检查';
+            retry.textContent = refreshing ? labels.checking : labels.retry;
             retry.disabled = refreshing;
             retry.addEventListener('click', refresh);
             actions.appendChild(retry);
@@ -191,7 +224,7 @@
             support.href = status.support_url;
             support.target = '_blank';
             support.rel = 'noreferrer';
-            support.textContent = '联系支持';
+            support.textContent = labels.support;
             actions.appendChild(support);
         }
         copy.appendChild(actions);
@@ -204,11 +237,11 @@
     function refresh() {
         if (refreshing) return;
         refreshing = true;
-        if (overlay) render(normalize({ data: { site_status: { mode: 'maintenance', title: '服务正在维护', message: '正在检查最新状态。' } } }));
+        if (overlay) render(normalize({ data: { site_status: { mode: 'maintenance', title: labels.maintenance, message: labels.checkingMessage } } }));
         fetch('/api/v1/guest/comm/config', { headers: { Accept: 'application/json' }, cache: 'no-store' })
             .then(function (response) { if (!response.ok) throw new Error('status request failed'); return response.json(); })
             .then(function (payload) { refreshing = false; render(normalize(payload)); })
-            .catch(function () { refreshing = false; renderError('暂时无法读取站点状态，请稍后重试。'); });
+            .catch(function () { refreshing = false; renderError(labels.readFailed); });
     }
 
     window.__v2boardSiteStatusRefresh = refresh;

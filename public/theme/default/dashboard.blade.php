@@ -3,11 +3,19 @@
 
 <head>
     @php
-        $siteStatusAssets = array_filter([
-            @filemtime(public_path('theme/default/assets/site-status.css')),
-            @filemtime(public_path('theme/default/assets/site-status.js')),
-        ]);
-        $siteStatusAssetVersion = $siteStatusAssets ? max($siteStatusAssets) : $version;
+        $siteStatusAssetPaths = [
+            public_path('theme/default/assets/site-status.css'),
+            public_path('theme/default/assets/site-status.js'),
+        ];
+        $siteStatusAssets = array_filter(array_map(function ($path) {
+            return is_file($path) ? filemtime($path) : null;
+        }, $siteStatusAssetPaths));
+        $siteStatusAssetFingerprint = array_filter(array_map(function ($path) {
+            return is_file($path) ? hash_file('sha256', $path) : null;
+        }, $siteStatusAssetPaths));
+        $siteStatusAssetVersion = $siteStatusAssets
+            ? max($siteStatusAssets) . '-' . substr(hash('sha256', implode('|', $siteStatusAssetFingerprint)), 0, 12)
+            : $version;
     @endphp
     <link rel="stylesheet" href="/theme/default/assets/site-status.css?v={{$siteStatusAssetVersion}}">
     <link rel="stylesheet" href="/theme/{{$theme}}/assets/components.chunk.css?v={{$version}}">
