@@ -20,7 +20,9 @@ class ResellerRoute
                 $router->post('/plans', 'V1\\Reseller\\Controller@savePlan');
                 $router->get('/payments', 'V1\\Reseller\\Controller@payments');
                 $router->post('/payments/form', 'V1\\Reseller\\Controller@paymentForm');
+                $router->get('/payments/{id}/edit', 'V1\\Reseller\\Controller@paymentEdit');
                 $router->post('/payments', 'V1\\Reseller\\Controller@savePayment');
+                $router->delete('/payments/{id}', 'V1\\Reseller\\Controller@deletePayment');
                 $router->post('/store', 'V1\\Reseller\\Controller@updateStore');
                 $router->get('/customers', 'V1\\Reseller\\Controller@customers');
                 $router->get('/orders', 'V1\\Reseller\\Controller@orders');

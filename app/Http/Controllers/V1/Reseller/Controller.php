@@ -122,6 +122,35 @@ class Controller extends BaseController
         return response(['data' => ResellerPaymentService::form($driver)]);
     }
 
+    public function paymentEdit(Request $request, $id)
+    {
+        $payment = $this->resellerPayment($request, (int)$id);
+        $config = $this->paymentConfig($payment);
+        $fields = ResellerPaymentService::form($payment->driver);
+        foreach ($fields as $key => &$field) {
+            $value = $config[$key] ?? '';
+            if (ResellerPaymentService::isSensitiveConfigField($key)) {
+                $field['sensitive'] = true;
+                $field['value'] = '';
+                $field['placeholder'] = $value === '' || $value === null
+                    ? '请输入配置值'
+                    : '已保存，留空保持不变';
+                continue;
+            }
+            $field['value'] = is_scalar($value) ? (string)$value : '';
+        }
+        unset($field);
+
+        return response(['data' => [
+            'id' => (int)$payment->id,
+            'driver' => $payment->driver,
+            'name' => $payment->name,
+            'enabled' => (int)$payment->enabled,
+            'sort' => (int)$payment->sort,
+            'fields' => $fields,
+        ]]);
+    }
+
     public function savePayment(Request $request)
     {
         $this->ensureStoreCanSell($request);
@@ -142,6 +171,12 @@ class Controller extends BaseController
             ? ResellerPayment::where('id', $data['id'])->where('reseller_id', $accountId)->first()
             : new ResellerPayment();
         if (!$payment) abort(404, 'Payment method does not exist');
+        if ($payment->exists && $payment->driver !== $data['driver']) {
+            abort(422, 'Payment driver cannot be changed. Delete this configuration and create a new one.');
+        }
+        $data['config'] = $this->validatePaymentConfig(
+            $data['driver'], $this->mergedPaymentConfig($payment, $data['config'])
+        );
         $payment->reseller_id = $accountId;
         $payment->driver = $data['driver'];
         $payment->name = $data['name'];
@@ -151,6 +186,21 @@ class Controller extends BaseController
         $payment->uuid = $payment->uuid ?: Helper::randomChar(32);
         $payment->save();
         return response(['data' => ['id' => $payment->id, 'uuid' => $payment->uuid]]);
+    }
+
+    public function deletePayment(Request $request, $id)
+    {
+        $payment = $this->resellerPayment($request, (int)$id);
+        $hasUnsettledOrder = ResellerOrder::where('reseller_id', $request->reseller['id'])
+            ->where('reseller_payment_id', $payment->id)
+            ->whereHas('platformOrder', function ($query) {
+                $query->whereIn('status', [0, 1]);
+            })->exists();
+        if ($hasUnsettledOrder) {
+            abort(422, 'This payment method has pending orders and cannot be deleted');
+        }
+        $payment->delete();
+        return response(['data' => true]);
     }
 
     public function updateStore(Request $request)
@@ -258,6 +308,56 @@ class Controller extends BaseController
         if (empty($request->reseller['can_sell'])) {
             abort(403, 'Account and store approval are both required before selling');
         }
+    }
+
+    private function resellerPayment(Request $request, int $id): ResellerPayment
+    {
+        $payment = ResellerPayment::where('id', $id)
+            ->where('reseller_id', $request->reseller['id'])
+            ->first();
+        if (!$payment) abort(404, 'Payment method does not exist');
+        return $payment;
+    }
+
+    private function paymentConfig(ResellerPayment $payment): array
+    {
+        try {
+            $config = json_decode(Crypt::decryptString($payment->config_encrypted), true);
+        } catch (\Throwable $e) {
+            abort(500, 'Payment configuration is unavailable');
+        }
+        if (!is_array($config)) abort(500, 'Payment configuration is invalid');
+        return $config;
+    }
+
+    private function mergedPaymentConfig(ResellerPayment $payment, array $config): array
+    {
+        if (!$payment->exists) return $config;
+
+        foreach ($this->paymentConfig($payment) as $key => $value) {
+            if (!array_key_exists($key, $config)
+                || (ResellerPaymentService::isSensitiveConfigField($key) && trim((string)$config[$key]) === '')) {
+                $config[$key] = $value;
+            }
+        }
+        return $config;
+    }
+
+    private function validatePaymentConfig(string $driver, array $config): array
+    {
+        if ($driver !== 'EPay') return $config;
+
+        foreach (['url', 'pid', 'key', 'type'] as $key) {
+            if (isset($config[$key]) && is_string($config[$key])) $config[$key] = trim($config[$key]);
+        }
+        foreach (['url', 'pid', 'key'] as $key) {
+            if (empty($config[$key])) abort(422, "EPay {$key} is required");
+        }
+        if (!filter_var($config['url'], FILTER_VALIDATE_URL)) {
+            abort(422, 'EPay URL is invalid');
+        }
+        $config['url'] = rtrim($config['url'], '/');
+        return $config;
     }
 
     private function planData(ResellerPlan $plan, bool $includeBase): array

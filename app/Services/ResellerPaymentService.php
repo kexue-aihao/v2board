@@ -58,6 +58,11 @@ class ResellerPaymentService
         return (new $class([]))->form();
     }
 
+    public static function isSensitiveConfigField(string $field): bool
+    {
+        return (bool)preg_match('/(?:key|secret|token|password|private|webhook)/i', $field);
+    }
+
     public function pay(ResellerOrder $order, string $storeSlug, ?string $stripeToken = null): array
     {
         $platformOrder = $order->platformOrder;

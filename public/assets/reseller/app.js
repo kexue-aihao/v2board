@@ -284,8 +284,9 @@
             input.name = key;
             input.setAttribute('data-payment-field', '1');
             input.autocomplete = 'off';
-            if (input.tagName === 'INPUT') input.type = 'text';
+            if (input.tagName === 'INPUT') input.type = definition.sensitive ? 'password' : 'text';
             if (definition.value !== undefined && definition.value !== null) input.value = String(definition.value);
+            if (definition.placeholder) input.placeholder = String(definition.placeholder);
             label.appendChild(input);
             if (definition.description) {
                 var help = document.createElement('span');
@@ -339,7 +340,7 @@
             api('/payments').then(function (result) {
                 var list = result.data || [];
                 document.getElementById('payments').innerHTML = list.length ? list.map(function (payment) {
-                    return '<div class="list-row"><div><strong>' + escapeHtml(payment.name) + '</strong><span>' + escapeHtml(payment.driver) + '</span></div><span class="status-dot ' + (payment.enabled ? 'is-on' : '') + '">' + (payment.enabled ? '已启用' : '已停用') + '</span></div>';
+                    return '<div class="list-row"><div><strong>' + escapeHtml(payment.name) + '</strong><span>' + escapeHtml(payment.driver) + '</span></div><div class="payment-row-actions"><span class="status-dot ' + (payment.enabled ? 'is-on' : '') + '">' + (payment.enabled ? '已启用' : '已停用') + '</span><button class="btn btn-quiet" type="button" data-edit-payment="' + Number(payment.id) + '">编辑</button><button class="btn btn-quiet" type="button" data-delete-payment="' + Number(payment.id) + '">删除</button></div></div>';
                 }).join('') : '<div class="empty-state">还没有支付配置。</div>';
             }),
             api('/me').then(function (result) {
@@ -349,6 +350,34 @@
                 }).join('') : '<option value="">暂无可用驱动</option>';
             })
         ]);
+    }
+
+    function resetPaymentForm() {
+        var form = document.getElementById('payment-form');
+        var driver = document.getElementById('payment-driver');
+        form.reset();
+        form.elements.id.value = '';
+        driver.disabled = false;
+        document.getElementById('payment-save').textContent = '保存支付配置';
+        document.getElementById('payment-cancel-edit').hidden = true;
+        return loadPaymentForm(driver.value);
+    }
+
+    function editPayment(id) {
+        var form = document.getElementById('payment-form');
+        var driver = document.getElementById('payment-driver');
+        return api('/payments/' + encodeURIComponent(id) + '/edit').then(function (result) {
+            var payment = result.data || {};
+            form.elements.id.value = Number(payment.id || 0);
+            driver.value = payment.driver || '';
+            driver.disabled = true;
+            form.elements.name.value = payment.name || '';
+            form.elements.enabled.checked = Number(payment.enabled) === 1;
+            renderPaymentFields(payment.fields || {});
+            document.getElementById('payment-save').textContent = '保存修改';
+            document.getElementById('payment-cancel-edit').hidden = false;
+            form.scrollIntoView({behavior: 'smooth', block: 'start'});
+        });
     }
 
     function loadWorkspace() {
@@ -452,16 +481,50 @@
             return;
         }
         var body = formBody(event.target);
+        body.driver = document.getElementById('payment-driver').value;
         body.config = paymentConfig();
         body.enabled = event.target.elements.enabled.checked ? 1 : 0;
-        var button = event.target.querySelector('button[type="submit"]');
+        var isEdit = Boolean(body.id);
+        var button = document.getElementById('payment-save');
         setButtonLoading(button, true, '保存中...');
         api('/payments', {method: 'POST', body: JSON.stringify(body)}).then(function () {
-            show('支付配置已保存。');
-            return loadPayments();
+            show(isEdit ? '支付配置已更新。' : '支付配置已保存。');
+            return loadPayments().then(resetPaymentForm);
         }).catch(function (error) {
             show(error.message, true);
         }).then(function () { setButtonLoading(button, false); });
+    });
+
+    document.getElementById('payment-cancel-edit').addEventListener('click', function () {
+        resetPaymentForm();
+    });
+
+    document.getElementById('payments').addEventListener('click', function (event) {
+        var edit = event.target.closest('[data-edit-payment]');
+        if (edit) {
+            setButtonLoading(edit, true, '加载中...');
+            editPayment(edit.dataset.editPayment).catch(function (error) {
+                show(error.message, true);
+            }).then(function () { setButtonLoading(edit, false); });
+            return;
+        }
+
+        var remove = event.target.closest('[data-delete-payment]');
+        if (!remove) return;
+        if (!window.confirm('确定删除此支付配置吗？未完成订单引用的支付方式无法删除。')) return;
+        setButtonLoading(remove, true, '删除中...');
+        api('/payments/' + encodeURIComponent(remove.dataset.deletePayment), {method: 'DELETE'}).then(function () {
+            show('支付配置已删除。');
+            return loadPayments().then(function () {
+                var form = document.getElementById('payment-form');
+                if (String(form.elements.id.value) === String(remove.dataset.deletePayment)) {
+                    return resetPaymentForm();
+                }
+                return null;
+            });
+        }).catch(function (error) {
+            show(error.message, true);
+        }).then(function () { setButtonLoading(remove, false); });
     });
 
     document.getElementById('templates').addEventListener('click', function (event) {
