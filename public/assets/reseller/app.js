@@ -66,6 +66,48 @@
         });
     }
 
+    function copyText(text, button) {
+        function copied() {
+            var original = button.textContent;
+            button.textContent = '已复制';
+            window.setTimeout(function () { button.textContent = original; }, 1600);
+        }
+        function fallback() {
+            var area = document.createElement('textarea');
+            area.value = text;
+            area.setAttribute('readonly', 'readonly');
+            area.style.position = 'fixed';
+            area.style.opacity = '0';
+            document.body.appendChild(area);
+            area.select();
+            try { document.execCommand('copy'); copied(); } catch (error) {}
+            area.remove();
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(copied).catch(fallback);
+            return;
+        }
+        fallback();
+    }
+
+    function renderRegistrationCredentials(password) {
+        var panel = document.getElementById('registration-credentials');
+        if (!panel) return;
+        if (!password) {
+            panel.hidden = true;
+            panel.innerHTML = '';
+            return;
+        }
+        panel.innerHTML = '<strong>安全密码已生成</strong>'
+            + '<small>密码只在本次注册结果中显示，请先复制或保存，再关闭此页面。</small>'
+            + '<code class="registration-password">' + escapeHtml(password) + '</code>'
+            + '<button class="btn btn-quiet" type="button" data-copy-registration-password>复制密码</button>';
+        panel.hidden = false;
+        panel.querySelector('[data-copy-registration-password]').addEventListener('click', function () {
+            copyText(password, this);
+        });
+    }
+
     function money(value) {
         return value === null || value === undefined || value === '' ? '-' : '¥' + (Number(value) / 100).toFixed(2);
     }
@@ -213,14 +255,11 @@
     document.getElementById('register-form').addEventListener('submit', function (event) {
         event.preventDefault();
         var body = formBody(event.target);
-        if (body.password !== body.password_confirmation) {
-            show('两次输入的密码不一致。', true);
-            return;
-        }
         var button = event.target.querySelector('button[type="submit"]');
         setButtonLoading(button, true, '提交中...');
         api('/auth/register', {method: 'POST', body: JSON.stringify(body)}).then(function (result) {
             var data = result.data || {};
+            renderRegistrationCredentials(data.password);
             show(data.message || '申请已提交，请等待管理员审核。');
             event.target.reset();
             showAuthTab('login');

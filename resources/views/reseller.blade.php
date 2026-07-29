@@ -52,6 +52,12 @@
         .btn-quiet:hover:not(:disabled) { background: #f8fafc; }
         .btn-block { width: 100%; }
         .auth-footnote { margin: 22px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+        .registration-credentials { margin: 18px 0 22px; padding: 14px; border: 1px solid #b9e6de; border-radius: 6px; color: var(--teal); background: var(--teal-soft); }
+        .registration-credentials strong, .registration-credentials small { display: block; }
+        .registration-credentials strong { margin-bottom: 4px; font-size: 13px; }
+        .registration-credentials small { margin-bottom: 10px; color: #276f67; font-size: 12px; line-height: 1.6; }
+        .registration-password { display: block; padding: 10px; border: 1px solid #b9e6de; border-radius: 5px; color: var(--ink); background: #fff; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.7; word-break: break-all; user-select: all; }
+        .registration-credentials .btn { margin-top: 10px; }
         .workspace { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100vh; }
         .sidebar { display: flex; flex-direction: column; padding: 26px 18px; color: #d9e2f0; background: var(--nav); }
         .sidebar .brand { margin: 0 8px 46px; }
@@ -123,7 +129,7 @@
 @endif
 <section id="auth-shell" class="auth-shell" @if (!$reseller_enabled) hidden @endif>
     <aside class="auth-aside">
-        <div class="brand"><span class="brand-mark">R</span><span>Reseller Workspace</span></div>
+        <div class="brand"><span class="brand-mark">R</span><span>倒卖工作区</span></div>
         <h1>把你的销售店铺管理得更清楚。</h1>
         <p>从平台允许的基础套餐开始，设置展示价格与收款方式，统一管理店铺运营状态。</p>
         <div class="aside-points">
@@ -139,29 +145,26 @@
         </div>
         <h2 id="auth-heading">登录倒卖商工作台</h2>
         <p id="auth-caption" class="auth-caption">使用已审核的账号继续管理你的店铺。</p>
+        <div id="registration-credentials" class="registration-credentials" hidden role="status" aria-live="polite"></div>
         <form id="login-form" class="form-stack">
             <label class="field">邮箱<input name="email" type="email" autocomplete="email" placeholder="name@example.com" required></label>
             <label class="field">密码<input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required></label>
             <button class="btn btn-primary btn-block" type="submit">登录工作台</button>
         </form>
         <form id="register-form" class="form-stack" hidden>
-            <label class="field">登录邮箱<input name="email" type="email" autocomplete="email" placeholder="用于登录和接收通知" required></label>
-            <div class="two-col">
-                <label class="field">密码<input name="password" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="至少 8 位" required></label>
-                <label class="field">确认密码<input name="password_confirmation" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="再次输入密码" required></label>
-            </div>
+            <label class="field">登录邮箱<input name="email" type="email" autocomplete="email" placeholder="仅用于登录" required><span class="field-help">邮箱仅用于登录，不用于接收通知。</span></label>
             <div class="two-col">
                 <label class="field">店铺 Slug<input name="store_slug" pattern="[a-z0-9][a-z0-9-]{2,31}" placeholder="demo-store" required><span class="field-help">仅使用小写字母、数字和连字符</span></label>
                 <label class="field">店铺名称<input name="store_name" maxlength="128" placeholder="我的订阅店" required></label>
             </div>
             <button class="btn btn-primary btn-block" type="submit">提交入驻申请</button>
-            <p class="auth-footnote">账号审核和店铺审核相互独立。两者都通过后，店铺才会对客户开放销售。</p>
+            <p class="auth-footnote">提交后系统会生成一组 64 位随机密码并仅显示一次。请立即保存；账号审核和店铺审核相互独立，两者都通过后店铺才会对客户开放销售。</p>
         </form>
     </main>
 </section>
 <section id="workspace" class="workspace" hidden>
     <aside class="sidebar">
-        <div class="brand"><span class="brand-mark">R</span><span>Reseller Workspace</span></div>
+        <div class="brand"><span class="brand-mark">R</span><span>倒卖工作区</span></div>
         <p class="nav-caption">工作台</p>
         <span class="nav-item"><i>◆</i>店铺与销售</span>
         <p class="sidebar-note">基础套餐、节点能力和平台权限由管理员统一控制，你只需管理展示信息、价格和收款配置。</p>
@@ -198,6 +201,7 @@
         </div>
     </main>
 </section>
-<script src="/assets/reseller/app.js"></script>
+@php ($resellerAssetVersion = is_file(public_path('assets/reseller/app.js')) ? filemtime(public_path('assets/reseller/app.js')) : config('app.version'))
+<script src="/assets/reseller/app.js?v={{ $resellerAssetVersion }}"></script>
 </body>
 </html>

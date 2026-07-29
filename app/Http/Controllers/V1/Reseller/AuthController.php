@@ -4,6 +4,7 @@ namespace App\Http\Controllers\V1\Reseller;
 
 use App\Http\Controllers\Controller;
 use App\Models\ResellerAccount;
+use App\Services\PasswordPolicyService;
 use App\Services\ResellerAuthService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +20,6 @@ class AuthController extends Controller
 
         $data = $request->validate([
             'email' => 'required|email|max:128',
-            'password' => 'required|string|min:8|max:72|confirmed',
             'store_slug' => ['required', 'regex:/^[a-z0-9][a-z0-9-]{2,31}$/'],
             'store_name' => 'required|string|max:128',
         ]);
@@ -33,10 +33,14 @@ class AuthController extends Controller
             abort(422, 'Store slug already exists');
         }
 
-        DB::transaction(function () use ($data) {
+        // Use the same 64-character cryptographically random password policy as user accounts.
+        // The plaintext is returned only in this response so the applicant can save it.
+        $password = PasswordPolicyService::generate();
+
+        DB::transaction(function () use ($data, $password) {
             $account = new ResellerAccount();
             $account->email = $data['email'];
-            $account->password = Hash::make($data['password']);
+            $account->password = password_hash($password, PASSWORD_DEFAULT);
             $account->store_slug = $data['store_slug'];
             $account->store_name = $data['store_name'];
             $account->status = 'pending';
@@ -48,6 +52,8 @@ class AuthController extends Controller
         return response(['data' => [
             'status' => 'pending',
             'message' => 'Registration submitted and awaits administrator approval',
+            'password' => $password,
+            'password_length' => PasswordPolicyService::LENGTH,
         ]]);
     }
 
