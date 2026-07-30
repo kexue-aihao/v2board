@@ -1005,3 +1005,18 @@ CREATE TABLE `v2_telegram_subscription_binding` (
     KEY `subscription_status` (`subscription_id`,`status`),
     KEY `status_checked` (`status`,`last_checked_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_user_oauth_identity` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NOT NULL,
+    `provider` varchar(24) NOT NULL,
+    `provider_subject` varchar(191) NOT NULL,
+    `provider_tenant` varchar(191) NOT NULL DEFAULT '',
+    `provider_email` varchar(191) DEFAULT NULL,
+    `provider_username` varchar(191) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `provider_subject_tenant` (`provider`,`provider_subject`,`provider_tenant`),
+    KEY `user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
