@@ -43,6 +43,11 @@ class CacheKey
         'TWO_FACTOR_CHALLENGE' => '2FA challenge',
         'TWO_FACTOR_SETUP' => '2FA setup',
         'TWO_FACTOR_FAILURE' => '2FA failure',
+        'OAUTH_STATE' => 'OAuth state',
+        'OAUTH_TICKET' => 'OAuth ticket',
+        'OAUTH_TICKET_LOCK' => 'OAuth ticket lock',
+        'OAUTH_JWKS' => 'OAuth JWKS',
+        'TELEGRAM_BINDING' => 'Telegram binding',
         'RISK_RECOMPUTE_CURSOR' => '风险重算游标',
         'TOKEN_HISTORY_STARTED_AT' => 'Token 历史起始时间',
         'PASSWORD_RESET_ERROR_LIMIT' => '重置密码时原密码错误次数限制'

@@ -4,6 +4,7 @@ namespace App\Observers;
 
 use App\Models\Subscription;
 use App\Services\SubscriptionTokenHistoryService;
+use App\Services\TelegramBindingService;
 use App\Utils\TokenRotationContext;
 use Illuminate\Database\Eloquent\Model;
 
@@ -69,6 +70,16 @@ class SubscriptionTokenObserver
         if ($old !== '' && $old !== $token) {
             // 退役前先查活性：镜像、setPrimary 换主、reset:user 三种情况下旧值仍然活着。
             $service->noteRetiredIfDead($old, $reason);
+            try {
+                $bindingService = new TelegramBindingService();
+                if ($subscriptionId) {
+                    $bindingService->invalidateForSubscription($subscriptionId, 'subscription_token_changed');
+                } else {
+                    $bindingService->invalidateForUser($userId, 'subscription_token_changed');
+                }
+            } catch (\Throwable $e) {
+                report($e);
+            }
         }
     }
 

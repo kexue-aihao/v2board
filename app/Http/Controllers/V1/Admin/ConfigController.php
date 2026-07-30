@@ -8,6 +8,7 @@ use App\Jobs\SendEmailJob;
 use App\Models\User;
 use App\Models\UserTwoFactor;
 use App\Services\SubscribeAuditRetentionService;
+use App\Services\TelegramBindingService;
 use App\Services\TelegramService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
@@ -153,7 +154,10 @@ class ConfigController extends Controller
             'telegram' => [
                 'telegram_bot_enable' => config('v2board.telegram_bot_enable', 0),
                 'telegram_bot_token' => config('v2board.telegram_bot_token'),
-                'telegram_discuss_link' => config('v2board.telegram_discuss_link')
+                'telegram_discuss_id' => config('v2board.telegram_discuss_id'),
+                'telegram_discuss_link' => config('v2board.telegram_discuss_link'),
+                'telegram_subscription_binding_enable' => (int)config('v2board.telegram_subscription_binding_enable', 0),
+                'telegram_binding_check_interval' => (int)config('v2board.telegram_binding_check_interval', 300)
             ],
             'app' => [
                 'windows_version' => config('v2board.windows_version'),
@@ -174,6 +178,22 @@ class ConfigController extends Controller
                 'arithmetic_verification_enable' => (int)config('v2board.arithmetic_verification_enable', 0),
                 'reseller_enable' => (int)config('v2board.reseller_enable', 0),
                 'reseller_allowed_payment_drivers' => array_values((array)config('v2board.reseller_allowed_payment_drivers', [])),
+                'oauth_google_enable' => (int)config('v2board.oauth_google_enable', 0),
+                'oauth_google_client_id' => config('v2board.oauth_google_client_id'),
+                'oauth_google_client_secret_configured' => (bool)config('v2board.oauth_google_client_secret'),
+                'oauth_google_redirect_uri' => config('v2board.oauth_google_redirect_uri'),
+                'oauth_github_enable' => (int)config('v2board.oauth_github_enable', 0),
+                'oauth_github_client_id' => config('v2board.oauth_github_client_id'),
+                'oauth_github_client_secret_configured' => (bool)config('v2board.oauth_github_client_secret'),
+                'oauth_github_redirect_uri' => config('v2board.oauth_github_redirect_uri'),
+                'oauth_microsoft_enable' => (int)config('v2board.oauth_microsoft_enable', 0),
+                'oauth_microsoft_client_id' => config('v2board.oauth_microsoft_client_id'),
+                'oauth_microsoft_client_secret_configured' => (bool)config('v2board.oauth_microsoft_client_secret'),
+                'oauth_microsoft_tenant' => config('v2board.oauth_microsoft_tenant', 'common'),
+                'oauth_microsoft_redirect_uri' => config('v2board.oauth_microsoft_redirect_uri'),
+                'oauth_telegram_enable' => (int)config('v2board.oauth_telegram_enable', 0),
+                'oauth_telegram_login_domain' => config('v2board.oauth_telegram_login_domain'),
+                'oauth_telegram_bot_username' => config('v2board.oauth_telegram_bot_username'),
                 'recaptcha_key' => config('v2board.recaptcha_key'),
                 'recaptcha_site_key' => config('v2board.recaptcha_site_key'),
                 'register_limit_by_ip_enable' => (int)config('v2board.register_limit_by_ip_enable', 0),
@@ -205,6 +225,14 @@ class ConfigController extends Controller
     public function save(ConfigSave $request)
     {
         $data = $request->validated();
+        $previousTelegramBindingEnabled = (int)config('v2board.telegram_subscription_binding_enable', 0);
+        $previousTelegramDiscussId = trim((string)config('v2board.telegram_discuss_id', ''));
+        foreach (['google', 'github', 'microsoft'] as $provider) {
+            $secret = 'oauth_' . $provider . '_client_secret';
+            if (array_key_exists($secret, $data) && trim((string)$data[$secret]) === '') {
+                unset($data[$secret]);
+            }
+        }
         if ((int)($data['admin_2fa_force_enable'] ?? config('v2board.admin_2fa_force_enable', 0)) === 1) {
             $hasUnprotectedStaff = User::where(function ($query) {
                 $query->where('is_admin', 1)->orWhere('is_staff', 1);
@@ -223,9 +251,21 @@ class ConfigController extends Controller
                 $config[$k] = $data[$k];
             }
         }
+        $telegramBindingEnabled = array_key_exists('telegram_subscription_binding_enable', $data)
+            ? (int)$data['telegram_subscription_binding_enable']
+            : $previousTelegramBindingEnabled;
+        $telegramDiscussId = array_key_exists('telegram_discuss_id', $data)
+            ? trim((string)$data['telegram_discuss_id'])
+            : $previousTelegramDiscussId;
         $data = var_export($config, 1);
         if (!File::put(base_path() . '/config/v2board.php', "<?php\n return $data ;")) {
             abort(500, '修改失败');
+        }
+        if ($previousTelegramBindingEnabled === 1
+            && ($telegramBindingEnabled === 0 || $telegramDiscussId !== $previousTelegramDiscussId)) {
+            (new TelegramBindingService())->invalidateAll(
+                $telegramBindingEnabled === 0 ? 'binding_feature_disabled' : 'binding_group_changed'
+            );
         }
         if (function_exists('opcache_reset')) {
             if (opcache_reset() === false) {

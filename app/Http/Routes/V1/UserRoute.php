@@ -63,6 +63,10 @@ class UserRoute
             $router->post('/coupon/check', 'V1\\User\\CouponController@check');
             // Telegram
             $router->get ('/telegram/getBotInfo', 'V1\\User\\TelegramController@getBotInfo');
+            $router->get ('/telegram/binding', 'V1\\User\\TelegramController@binding');
+            $router->post('/telegram/binding/prepare', 'V1\\User\\TelegramController@prepareBinding');
+            $router->post('/telegram/binding/revoke', 'V1\\User\\TelegramController@revokeBinding');
+            $router->post('/oauth/link', 'V1\\Passport\\OAuthController@link');
             // Comm
             $router->get ('/comm/config', 'V1\\User\\CommController@config');
             $router->Post('/comm/getStripePublicKey', 'V1\\User\\CommController@getStripePublicKey');

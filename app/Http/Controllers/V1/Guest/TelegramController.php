@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\V1\Guest;
 
 use App\Http\Controllers\Controller;
+use App\Services\TelegramBindingService;
 use App\Services\TelegramService;
 use Illuminate\Http\Request;
 
@@ -23,9 +24,68 @@ class TelegramController extends Controller
 
     public function webhook(Request $request)
     {
-        $this->formatMessage($request->input());
-        $this->formatChatJoinRequest($request->input());
+        $data = $request->input();
+        if ($this->handleBindingUpdate($data)) {
+            return response(['data' => true]);
+        }
+        $this->formatMessage($data);
         $this->handle();
+        return response(['data' => true]);
+    }
+
+    private function handleBindingUpdate(array $data): bool
+    {
+        $bindingService = new TelegramBindingService();
+        if (isset($data['chat_join_request'])) {
+            $request = $data['chat_join_request'];
+            $chatId = (string)($request['chat']['id'] ?? '');
+            $userId = (int)($request['from']['id'] ?? 0);
+            if ($bindingService->enabled() && $bindingService->available()) {
+                $approved = $bindingService->processJoinRequest($chatId, (array)($request['from'] ?? []));
+                if ($approved) {
+                    $this->telegramService->approveChatJoinRequest((int)$chatId, $userId);
+                } else {
+                    $this->telegramService->declineChatJoinRequest((int)$chatId, $userId);
+                }
+                return true;
+            }
+            $this->formatLegacyChatJoinRequest($data);
+            return true;
+        }
+        if (isset($data['chat_member']) && $bindingService->enabled() && $bindingService->available()) {
+            $bindingService->processChatMemberUpdate((array)$data['chat_member']);
+            return true;
+        }
+        if (isset($data['message']['text']) && $bindingService->enabled() && $bindingService->available()) {
+            $message = $data['message'];
+            if (($message['chat']['type'] ?? '') !== 'private') return false;
+            $parts = preg_split('/\s+/', trim((string)$message['text']), 2);
+            if (($parts[0] ?? '') !== '/start' && strpos((string)($parts[0] ?? ''), '/start@') !== 0) {
+                return false;
+            }
+            $argument = trim((string)($parts[1] ?? ''));
+            if (strpos($argument, 'bind_') !== 0) return false;
+            try {
+                $result = $bindingService->completeFromBot(
+                    substr($argument, 5),
+                    $message['from']['id'] ?? '',
+                    $message['from']['username'] ?? '',
+                    $message['chat']['id'] ?? ''
+                );
+                $this->telegramService->sendMessage(
+                    (int)$message['chat']['id'],
+                    '绑定成功。请返回网站申请加入售后群。'
+                );
+            } catch (\Throwable $e) {
+                report($e);
+                $this->telegramService->sendMessage(
+                    (int)$message['chat']['id'],
+                    '绑定失败，请返回网站重新生成绑定链接后再试。'
+                );
+            }
+            return true;
+        }
+        return false;
     }
 
     public function handle()
@@ -92,7 +152,7 @@ class TelegramController extends Controller
         $this->msg = $obj;
     }
 
-    private function formatChatJoinRequest(array $data)
+    private function formatLegacyChatJoinRequest(array $data)
     {
         if (!isset($data['chat_join_request'])) return;
         if (!isset($data['chat_join_request']['from']['id'])) return;

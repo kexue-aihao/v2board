@@ -49,6 +49,11 @@ class Kernel extends ConsoleKernel
         $schedule->command('send:remindMail')->dailyAt('11:30');
         // horizon metrics
         $schedule->command('horizon:snapshot')->everyFiveMinutes();
+        $telegramBindingInterval = max(60, min(3600, (int)config('v2board.telegram_binding_check_interval', 300)));
+        $telegramBindingMinutes = max(1, (int)ceil($telegramBindingInterval / 60));
+        $schedule->command('telegram:verify-bindings')
+            ->cron('*/' . $telegramBindingMinutes . ' * * * *')
+            ->withoutOverlapping();
     }
 
     /**

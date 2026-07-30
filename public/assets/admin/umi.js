@@ -6208,10 +6208,164 @@
                 })), f.a.createElement(m, {
                     title: "\u5012\u5356\u5546\u670d\u52a1",
                     description: "\u5f00\u542f\u540e\u5141\u8bb8\u5916\u90e8\u7533\u8bf7\u5012\u5356\u5546\u8d26\u53f7\uff0c\u5e76\u5f00\u653e\u5df2\u5ba1\u6838\u5e97\u94fa\u7684\u9500\u552e\u9875\u3002"
-                }, f.a.createElement(l["a"], {
-                    checked: parseInt(_.reseller_enable),
-                    onChange: e=>this.set("safe", "reseller_enable", e ? 1 : 0)
-                })), _.recaptcha_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                 }, f.a.createElement(l["a"], {
+                     checked: parseInt(_.reseller_enable),
+                     onChange: e=>this.set("safe", "reseller_enable", e ? 1 : 0)
+                 })), f.a.createElement(f.a.Fragment, null, f.a.createElement("div", {
+                     className: "v2board-config-section-title mt-4 mb-2"
+                 }, "OAuth 登录"), f.a.createElement(m, {
+                     title: "Google 登录",
+                     description: "启用 Google 账号登录和注册。"
+                 }, f.a.createElement(l["a"], {
+                     checked: parseInt(_.oauth_google_enable),
+                     onChange: e=>this.set("safe", "oauth_google_enable", e ? 1 : 0)
+                 })), _.oauth_google_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Google Client ID",
+                     description: "OAuth 回调地址必须与 Google 应用配置完全一致。"
+                 }, f.a.createElement("input", {
+                     type: "text",
+                     className: "form-control",
+                     defaultValue: _.oauth_google_client_id,
+                     onChange: e=>this.set("safe", "oauth_google_client_id", e.target.value)
+                 })), f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Google Client Secret",
+                     description: _.oauth_google_client_secret_configured ? "已配置，留空保留当前值。" : "仅保存在服务端，不会回显。"
+                 }, f.a.createElement("input", {
+                     type: "password",
+                     className: "form-control",
+                     autoComplete: "new-password",
+                     placeholder: _.oauth_google_client_secret_configured ? "已配置，留空保留当前值" : "请输入",
+                     onChange: e=>this.set("safe", "oauth_google_client_secret", e.target.value)
+                 })), f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Google 回调地址",
+                     description: "可留空使用系统默认地址。"
+                 }, f.a.createElement("input", {
+                     type: "url",
+                     className: "form-control",
+                     defaultValue: _.oauth_google_redirect_uri,
+                     onChange: e=>this.set("safe", "oauth_google_redirect_uri", e.target.value)
+                 }))) : "", f.a.createElement(m, {
+                     title: "GitHub 登录",
+                     description: "启用 GitHub 账号登录和注册。"
+                 }, f.a.createElement(l["a"], {
+                     checked: parseInt(_.oauth_github_enable),
+                     onChange: e=>this.set("safe", "oauth_github_enable", e ? 1 : 0)
+                 })), _.oauth_github_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "GitHub Client ID",
+                     description: "请填写 GitHub OAuth App 的 Client ID。"
+                 }, f.a.createElement("input", {
+                     type: "text",
+                     className: "form-control",
+                     defaultValue: _.oauth_github_client_id,
+                     onChange: e=>this.set("safe", "oauth_github_client_id", e.target.value)
+                 })), f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "GitHub Client Secret",
+                     description: _.oauth_github_client_secret_configured ? "已配置，留空保留当前值。" : "仅保存在服务端，不会回显。"
+                 }, f.a.createElement("input", {
+                     type: "password",
+                     className: "form-control",
+                     autoComplete: "new-password",
+                     placeholder: _.oauth_github_client_secret_configured ? "已配置，留空保留当前值" : "请输入",
+                     onChange: e=>this.set("safe", "oauth_github_client_secret", e.target.value)
+                 })), f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "GitHub 回调地址",
+                     description: "可留空使用系统默认地址。"
+                 }, f.a.createElement("input", {
+                     type: "url",
+                     className: "form-control",
+                     defaultValue: _.oauth_github_redirect_uri,
+                     onChange: e=>this.set("safe", "oauth_github_redirect_uri", e.target.value)
+                 }))) : "", f.a.createElement(m, {
+                     title: "Microsoft 登录",
+                     description: "启用 Microsoft Entra ID 账号登录和注册。"
+                 }, f.a.createElement(l["a"], {
+                     checked: parseInt(_.oauth_microsoft_enable),
+                     onChange: e=>this.set("safe", "oauth_microsoft_enable", e ? 1 : 0)
+                 })), _.oauth_microsoft_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Microsoft Tenant",
+                     description: "使用 common、organizations、consumers 或指定 Tenant ID。"
+                 }, f.a.createElement("input", {
+                     type: "text",
+                     className: "form-control",
+                     defaultValue: _.oauth_microsoft_tenant,
+                     onChange: e=>this.set("safe", "oauth_microsoft_tenant", e.target.value)
+                 })), f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Microsoft Client ID",
+                     description: "请填写 Microsoft 应用注册的 Application ID。"
+                 }, f.a.createElement("input", {
+                     type: "text",
+                     className: "form-control",
+                     defaultValue: _.oauth_microsoft_client_id,
+                     onChange: e=>this.set("safe", "oauth_microsoft_client_id", e.target.value)
+                 })), f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Microsoft Client Secret",
+                     description: _.oauth_microsoft_client_secret_configured ? "已配置，留空保留当前值。" : "仅保存在服务端，不会回显。"
+                 }, f.a.createElement("input", {
+                     type: "password",
+                     className: "form-control",
+                     autoComplete: "new-password",
+                     placeholder: _.oauth_microsoft_client_secret_configured ? "已配置，留空保留当前值" : "请输入",
+                     onChange: e=>this.set("safe", "oauth_microsoft_client_secret", e.target.value)
+                 })), f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Microsoft 回调地址",
+                     description: "可留空使用系统默认地址。"
+                 }, f.a.createElement("input", {
+                     type: "url",
+                     className: "form-control",
+                     defaultValue: _.oauth_microsoft_redirect_uri,
+                     onChange: e=>this.set("safe", "oauth_microsoft_redirect_uri", e.target.value)
+                 }))) : "", f.a.createElement(m, {
+                     title: "Telegram 登录",
+                     description: "启用 Telegram Login Widget。请先在 BotFather 配置登录域名。"
+                 }, f.a.createElement(l["a"], {
+                     checked: parseInt(_.oauth_telegram_enable),
+                     onChange: e=>this.set("safe", "oauth_telegram_enable", e ? 1 : 0)
+                 })), _.oauth_telegram_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Telegram 登录域名",
+                     description: "填写 BotFather 中配置的域名。"
+                 }, f.a.createElement("input", {
+                     type: "text",
+                     className: "form-control",
+                     defaultValue: _.oauth_telegram_login_domain,
+                     onChange: e=>this.set("safe", "oauth_telegram_login_domain", e.target.value)
+                 })), f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Telegram Bot 用户名",
+                     description: "用于显示 Login Widget，不要填写 @ 前缀。"
+                 }, f.a.createElement("input", {
+                     type: "text",
+                     className: "form-control",
+                     defaultValue: _.oauth_telegram_bot_username,
+                     onChange: e=>this.set("safe", "oauth_telegram_bot_username", e.target.value)
+                 }))) : "", f.a.createElement(m, {
+                     title: "Telegram 售后群绑定",
+                     description: "开启后用户可用订阅、 Telegram UID 和用户名申请加入售后群。"
+                 }, f.a.createElement(l["a"], {
+                     checked: parseInt(y.telegram_subscription_binding_enable),
+                     onChange: e=>this.set("telegram", "telegram_subscription_binding_enable", e ? 1 : 0)
+                 })), y.telegram_subscription_binding_enable ? f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "Telegram 巡检间隔（秒）",
+                     description: "用于检测用户名变更，建议保持 300 秒。"
+                 }, f.a.createElement("input", {
+                     type: "number",
+                     min: 60,
+                     max: 3600,
+                     className: "form-control",
+                     defaultValue: y.telegram_binding_check_interval,
+                     onChange: e=>this.set("telegram", "telegram_binding_check_interval", e.target.value)
+                 })) : ""), _.recaptcha_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                     isChildren: !0,
                     title: "\u5bc6\u94a5",
                     description: "\u5728Google reCAPTCHA\u7533\u8bf7\u7684\u5bc6\u94a5\u3002"

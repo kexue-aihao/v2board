@@ -18,7 +18,9 @@ class SchemaUpgradeService
         'password_policy_schema' => 'password_policy_schema_v1',
         'reseller_schema' => 'reseller_schema_v1',
         'reseller_approval_schema' => 'reseller_approval_schema_v1',
-        'reseller_shared_subscription_schema' => 'reseller_shared_subscription_schema_v1'
+        'reseller_shared_subscription_schema' => 'reseller_shared_subscription_schema_v1',
+        'oauth_identity_schema' => 'oauth_identity_schema_v1',
+        'telegram_binding_schema' => 'telegram_binding_schema_v1'
     ];
 
     public function run(): array
@@ -87,6 +89,12 @@ class SchemaUpgradeService
                 return;
             case 'reseller_shared_subscription_schema':
                 $this->applyResellerSharedSubscriptionSchema();
+                return;
+            case 'oauth_identity_schema':
+                $this->applyOAuthIdentitySchema();
+                return;
+            case 'telegram_binding_schema':
+                $this->applyTelegramBindingSchema();
                 return;
         }
 
@@ -590,6 +598,79 @@ class SchemaUpgradeService
             ->update(['password_reset_required' => 1]);
     }
 
+    private function applyOAuthIdentitySchema(): void
+    {
+        $this->requireTable('v2_user');
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_user_oauth_identity` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `provider` varchar(24) NOT NULL,
+            `provider_subject` varchar(191) NOT NULL,
+            `provider_tenant` varchar(191) NOT NULL DEFAULT '',
+            `provider_email` varchar(191) DEFAULT NULL,
+            `provider_username` varchar(191) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'provider' => 'varchar(24) NOT NULL',
+            'provider_subject' => 'varchar(191) NOT NULL',
+            'provider_tenant' => "varchar(191) NOT NULL DEFAULT ''",
+            'provider_email' => 'varchar(191) DEFAULT NULL',
+            'provider_username' => 'varchar(191) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_user_oauth_identity', $column, $definition);
+        }
+        $this->ensureIndex('v2_user_oauth_identity', 'provider_subject_tenant', ['provider', 'provider_subject', 'provider_tenant'], true);
+        $this->ensureIndex('v2_user_oauth_identity', 'user_id', ['user_id']);
+    }
+
+    private function applyTelegramBindingSchema(): void
+    {
+        $this->requireTable('v2_user');
+        $this->requireTable('v2_subscription');
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_telegram_subscription_binding` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `subscription_id` bigint(20) NOT NULL,
+            `subscription_token_hash` char(64) NOT NULL,
+            `telegram_user_id` bigint(20) NOT NULL,
+            `telegram_username` varchar(191) NOT NULL,
+            `chat_id` bigint(20) NOT NULL,
+            `status` varchar(16) NOT NULL DEFAULT 'active',
+            `invalid_reason` varchar(255) DEFAULT NULL,
+            `bound_at` int(11) NOT NULL,
+            `last_checked_at` int(11) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'subscription_id' => 'bigint(20) NOT NULL',
+            'subscription_token_hash' => 'char(64) NOT NULL',
+            'telegram_user_id' => 'bigint(20) NOT NULL',
+            'telegram_username' => 'varchar(191) NOT NULL',
+            'chat_id' => 'bigint(20) NOT NULL',
+            'status' => "varchar(16) NOT NULL DEFAULT 'active'",
+            'invalid_reason' => 'varchar(255) DEFAULT NULL',
+            'bound_at' => 'int(11) NOT NULL',
+            'last_checked_at' => 'int(11) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_telegram_subscription_binding', $column, $definition);
+        }
+        $this->ensureUniqueIndex('v2_telegram_subscription_binding', 'user_chat', ['user_id', 'chat_id']);
+        $this->ensureUniqueIndex('v2_telegram_subscription_binding', 'telegram_chat', ['telegram_user_id', 'chat_id']);
+        $this->ensureIndex('v2_telegram_subscription_binding', 'subscription_status', ['subscription_id', 'status']);
+        $this->ensureIndex('v2_telegram_subscription_binding', 'status_checked', ['status', 'last_checked_at']);
+    }
+
     private function applyResellerSchema(): void
     {
         $this->requireTable('v2_user');
@@ -877,6 +958,32 @@ class SchemaUpgradeService
         $columnList = implode('`,`', $columns);
         $type = $unique ? 'ADD UNIQUE KEY' : 'ADD KEY';
         DB::statement("ALTER TABLE `{$table}` {$type} `{$name}` (`{$columnList}`)");
+    }
+
+    private function ensureUniqueIndex(string $table, string $name, array $columns): void
+    {
+        foreach (DB::select("SHOW INDEX FROM `{$table}`") as $index) {
+            if ((string)$index->Key_name !== $name) {
+                continue;
+            }
+            if ((int)$index->Non_unique === 0) {
+                return;
+            }
+            DB::statement("ALTER TABLE `{$table}` DROP INDEX `{$name}`");
+            break;
+        }
+        $this->ensureIndex($table, $name, $columns, true);
+    }
+
+    private function ensureNonUniqueIndex(string $table, string $name, array $columns): void
+    {
+        foreach (DB::select("SHOW INDEX FROM `{$table}`") as $index) {
+            if ((string)$index->Key_name === $name && (int)$index->Non_unique === 0) {
+                DB::statement('ALTER TABLE ' . $table . ' DROP INDEX ' . $name);
+                break;
+            }
+        }
+        $this->ensureIndex($table, $name, $columns, false);
     }
 
     private function dropIndexIfExists(string $table, string $name): void

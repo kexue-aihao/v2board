@@ -52,7 +52,34 @@ class TelegramService {
         $commands = $this->discoverCommands(base_path('app/Plugins/Telegram/Commands'));
         $this->setMyCommands($commands);
         return $this->request('setWebhook', [
-            'url' => $url
+            'url' => $url,
+            'allowed_updates' => json_encode(['message', 'chat_join_request', 'chat_member'])
+        ]);
+    }
+
+    public function getChatMember($chatId, $userId)
+    {
+        return $this->request('getChatMember', [
+            'chat_id' => $chatId,
+            'user_id' => $userId
+        ]);
+    }
+
+    public function banChatMember($chatId, $userId)
+    {
+        return $this->request('banChatMember', [
+            'chat_id' => $chatId,
+            'user_id' => $userId,
+            'revoke_messages' => false
+        ]);
+    }
+
+    public function unbanChatMember($chatId, $userId)
+    {
+        return $this->request('unbanChatMember', [
+            'chat_id' => $chatId,
+            'user_id' => $userId,
+            'only_if_banned' => true
         ]);
     }
 

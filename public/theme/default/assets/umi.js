@@ -61233,3 +61233,467 @@
         var value = window.prompt('Enter your authenticator code or recovery code'); var payload = { challenge: data.challenge }; if (/^\\d{6}$/.test(value || '')) payload.code = value; else payload.recovery_code = value || ''; return post('/passport/auth/verify2fa', payload).then(finish);
     };
 })();
+
+/* Third-party sign-in and Telegram support binding enhancement for the compiled default theme. */
+(function () {
+    var oauthConfig = null;
+    var guestConfig = null;
+    var configPromise = null;
+    var observer = null;
+    var oauthTicketProcessing = '';
+    var telegramBindingLoading = false;
+
+    function request(path, options) {
+        options = options || {};
+        var headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        };
+        var authorization = localStorage.getItem('authorization');
+        if (authorization) headers.Authorization = authorization;
+        return fetch('/api/v1' + path, {
+            method: options.method || 'GET',
+            headers: headers,
+            body: options.body ? JSON.stringify(options.body) : undefined
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (body) {
+                if (!response.ok) throw new Error(body.message || body.error || '请求失败');
+                return body && body.data !== undefined ? body.data : body;
+            });
+        });
+    }
+
+    function getConfig() {
+        if (!configPromise) {
+            configPromise = request('/guest/comm/config').then(function (data) {
+                guestConfig = data || {};
+                oauthConfig = data && data.oauth ? data.oauth : {};
+                return data;
+            }).catch(function () {
+                oauthConfig = {};
+                return {};
+            });
+        }
+        return configPromise;
+    }
+
+    function hashQuery() {
+        var hash = window.location.hash || '';
+        var position = hash.indexOf('?');
+        return position < 0 ? new URLSearchParams() : new URLSearchParams(hash.slice(position + 1));
+    }
+
+    function authRoute() {
+        var path = (window.location.hash || '').split('?')[0];
+        return path === '#/login' || path === '#/register';
+    }
+
+    function authContent() {
+        return document.querySelector('.v2board-auth-box .block-content');
+    }
+
+    function message(container, text, danger) {
+        var old = container.querySelector('.v2board-oauth-message');
+        if (old) old.remove();
+        var node = document.createElement('div');
+        node.className = 'v2board-oauth-message alert ' + (danger ? 'alert-danger' : 'alert-success') + ' mb-3';
+        node.setAttribute('role', 'status');
+        node.textContent = text;
+        container.insertBefore(node, container.firstChild);
+        return node;
+    }
+
+    function oauthButton(provider, label) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-outline-secondary btn-block mb-2 v2board-oauth-button';
+        button.textContent = label;
+        button.addEventListener('click', function () {
+            window.location.assign('/api/v1/passport/oauth/' + provider + '/redirect');
+        });
+        return button;
+    }
+
+    function mountOAuthButtons() {
+        if (!authRoute() || !oauthConfig) return;
+        var content = authContent();
+        if (!content || content.querySelector('.v2board-oauth-entry')) return;
+        var footer = content.querySelector('.text-left.bg-gray-lighter');
+        var entry = document.createElement('div');
+        entry.className = 'v2board-oauth-entry mt-3';
+        entry.setAttribute('aria-label', '第三方登录');
+        var divider = document.createElement('div');
+        divider.className = 'text-center text-muted small mb-2';
+        divider.textContent = '或使用以下账号继续';
+        entry.appendChild(divider);
+        var providers = [
+            ['google', 'Google'],
+            ['github', 'GitHub'],
+            ['microsoft', 'Microsoft'],
+            ['telegram', 'Telegram']
+        ];
+        providers.forEach(function (item) {
+            if (oauthConfig[item[0]]) entry.appendChild(oauthButton(item[0], item[1] + ' 登录 / 注册'));
+        });
+        if (!entry.querySelector('button')) return;
+        if (footer) footer.parentNode.insertBefore(entry, footer); else content.appendChild(entry);
+    }
+
+    function resetHashToLogin() {
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.search + '#/login');
+    }
+
+    function completeLogin(data, ticket) {
+        if (data && data.auth_data) {
+            localStorage.setItem('authorization', data.auth_data);
+            window.location.hash = '#/dashboard';
+            return;
+        }
+        if (data && (data.two_factor_required || data.two_factor_setup_required)) {
+            if (ticket && data.two_factor_required) sessionStorage.setItem('v2board_oauth_link_ticket', ticket);
+            if (window.__v2board2fa) window.__v2board2fa(data, 'dashboard');
+            return;
+        }
+    }
+
+    function buildField(label, type, name) {
+        var group = document.createElement('div');
+        group.className = 'form-group';
+        var input = document.createElement('input');
+        input.className = 'form-control form-control-alt';
+        input.type = type;
+        input.name = name;
+        input.placeholder = label;
+        group.appendChild(input);
+        return { group: group, input: input };
+    }
+
+    function mountOAuthCaptcha() {
+        if (!guestConfig || !guestConfig.is_recaptcha || !guestConfig.recaptcha_site_key) return null;
+        var holder = document.createElement('div');
+        holder.className = 'v2board-oauth-recaptcha mb-3';
+        holder._token = '';
+        var render = function () {
+            if (!window.grecaptcha || typeof window.grecaptcha.render !== 'function' || holder._widget !== undefined) return;
+            try {
+                holder._widget = window.grecaptcha.render(holder, {
+                    sitekey: guestConfig.recaptcha_site_key,
+                    callback: function (token) { holder._token = token || ''; }
+                });
+            } catch (error) {}
+        };
+        var script = document.getElementById('v2board-recaptcha-script');
+        if (!script) {
+            script = document.createElement('script');
+            script.id = 'v2board-recaptcha-script';
+            script.async = true;
+            script.defer = true;
+            script.src = 'https://www.google.com/recaptcha/api.js?render=explicit';
+            script.onload = render;
+            document.head.appendChild(script);
+        }
+        render();
+        window.setTimeout(render, 800);
+        return holder;
+    }
+
+    function showEmailCompletion(ticket, provider) {
+        var content = authContent();
+        if (!content) return;
+        var old = content.querySelector('.v2board-oauth-completion');
+        if (old) old.remove();
+        var panel = document.createElement('div');
+        panel.className = 'v2board-oauth-completion mt-3';
+        var title = document.createElement('p');
+        title.className = 'text-muted small';
+        title.textContent = provider === 'telegram' ? '请补充并验证邮箱后继续 Telegram 登录。' : '请补充并验证邮箱后继续。';
+        panel.appendChild(title);
+        var email = buildField('邮箱', 'email', 'oauth_email');
+        var code = buildField('邮箱验证码', 'text', 'oauth_email_code');
+        code.input.maxLength = 6;
+        var captcha = mountOAuthCaptcha();
+        panel.appendChild(email.group);
+        panel.appendChild(code.group);
+        if (captcha) panel.appendChild(captcha);
+        var send = document.createElement('button');
+        send.type = 'button';
+        send.className = 'btn btn-outline-primary mr-2';
+        send.textContent = '发送验证码';
+        send.addEventListener('click', function () {
+            if (!email.input.value) return;
+            if (captcha && !captcha._token) {
+                message(panel, '请先在原有注册表单中完成验证码校验。', true);
+                return;
+            }
+            send.disabled = true;
+            var sendBody = { email: email.input.value };
+            if (captcha && captcha._token) sendBody.recaptcha_data = captcha._token;
+            request('/passport/comm/sendEmailVerify', { method: 'POST', body: sendBody }).then(function () {
+                message(panel, '验证码已发送。', false);
+            }).catch(function (error) {
+                message(panel, error.message, true);
+            }).finally(function () { send.disabled = false; });
+        });
+        var submit = document.createElement('button');
+        submit.type = 'button';
+        submit.className = 'btn btn-primary';
+        submit.textContent = '继续';
+        submit.addEventListener('click', function () {
+            submit.disabled = true;
+            var completeBody = {
+                ticket: ticket,
+                email: email.input.value,
+                email_code: code.input.value
+            };
+            if (captcha && captcha._token) completeBody.recaptcha_data = captcha._token;
+             request('/passport/oauth/complete', { method: 'POST', body: completeBody }).then(function (data) {
+                 completeLogin(data, ticket);
+                 if (data && data.link_required) showLinkCompletion(ticket, data.email || email.input.value);
+                 if (data && data.registration_required) showRegistrationCompletion(ticket, data.provider || provider, data.email || email.input.value);
+             }).catch(function (error) {
+                 message(panel, error.message, true);
+            }).finally(function () { submit.disabled = false; });
+        });
+        panel.appendChild(send);
+        panel.appendChild(submit);
+         content.appendChild(panel);
+     }
+
+     function showRegistrationCompletion(ticket, provider, emailValue) {
+         var content = authContent();
+         if (!content) return;
+         var old = content.querySelector('.v2board-oauth-completion');
+         if (old) old.remove();
+         var panel = document.createElement('div');
+         panel.className = 'v2board-oauth-completion mt-3';
+         var title = document.createElement('p');
+         title.className = 'text-muted small';
+         title.textContent = '请完成注册安全校验后继续。';
+         panel.appendChild(title);
+         if (emailValue) {
+             var account = document.createElement('p');
+             account.className = 'text-muted small';
+             account.textContent = '账号：' + emailValue;
+             panel.appendChild(account);
+         }
+         var invite = null;
+         if (guestConfig && (guestConfig.is_invite_force === 1 || guestConfig.is_invite_force === '1')) {
+             invite = buildField('邀请码', 'text', 'oauth_invite_code');
+             panel.appendChild(invite.group);
+         }
+         var arithmeticId = '';
+         var arithmetic = null;
+         var arithmeticAnswer = null;
+         if (guestConfig && (guestConfig.is_arithmetic_verification === 1 || guestConfig.is_arithmetic_verification === '1')) {
+             arithmetic = document.createElement('div');
+             arithmetic.className = 'form-group';
+             var expression = document.createElement('p');
+             expression.className = 'text-muted small';
+             expression.textContent = '正在加载算术验证…';
+             arithmeticAnswer = buildField('算术答案', 'text', 'oauth_arithmetic_answer');
+             arithmeticAnswer.input.inputMode = 'numeric';
+             arithmetic.appendChild(expression);
+             arithmetic.appendChild(arithmeticAnswer.group);
+             panel.appendChild(arithmetic);
+             request('/guest/comm/arithmetic').then(function (challenge) {
+                 arithmeticId = challenge && challenge.challenge_id ? String(challenge.challenge_id) : '';
+                 if (challenge) expression.textContent = String(challenge.left) + ' ' + String(challenge.operator) + ' ' + String(challenge.right) + ' = ?';
+             }).catch(function (error) { expression.textContent = error.message; });
+         }
+         var captcha = mountOAuthCaptcha();
+         if (captcha) panel.appendChild(captcha);
+         var submit = document.createElement('button');
+         submit.type = 'button';
+         submit.className = 'btn btn-primary';
+         submit.textContent = '继续';
+         submit.addEventListener('click', function () {
+             submit.disabled = true;
+             var completeBody = { ticket: ticket };
+             if (invite && invite.input.value) completeBody.invite_code = invite.input.value;
+             if (captcha && captcha._token) completeBody.recaptcha_data = captcha._token;
+             if (arithmeticId && arithmeticAnswer) {
+                 completeBody.arithmetic_challenge_id = arithmeticId;
+                 completeBody.arithmetic_answer = arithmeticAnswer.input.value;
+             }
+             request('/passport/oauth/complete', { method: 'POST', body: completeBody }).then(function (data) {
+                 if (data && data.registration_required) {
+                     showRegistrationCompletion(ticket, provider, emailValue);
+                     return;
+                 }
+                 if (data && data.link_required) {
+                     showLinkCompletion(ticket, data.email || emailValue || '');
+                     return;
+                 }
+                 completeLogin(data, ticket);
+             }).catch(function (error) {
+                 message(panel, error.message, true);
+             }).finally(function () { submit.disabled = false; });
+         });
+         panel.appendChild(submit);
+         content.appendChild(panel);
+     }
+
+     function showLinkCompletion(ticket, email) {
+        var content = authContent();
+        if (!content) return;
+        var panel = content.querySelector('.v2board-oauth-completion') || document.createElement('div');
+        panel.className = 'v2board-oauth-completion mt-3';
+        panel.innerHTML = '';
+        var title = document.createElement('p');
+        title.className = 'text-muted small';
+        title.textContent = '该邮箱已有账号，请登录后确认绑定。';
+        panel.appendChild(title);
+        var account = buildField('邮箱', 'email', 'oauth_link_email');
+        account.input.value = email || '';
+        var password = buildField('密码', 'password', 'oauth_link_password');
+        panel.appendChild(account.group);
+        panel.appendChild(password.group);
+        var submit = document.createElement('button');
+        submit.type = 'button';
+        submit.className = 'btn btn-primary';
+        submit.textContent = '登录并确认绑定';
+        submit.addEventListener('click', function () {
+            submit.disabled = true;
+            request('/passport/auth/login', { method: 'POST', body: { email: account.input.value, password: password.input.value } }).then(function (data) {
+                if (data && (data.two_factor_required || data.two_factor_setup_required)) {
+                    sessionStorage.setItem('v2board_oauth_link_ticket', ticket);
+                    if (window.__v2board2fa) window.__v2board2fa(data, 'dashboard');
+                    return;
+                }
+                if (!data || !data.auth_data) throw new Error('登录失败');
+                localStorage.setItem('authorization', data.auth_data);
+                return request('/user/oauth/link', { method: 'POST', body: { ticket: ticket } }).then(function () {
+                    window.location.hash = '#/dashboard';
+                });
+            }).catch(function (error) {
+                message(panel, error.message, true);
+            }).finally(function () { submit.disabled = false; });
+        });
+        panel.appendChild(submit);
+        if (!panel.parentNode) content.appendChild(panel);
+    }
+
+    function consumeTicket() {
+        var params = hashQuery();
+        var ticket = params.get('oauth_ticket');
+        if (!ticket || !authRoute()) return;
+        if (oauthTicketProcessing === ticket) return;
+         oauthTicketProcessing = ticket;
+         request('/passport/oauth/complete', { method: 'POST', body: { ticket: ticket } }).then(function (data) {
+             if (data && data.requires_email) showEmailCompletion(ticket, data.provider);
+             else if (data && data.registration_required) showRegistrationCompletion(ticket, data.provider, data.email || '');
+             else if (data && data.link_required) showLinkCompletion(ticket, data.email || '');
+             else completeLogin(data, ticket);
+            resetHashToLogin();
+        }).catch(function (error) {
+            var content = authContent();
+            if (content) message(content, error.message, true);
+        });
+    }
+
+    function mountTelegramWidget() {
+        var params = hashQuery();
+        var state = params.get('telegram_state');
+        if (!state || !oauthConfig || !oauthConfig.telegram || !oauthConfig.telegram_bot_username || !authRoute()) return;
+        var content = authContent();
+        if (!content || content.querySelector('.v2board-telegram-widget')) return;
+        var wrapper = document.createElement('div');
+        wrapper.className = 'v2board-telegram-widget mt-3 text-center';
+        var text = document.createElement('p');
+        text.className = 'text-muted small';
+        text.textContent = '使用 Telegram 完成身份验证';
+        var target = document.createElement('div');
+        wrapper.appendChild(text);
+        wrapper.appendChild(target);
+        content.appendChild(wrapper);
+        var callback = '__v2boardTelegramAuth_' + Date.now();
+        window[callback] = function (data) {
+             request('/passport/oauth/complete', { method: 'POST', body: { provider: 'telegram', state: state, data: data } }).then(function (result) {
+                 if (result && result.requires_email) showEmailCompletion(result.ticket, 'telegram');
+                 else if (result && result.registration_required) showRegistrationCompletion(result.ticket, 'telegram', result.email || '');
+                 else if (result && result.link_required) showLinkCompletion(result.ticket, result.email || '');
+                 else completeLogin(result, '');
+            }).catch(function (error) { message(wrapper, error.message, true); });
+        };
+        var script = document.createElement('script');
+        script.async = true;
+        script.src = 'https://telegram.org/js/telegram-widget.js?22';
+        script.setAttribute('data-telegram-login', String(oauthConfig.telegram_bot_username).replace(/^@/, ''));
+        script.setAttribute('data-size', 'large');
+        script.setAttribute('data-userpic', 'false');
+        script.setAttribute('data-onauth', callback + '(user)');
+        target.appendChild(script);
+    }
+
+    function resumeOAuthLink() {
+        var ticket = sessionStorage.getItem('v2board_oauth_link_ticket');
+        if (!ticket || !localStorage.getItem('authorization')) return;
+        request('/user/oauth/link', { method: 'POST', body: { ticket: ticket } }).then(function () {
+            sessionStorage.removeItem('v2board_oauth_link_ticket');
+        }).catch(function () {});
+    }
+
+    function mountTelegramBinding() {
+        var path = (window.location.hash || '').split('?')[0];
+        if (path !== '#/profile' || document.querySelector('.v2board-telegram-binding') || telegramBindingLoading) return;
+        var host = document.querySelector('#page-container .block-content-full:last-child') || document.querySelector('#page-container main') || document.querySelector('#page-container');
+        if (!host) return;
+        telegramBindingLoading = true;
+        request('/user/telegram/binding').then(function (binding) {
+            if (!binding || !binding.enabled) return;
+            var card = document.createElement('div');
+            card.className = 'block block-rounded v2board-telegram-binding mt-3';
+            var body = document.createElement('div');
+            body.className = 'block-content';
+            var heading = document.createElement('h3');
+            heading.className = 'font-size-h4';
+            heading.textContent = 'Telegram 售后群';
+            var status = document.createElement('p');
+            status.className = 'text-muted small';
+            status.textContent = binding.binding ? ('当前状态：' + binding.binding.status) : '请选择有效订阅进行绑定';
+            body.appendChild(heading);
+            body.appendChild(status);
+            var select = document.createElement('select');
+            select.className = 'form-control mb-2';
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-primary';
+            button.textContent = '生成 Telegram 绑定链接';
+            request('/user/subscription/fetch').then(function (subscriptions) {
+                (Array.isArray(subscriptions) ? subscriptions : []).filter(function (item) { return item.status === 'active'; }).forEach(function (item) {
+                    var option = document.createElement('option');
+                    option.value = item.id;
+                    option.textContent = item.plan_name || ('Subscription #' + item.id);
+                    select.appendChild(option);
+                });
+            }).catch(function () {});
+            button.addEventListener('click', function () {
+                if (!select.value) return;
+                button.disabled = true;
+                request('/user/telegram/binding/prepare', { method: 'POST', body: { subscription_id: Number(select.value) } }).then(function (data) {
+                    if (data && data.binding_url) window.open(data.binding_url, '_blank', 'noopener,noreferrer');
+                    status.textContent = '已生成一次性链接，请在 Telegram 私聊中完成绑定。';
+                }).catch(function (error) { status.textContent = error.message; }).finally(function () { button.disabled = false; });
+            });
+            body.appendChild(select);
+            body.appendChild(button);
+            card.appendChild(body);
+            host.appendChild(card);
+        }).catch(function () {}).finally(function () { telegramBindingLoading = false; });
+    }
+
+    function boot() {
+        getConfig().then(function () {
+            mountOAuthButtons();
+            mountTelegramWidget();
+            consumeTicket();
+            mountTelegramBinding();
+            resumeOAuthLink();
+        });
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+    observer = new MutationObserver(function () { boot(); });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    window.addEventListener('hashchange', boot);
+})();

@@ -48,6 +48,14 @@ class CommController extends Controller
                 'is_recaptcha' => (int)config('v2board.recaptcha_enable', 0) ? 1 : 0,
                 'recaptcha_site_key' => config('v2board.recaptcha_site_key'),
                 'is_arithmetic_verification' => (int)config('v2board.arithmetic_verification_enable', 0) ? 1 : 0,
+                'oauth' => [
+                    'google' => (int)config('v2board.oauth_google_enable', 0) === 1,
+                    'github' => (int)config('v2board.oauth_github_enable', 0) === 1,
+                    'microsoft' => (int)config('v2board.oauth_microsoft_enable', 0) === 1,
+                    'telegram' => (int)config('v2board.oauth_telegram_enable', 0) === 1,
+                    'telegram_bot_username' => config('v2board.oauth_telegram_bot_username'),
+                    'telegram_login_domain' => config('v2board.oauth_telegram_login_domain')
+                ],
                 'site_status' => [
                     'mode' => $siteStatus,
                     'title' => $siteStatusTitle ?: ($siteStatus === 'shutdown' ? '服务暂时停止' : '服务正在维护'),

@@ -37,6 +37,11 @@ class PassportRoute
             $router->get ('/auth/token2Login', 'V1\\Passport\\AuthController@token2Login');
             $router->post('/auth/forget', 'V1\\Passport\\AuthController@forget');
             $router->post('/auth/getQuickLoginUrl', 'V1\\Passport\\AuthController@getQuickLoginUrl');
+            // Third-party login. The callback only creates a short-lived ticket;
+            // the frontend consumes it through /oauth/complete.
+            $router->get ('/oauth/{provider}/redirect', 'V1\\Passport\\OAuthController@redirect');
+            $router->get ('/oauth/{provider}/callback', 'V1\\Passport\\OAuthController@callback');
+            $router->post('/oauth/complete', 'V1\\Passport\\OAuthController@complete');
             // Comm
             $router->post('/comm/sendEmailVerify', 'V1\\Passport\\CommController@sendEmailVerify');
             $router->post('/comm/pv', 'V1\\Passport\\CommController@pv');
