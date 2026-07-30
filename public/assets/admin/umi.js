@@ -6354,7 +6354,16 @@
                  }, f.a.createElement(l["a"], {
                      checked: parseInt(y.telegram_subscription_binding_enable),
                      onChange: e=>this.set("telegram", "telegram_subscription_binding_enable", e ? 1 : 0)
-                 })), y.telegram_subscription_binding_enable ? f.a.createElement(m, {
+                 })), y.telegram_subscription_binding_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                     isChildren: !0,
+                     title: "售后群 Chat ID",
+                     description: "数字群组 ID（超级群通常以 -100 开头），不是上方的售后群链接。此项为空时用户前台不显示绑定入口。机器人需为该群管理员并具备邀请用户权限。"
+                 }, f.a.createElement("input", {
+                     className: "form-control",
+                     placeholder: "-100xxxxxxxxxx",
+                     defaultValue: y.telegram_discuss_id,
+                     onChange: e=>this.set("telegram", "telegram_discuss_id", e.target.value)
+                 })), f.a.createElement(m, {
                      isChildren: !0,
                      title: "Telegram 巡检间隔（秒）",
                      description: "用于检测用户名变更，建议保持 300 秒。"
@@ -6365,7 +6374,7 @@
                      className: "form-control",
                      defaultValue: y.telegram_binding_check_interval,
                      onChange: e=>this.set("telegram", "telegram_binding_check_interval", e.target.value)
-                 })) : ""), _.recaptcha_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                 }))) : ""), _.recaptcha_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                     isChildren: !0,
                     title: "\u5bc6\u94a5",
                     description: "\u5728Google reCAPTCHA\u7533\u8bf7\u7684\u5bc6\u94a5\u3002"
