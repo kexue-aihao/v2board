@@ -56,6 +56,19 @@ class TelegramController extends Controller
             $bindingService->processChatMemberUpdate((array)$data['chat_member']);
             return true;
         }
+        if (isset($data['message']) && $bindingService->enabled() && $bindingService->available()
+            && in_array((string)($data['message']['chat']['type'] ?? ''), ['group', 'supergroup'], true)
+            // sender_chat = 匿名管理员或关联频道的自动转发（from 是 777000 服务号），
+            // 不是真实成员，不能拿去校验。
+            && !isset($data['message']['sender_chat'])) {
+            // 存量成员的懒校验：bot 上任前就在群里的人不会产生 chat_member 事件，
+            // Bot API 又无法枚举成员 —— 他们一发言就在这里被查一次绑定，无绑定即清退。
+            // 只旁路观察，不 return：群消息还要继续走下面的命令处理。
+            $bindingService->enforceMember(
+                $data['message']['chat']['id'] ?? '',
+                (array)($data['message']['from'] ?? [])
+            );
+        }
         if (isset($data['message']['text']) && $bindingService->enabled() && $bindingService->available()) {
             $message = $data['message'];
             if (($message['chat']['type'] ?? '') !== 'private') return false;

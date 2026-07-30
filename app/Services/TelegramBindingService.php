@@ -264,10 +264,83 @@ class TelegramBindingService
         if ($chatId === '' || $telegramUserId === '') return;
         $binding = TelegramSubscriptionBinding::where('chat_id', $chatId)
             ->where('telegram_user_id', $telegramUserId)->where('status', 'active')->first();
-        if (!$binding) return;
+        if (!$binding) {
+            // 没有有效绑定的人出现在群里（被管理员拉入、拿旧公共链接进入、或绑定
+            // 已被作废后又回来）：一露面就清退，不必等任何巡检。
+            // restricted 也算在群内 —— 被限制发言的成员仍然占着位置。
+            if (in_array((string)($update['new_chat_member']['status'] ?? ''), ['member', 'restricted'], true)) {
+                $this->enforceMember($chatId, (array)($member['user'] ?? []));
+            }
+            return;
+        }
         $username = $this->normalizeUsername($member['user']['username'] ?? '');
         if ($username === '' || $username !== $this->normalizeUsername($binding->telegram_username)) {
             $this->invalidate($binding, 'telegram_username_changed');
+        }
+    }
+
+    /**
+     * 清退无有效绑定的群成员（ban+unban = 踢出、不封禁，随时可凭新链接回来）。
+     *
+     * Bot API 没有枚举群成员的接口，「定时扫全群」做不到；等价做法是事件驱动 ——
+     * chat_member 事件盯住每一次加入，群消息兜住 bot 上任前就在群里的存量成员
+     * （他们一发言即被校验）。覆盖面与轮询相同，时延从巡检间隔降到秒级。
+     *
+     * 三道保险：bot 一律豁免；管理员/群主豁免；管理员名单拉取失败时**绝不踢**
+     * （fail-safe，避免 Telegram API 抖动时误踢群主）。已验证成员缓存 5 分钟，
+     * 避免活跃群每条消息都打一次数据库。
+     */
+    public function enforceMember($chatId, array $user): void
+    {
+        if (!$this->enabled() || !$this->available()) return;
+        $chatId = (string)$chatId;
+        if ($chatId !== $this->chatId()) return;
+        $uid = (string)($user['id'] ?? '');
+        if ($uid === '' || !ctype_digit($uid)) return;
+        if (!empty($user['is_bot'])) return;
+
+        $verifiedKey = CacheKey::get('TELEGRAM_MEMBER_VERIFIED', $chatId . ':' . $uid);
+        if (Cache::get($verifiedKey)) return;
+
+        $admins = $this->groupAdminIds($chatId);
+        if ($admins === null) return; // 名单拿不到，宁可放过不可错踢
+        if (in_array($uid, $admins, true)) {
+            Cache::put($verifiedKey, 1, 300);
+            return;
+        }
+
+        $bound = TelegramSubscriptionBinding::where('chat_id', $chatId)
+            ->where('telegram_user_id', $uid)
+            ->where('status', 'active')->exists();
+        if ($bound) {
+            Cache::put($verifiedKey, 1, 300);
+            return;
+        }
+
+        // forceSnapshot：按裸 uid/chatId 直接踢，不依赖绑定行（本来就没有）。
+        KickTelegramBinding::dispatch(0, $uid, $chatId, true);
+    }
+
+    /**
+     * @return array|null 数字 id 字符串数组；拉取失败返回 null（调用方必须按「未知」处理）
+     */
+    private function groupAdminIds(string $chatId): ?array
+    {
+        $key = CacheKey::get('TELEGRAM_GROUP_ADMINS', $chatId);
+        $ids = Cache::get($key);
+        if (is_array($ids)) return $ids;
+        try {
+            $response = (new TelegramService())->getChatAdministrators((int)$chatId);
+            $ids = [];
+            foreach ((array)($response->result ?? []) as $item) {
+                $id = (string)($item->user->id ?? '');
+                if ($id !== '') $ids[] = $id;
+            }
+            Cache::put($key, $ids, 300);
+            return $ids;
+        } catch (\Throwable $e) {
+            report($e);
+            return null;
         }
     }
 

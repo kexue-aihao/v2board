@@ -83,6 +83,13 @@ class TelegramService {
         ]);
     }
 
+    public function getChatAdministrators($chatId)
+    {
+        return $this->request('getChatAdministrators', [
+            'chat_id' => $chatId
+        ]);
+    }
+
     public function getChatMember($chatId, $userId)
     {
         return $this->request('getChatMember', [
