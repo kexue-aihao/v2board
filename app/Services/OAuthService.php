@@ -215,6 +215,15 @@ class OAuthService
      * v2_user.email is required by the existing account model. Telegram users
      * do not provide an email, so keep a deterministic, non-deliverable value
      * for internal uniqueness only. Telegram identity remains the login key.
+     *
+     * The result MUST fit v2_user.email, which is varchar(64). The budget here
+     * is 9 + 32 + 17 = 58 characters. Do not lengthen any of the three parts
+     * without widening the column first: the full sha256 digest made this 90
+     * characters, and MySQL rejected the insert with 1406 Data too long as an
+     * uncaught QueryException, so every Telegram registration answered 500
+     * with the handler's generic message and no detail outside the query log.
+     * 32 hex characters is 128 bits over an input that is already a unique
+     * account id, so the truncation costs nothing that matters here.
      */
     public function telegramAccountEmail(string $subject): string
     {
@@ -223,7 +232,7 @@ class OAuthService
             abort(422, 'Telegram identity is invalid');
         }
 
-        return 'telegram_' . hash('sha256', 'v2board:telegram:' . $subject) . '@telegram.invalid';
+        return 'telegram_' . substr(hash('sha256', 'v2board:telegram:' . $subject), 0, 32) . '@telegram.invalid';
     }
 
     private function authorizationUrl(string $provider, array $state): string
