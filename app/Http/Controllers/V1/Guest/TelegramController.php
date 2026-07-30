@@ -65,6 +65,16 @@ class TelegramController extends Controller
             }
             $argument = trim((string)($parts[1] ?? ''));
             if (strpos($argument, 'bind_') !== 0) return false;
+            // 没设用户名的账号绑定必然失败（completeFromBot 要求 UID 和用户名都非空），
+            // 落进下面那个通用 catch 只会提示「重新生成链接」—— 照做一百遍也不会成功。
+            // 在这里先拦下来，把真正的原因说清楚。
+            if (trim((string)($message['from']['username'] ?? '')) === '') {
+                $this->telegramService->sendMessage(
+                    (int)$message['chat']['id'],
+                    '绑定失败：你的 Telegram 账号未设置用户名。请先在 Telegram 设置中配置用户名（@username），再重新打开绑定链接。'
+                );
+                return true;
+            }
             try {
                 $result = $bindingService->completeFromBot(
                     substr($argument, 5),
@@ -72,15 +82,27 @@ class TelegramController extends Controller
                     $message['from']['username'] ?? '',
                     $message['chat']['id'] ?? ''
                 );
-                $this->telegramService->sendMessage(
-                    (int)$message['chat']['id'],
-                    '绑定成功。请返回网站申请加入售后群。'
-                );
             } catch (\Throwable $e) {
                 report($e);
                 $this->telegramService->sendMessage(
                     (int)$message['chat']['id'],
                     '绑定失败，请返回网站重新生成绑定链接后再试。'
+                );
+                return true;
+            }
+            // 绑定已经落库，签发入群链接是独立的第二步：这里失败绝不能说「绑定失败」，
+            // 否则用户会去重复绑定。常见失败原因是机器人不是群管理员或没有邀请权限。
+            try {
+                $link = $bindingService->issueInviteLink((int)$result['binding_id']);
+                $this->telegramService->sendMessage(
+                    (int)$message['chat']['id'],
+                    "绑定成功。点击以下链接加入售后群（10 分钟内有效，仅可使用一次）：\n" . $link
+                );
+            } catch (\Throwable $e) {
+                report($e);
+                $this->telegramService->sendMessage(
+                    (int)$message['chat']['id'],
+                    '绑定已完成，但入群链接生成失败，请联系客服。'
                 );
             }
             return true;

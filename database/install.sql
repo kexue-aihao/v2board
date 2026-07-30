@@ -982,3 +982,26 @@ CREATE TABLE `v2_reseller_shared_invitation` (
     KEY `shared_status` (`shared_subscription_id`,`revoked_at`,`expires_at`),
     KEY `reseller_email` (`reseller_id`,`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `v2_telegram_subscription_binding` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NOT NULL,
+    `subscription_id` bigint(20) NOT NULL,
+    `subscription_token_hash` char(64) NOT NULL,
+    `telegram_user_id` bigint(20) NOT NULL,
+    `telegram_username` varchar(191) NOT NULL,
+    `chat_id` bigint(20) NOT NULL,
+    `status` varchar(16) NOT NULL DEFAULT 'active',
+    `invalid_reason` varchar(255) DEFAULT NULL,
+    `invite_link` varchar(255) DEFAULT NULL,
+    `invite_link_expires_at` int(11) DEFAULT NULL,
+    `bound_at` int(11) NOT NULL,
+    `last_checked_at` int(11) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `user_chat` (`user_id`,`chat_id`),
+    UNIQUE KEY `telegram_chat` (`telegram_user_id`,`chat_id`),
+    KEY `subscription_status` (`subscription_id`,`status`),
+    KEY `status_checked` (`status`,`last_checked_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

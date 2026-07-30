@@ -42,6 +42,32 @@ class TelegramService {
         ]);
     }
 
+    /**
+     * member_limit=1 makes single-use a Telegram-native property: the link
+     * dies the moment one person joins, no revocation logic on our side.
+     * Requires the bot to be a group admin with the invite-users permission.
+     *
+     * NOTE for callers inside the webhook: request() aborts with 500 on
+     * failure, and a 500 makes Telegram consider the update undelivered and
+     * retry it -- wrap calls in try/catch there.
+     */
+    public function createChatInviteLink($chatId, int $expireDate, int $memberLimit = 1)
+    {
+        return $this->request('createChatInviteLink', [
+            'chat_id' => $chatId,
+            'expire_date' => $expireDate,
+            'member_limit' => $memberLimit
+        ]);
+    }
+
+    public function revokeChatInviteLink($chatId, string $inviteLink)
+    {
+        return $this->request('revokeChatInviteLink', [
+            'chat_id' => $chatId,
+            'invite_link' => $inviteLink
+        ]);
+    }
+
     public function getMe()
     {
         return $this->request('getMe');

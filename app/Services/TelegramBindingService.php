@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Utils\CacheKey;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
@@ -144,6 +145,68 @@ class TelegramBindingService
         ];
     }
 
+    /**
+     * 绑定完成后签发一次性入群链接：10 分钟有效、member_limit=1 用后即焚。
+     * 链接存回绑定行，供 revoke/invalidate 时回收未用完的链接。
+     * Telegram API 失败会向上抛（request() 是 abort(500)）—— webhook 调用方必须
+     * 自己 try/catch，否则 500 会让 Telegram 反复重投同一条 update。
+     */
+    public function issueInviteLink(int $bindingId): string
+    {
+        $binding = TelegramSubscriptionBinding::find($bindingId);
+        if (!$binding || $binding->status !== 'active') {
+            throw new RuntimeException('Binding is not active');
+        }
+        // 10 分钟内重复绑定会复用同一行：先收回上一条未用完的链接，
+        // 否则新旧两条会短暂同时有效。
+        $this->recallInviteLink($binding);
+        $expiresAt = time() + 600;
+        $response = (new TelegramService())->createChatInviteLink((int)$binding->chat_id, $expiresAt, 1);
+        $link = (string)($response->result->invite_link ?? '');
+        if ($link === '') {
+            throw new RuntimeException('Telegram did not return an invite link');
+        }
+        if ($this->inviteLinkColumnsAvailable()) {
+            $binding->invite_link = $link;
+            $binding->invite_link_expires_at = $expiresAt;
+            $binding->updated_at = time();
+            $binding->save();
+        }
+        return $link;
+    }
+
+    /**
+     * 回收还在有效期内的一次性链接。fail-open：回收失败只记日志，绝不让
+     * 解绑/作废本身失败（口径同 SubscriptionTokenHistoryService）。
+     * 只改属性不 save() —— 两个调用方紧接着都会 save。
+     */
+    private function recallInviteLink(TelegramSubscriptionBinding $binding): void
+    {
+        if (!$this->inviteLinkColumnsAvailable()) return;
+        $link = trim((string)$binding->invite_link);
+        if ($link !== '' && (int)$binding->invite_link_expires_at > time()) {
+            try {
+                (new TelegramService())->revokeChatInviteLink((int)$binding->chat_id, $link);
+            } catch (\Throwable $e) {
+                Log::error('Failed to revoke a Telegram invite link', [
+                    'binding_id' => (int)$binding->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+        $binding->invite_link = null;
+        $binding->invite_link_expires_at = null;
+    }
+
+    private function inviteLinkColumnsAvailable(): bool
+    {
+        static $available = null;
+        if ($available === null) {
+            $available = Schema::hasColumn('v2_telegram_subscription_binding', 'invite_link');
+        }
+        return $available;
+    }
+
     public function forUser(User $user): ?TelegramSubscriptionBinding
     {
         if (!$this->enabled() || !$this->available()) return null;
@@ -167,6 +230,9 @@ class TelegramBindingService
             ->where('chat_id', $this->chatId())
             ->where('status', 'active')->first();
         if (!$binding) return false;
+        // 先收回没用完的一次性链接：绑定后拿到链接、不用、再解绑，那条链接在
+        // 剩余窗口里依然能进群。
+        $this->recallInviteLink($binding);
         $binding->status = 'revoked';
         $binding->invalid_reason = 'user_revoked';
         $binding->updated_at = time();
@@ -210,11 +276,9 @@ class TelegramBindingService
         if (!$this->available()) return;
         TelegramSubscriptionBinding::where('subscription_id', $subscriptionId)
             ->where('status', 'active')->get()->each(function (TelegramSubscriptionBinding $binding) use ($reason) {
-                $binding->status = 'invalid';
-                $binding->invalid_reason = $reason;
-                $binding->updated_at = time();
-                $binding->save();
-                KickTelegramBinding::dispatch((int)$binding->id, (string)$binding->telegram_user_id, (string)$binding->chat_id);
+                // 与原内联逻辑逐项相同（invalid + reason + save + kick），
+                // 走 invalidate() 才能一并回收未用完的入群链接。
+                $this->invalidate($binding, $reason);
             });
     }
 
@@ -267,6 +331,7 @@ class TelegramBindingService
     public function invalidate(TelegramSubscriptionBinding $binding, string $reason): void
     {
         if ($binding->status !== 'active') return;
+        $this->recallInviteLink($binding);
         $binding->status = 'invalid';
         $binding->invalid_reason = $reason;
         $binding->updated_at = time();

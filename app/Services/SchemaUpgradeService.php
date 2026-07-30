@@ -643,6 +643,8 @@ class SchemaUpgradeService
             `chat_id` bigint(20) NOT NULL,
             `status` varchar(16) NOT NULL DEFAULT 'active',
             `invalid_reason` varchar(255) DEFAULT NULL,
+            `invite_link` varchar(255) DEFAULT NULL,
+            `invite_link_expires_at` int(11) DEFAULT NULL,
             `bound_at` int(11) NOT NULL,
             `last_checked_at` int(11) DEFAULT NULL,
             `created_at` int(11) NOT NULL,
@@ -658,6 +660,10 @@ class SchemaUpgradeService
             'chat_id' => 'bigint(20) NOT NULL',
             'status' => "varchar(16) NOT NULL DEFAULT 'active'",
             'invalid_reason' => 'varchar(255) DEFAULT NULL',
+            // 一次性入群链接及其失效时间。ensureColumn 幂等，老库升级时补列即可，
+            // 不需要新的 migration key。
+            'invite_link' => 'varchar(255) DEFAULT NULL',
+            'invite_link_expires_at' => 'int(11) DEFAULT NULL',
             'bound_at' => 'int(11) NOT NULL',
             'last_checked_at' => 'int(11) DEFAULT NULL',
             'created_at' => 'int(11) NOT NULL',
