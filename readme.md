@@ -12,6 +12,8 @@
 | 用户鉴权 | Authorization 或 auth_data |
 | 管理员鉴权 | Authorization 或 auth_data + is_admin |
 | 员工鉴权 | Authorization 或 auth_data + staff 权限 |
+| 倒卖商鉴权 | Authorization 或 auth_data + reseller 会话 |
+| 店铺客户鉴权 | Authorization 或 auth_data + user 会话 |
 | 订阅鉴权 | token 参数 |
 | 节点鉴权 | server_token + node_id |
 | 默认订阅地址 | /api/v1/client/subscribe |
@@ -39,6 +41,7 @@
 | 403 | 无权访问 | 未登录、权限不足、Token 无效 |
 | 404 | 资源不存在 | 用户、订阅、订单不存在 |
 | 422 | 参数或业务校验失败 | 参数格式错误、状态不允许 |
+| 503 | 服务暂不可用 | 站点维护、倒卖商服务关闭、缓存或算术验证不可用 |
 | 500 | 业务处理失败 | 支付、保存、配置处理失败 |
 
 ## 三、鉴权参数表
@@ -49,6 +52,8 @@
 | 用户 | Query/Body | auth_data={auth_data} | /api/v1/user/* | 兼容前端 |
 | 管理员 | Header | Authorization: {auth_data} | /api/v1/{secure_path}/* | 必须具备 is_admin |
 | 员工 | Header | Authorization: {auth_data} | /api/v1/staff/* | 使用 staff 中间件 |
+| 倒卖商 | Header/Body | Authorization: {auth_data} 或 auth_data={auth_data} | /api/v1/reseller/* | 使用 reseller 中间件，不能访问管理员接口 |
+| 店铺客户 | Header/Body | Authorization: {auth_data} 或 auth_data={auth_data} | /api/v1/store/{slug}/* | 使用现有 user 中间件并校验店铺归属 |
 | 客户端 | Query/Body | token={subscription_token} | 订阅接口 | 订阅地址敏感 |
 | 节点 | Query/Body | token、node_id | /api/v1/server/*、/api/v2/server/* | token 为 server_token |
 
@@ -62,7 +67,7 @@
 
 | 方法 | 接口路径 | 鉴权 | 请求参数 | 返回/说明 |
 | --- | --- | --- | --- | --- |
-| POST | /auth/register | 无 | email、password；可选 invite_code、email_code、recaptcha_data | 注册成功返回 auth_data |
+| POST | /auth/register | 无 | email、password；可选 invite_code、email_code、recaptcha_data、arithmetic_challenge_id、arithmetic_answer | 注册成功返回 auth_data；算术验证开启时服务端强制校验 |
 | POST | /auth/login | 无 | email、password | 密码正确时返回 auth_data 或二步验证 challenge |
 | POST | /auth/verify2fa | 无 | challenge、code 或 recovery_code | 完成登录二步验证并返回 auth_data |
 | POST | /auth/2fa/setup | setup_token | setup_token | 管理员强制二步验证初始化 |
@@ -80,11 +85,29 @@
 | 方法 | 接口路径 | 鉴权 | 请求参数 | 返回/说明 |
 | --- | --- | --- | --- | --- |
 | GET | /comm/config | 无 | 无 | 公开站点配置 |
+| GET | /comm/arithmetic | 无 | 无 | 算术验证开启时获取题目；不返回答案 |
+| POST | /comm/arithmetic/verify | 无 | challenge_id、answer | 返回 correct、verified；不返回正确答案 |
 | GET | /plan/fetch | 无 | 无 | Signature 首页套餐列表 |
 | POST/GET | /telegram/webhook | 无 | Telegram 回调参数 | Telegram Webhook |
 | POST/GET | /payment/notify/{method}/{uuid} | 无 | 支付回调参数 | 支付平台异步通知 |
 
-### 4.3 公开套餐字段
+### 4.3 公共配置扩展字段
+
+`GET /api/v1/guest/comm/config` 返回的 `data` 包含以下功能字段，并带有 `Cache-Control: no-store`：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| is_arithmetic_verification | integer | 是否开启注册算术验证，0/1 |
+| site_status.mode | string | `normal`、`maintenance` 或 `shutdown` |
+| site_status.title | string | 状态页标题，纯文本 |
+| site_status.message | string | 状态页说明，纯文本 |
+| site_status.recovery_at | integer/null | 预计恢复 Unix 时间戳 |
+| site_status.server_time | integer | 服务端当前 Unix 时间戳，用于客户端校准倒计时 |
+| site_status.support_url | string/null | 支持入口地址 |
+
+`maintenance` 和 `shutdown` 状态由服务端中间件阻断普通注册、登录、下单、支付和订阅业务；公共配置、管理员接口、节点通信和已创建支付回调保持可用。
+
+### 4.4 公开套餐字段
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -94,16 +117,18 @@
 | transfer_enable | integer | 总流量，单位 GB 配置值 |
 | device_limit | integer | 设备限制，0 通常表示不限 |
 | speed_limit | integer | 速度限制 |
-| month_price | number | 月付价格 |
-| quarter_price | number | 季付价格 |
-| half_year_price | number | 半年付价格 |
-| year_price | number | 年付价格 |
-| two_year_price | number | 两年付价格 |
-| three_year_price | number | 三年付价格 |
-| onetime_price | number | 一次性价格 |
+| month_price | integer | 月付价格，单位为分 |
+| quarter_price | integer | 季付价格，单位为分 |
+| half_year_price | integer | 半年付价格，单位为分 |
+| year_price | integer | 年付价格，单位为分 |
+| two_year_price | integer | 两年付价格，单位为分 |
+| three_year_price | integer | 三年付价格，单位为分 |
+| onetime_price | integer | 一次性价格，单位为分 |
 | capacity_limit | integer/null | 剩余容量 |
 | show | integer | 是否展示 |
 | renew | integer | 是否允许续费 |
+
+套餐价格字段在 API 和订单中使用整数分；前端页面按 `currency_symbol` 展示为人民币元。例如页面输入 `12.50` 元，接口提交 `1250`。
 
 ## 五、用户接口
 
@@ -333,6 +358,8 @@ IP 归属字段：
 | 知识库 | /knowledge/fetch、getCategory、save、show、drop、sort |
 | 系统 | /system/getSystemStatus、getQueueStats、getQueueWorkload、getQueueMasters、getSystemLog |
 | 主题 | /theme/getThemes、saveThemeConfig、getThemeConfig |
+| 倒卖商审批 | /reseller/summary、accounts、stores、review-logs、accounts/review、stores/review、accounts/reset-password |
+| 倒卖商销售权限 | /reseller/templates、templates/save、payment-drivers、orders |
 
 协议节点的 save、update、drop、copy 均为 POST 请求。
 
@@ -480,8 +507,146 @@ Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorc
 | 用户控制器 | app/Http/Controllers/V1/User |
 | 管理员控制器 | app/Http/Controllers/V1/Admin |
 | 鉴权中间件 | app/Http/Middleware/User.php、Admin.php、Client.php |
+| 倒卖商与店铺中间件 | app/Http/Middleware/Reseller.php、Storefront.php |
 | 多订阅服务 | app/Services/SubscriptionService.php |
 | IP 归属服务 | app/Services/IpLocationService.php |
 | 风险服务 | app/Services/SubscriptionRiskService.php |
+
+## 十四、倒卖商与店铺 API
+
+本节对应 `app/Http/Routes/V1/ResellerRoute.php`、`StoreRoute.php` 和管理员路由中的倒卖商模块。
+
+### 14.1 倒卖商注册与登录
+
+基础路径：`/api/v1/reseller`。
+
+| 方法 | 接口路径 | 鉴权 | 请求参数 | 返回/说明 |
+| --- | --- | --- | --- | --- |
+| POST | /auth/register | 无 | email、store_slug、store_name | 提交账号和店铺申请；账号、店铺均为 pending |
+| POST | /auth/login | 无 | email、password | 账号审核通过后返回独立 reseller `auth_data` |
+| POST | /auth/logout | 无 | auth_data 或 Authorization | 注销当前倒卖商会话 |
+
+注册规则：
+
+- `reseller_enable=0` 时注册和登录返回 503；开启后才允许提交申请。
+- `store_slug` 必须匹配 `^[a-z0-9][a-z0-9-]{2,31}$`，邮箱和 Slug 均不可重复。
+- 注册请求不接收自定义密码，成功响应一次性返回 64 位随机密码和 `password_length`，接口不返回登录 Token。
+- 倒卖商账号和店铺分别审批；账号与店铺均为 `active` 后才能销售。
+- 倒卖商 Token 使用独立会话命名空间，不能访问管理员接口；账号停用、拒绝或管理员重置密码后旧 Token 失效。
+
+### 14.2 倒卖商工作区
+
+以下接口要求倒卖商鉴权：`Authorization: {reseller_auth_data}` 或 `auth_data={reseller_auth_data}`。
+
+| 方法 | 接口路径 | 请求参数 | 返回/说明 |
+| --- | --- | --- | --- |
+| GET | /me | 无 | 当前倒卖商、店铺状态和可用支付驱动 |
+| GET | /plan-template | 无 | 管理员已发布的基础套餐模板 |
+| GET | /plans | 无 | 当前倒卖商套餐 |
+| POST | /plans | id、base_plan_id、name、content、周期价格（整数分）、shared_member_limit、enabled、sort | 创建或修改自定义销售套餐 |
+| GET | /payments | 无 | 当前倒卖商支付配置的脱敏列表 |
+| POST | /payments/form | driver | 获取管理员白名单驱动的配置字段 |
+| GET | /payments/{id}/edit | id | 获取编辑字段；敏感字段只返回脱敏占位符 |
+| POST | /payments | id、driver、name、config、enabled、sort | 保存支付配置 |
+| DELETE | /payments/{id} | id | 删除未被订单使用的支付配置 |
+| POST | /store | store_slug、store_name、store_description | 修改店铺资料 |
+| GET | /customers | page、pageSize | 当前店铺客户列表，仅返回必要客户字段 |
+| GET | /orders | page、pageSize | 当前店铺订单列表和金额快照 |
+
+套餐和支付规则：
+
+- `base_plan_id` 只能选择管理员发布且启用的基础套餐，倒卖商不能修改节点、流量、速度和设备限制。
+- 周期价格在 API 中必须为大于 0 的整数分；倒卖工作区输入框使用人民币元并在提交时转换为分。周期字段为 `month_price`、`quarter_price`、`half_year_price`、`year_price`、`two_year_price`、`three_year_price`、`onetime_price`。
+- `shared_member_limit` 默认为 1；大于 1 时为共享套餐，人数包含购买者。
+- 支付驱动必须在管理员 `reseller_allowed_payment_drivers` 白名单内，禁止提交任意 PHP 类或代码。
+- 支付密钥使用服务端加密保存，不在列表或日志返回。已经被订单使用的支付配置不能修改密钥或删除，可停用以阻止新订单。
+
+共享群组审计接口：
+
+| 方法 | 接口路径 | 请求参数 | 说明 |
+| --- | --- | --- | --- |
+| GET | /shared-subscriptions | page、pageSize | 当前倒卖商共享群组汇总 |
+| GET | /shared-subscriptions/{id}/members | id | 查看群组成员状态，不返回订阅凭据 |
+| POST | /shared-subscriptions/{id}/suspend | id、reason | 停用共享群组，必须填写原因 |
+| POST | /shared-subscriptions/{groupId}/members/{memberId}/remove | groupId、memberId、reason | 强制移除成员，必须填写原因 |
+
+### 14.3 管理员倒卖商接口
+
+基础路径：`/api/v1/{secure_path}/reseller`，要求管理员鉴权。`secure_path` 读取 `config('v2board.secure_path')`。
+
+| 方法 | 接口路径 | 请求参数 | 说明 |
+| --- | --- | --- | --- |
+| GET | /summary | 无 | 待审核倒卖商、待审核店铺、启用店铺、停用账号统计 |
+| GET | /accounts | page、pageSize、status、keyword | 倒卖商账号分页和筛选 |
+| POST | /accounts/review | id、target、status、reason | 审批账号；target 为 account，拒绝或停用必须填写 reason |
+| POST | /accounts/reset-password | id | 生成新的 64 位随机密码并撤销旧会话，明文仅返回一次 |
+| GET | /stores | page、pageSize、status、keyword | 店铺分页和筛选 |
+| POST | /stores/review | id、target、status、reason | 审批店铺；target 为 store，拒绝或停用必须填写 reason |
+| GET | /review-logs | page、pageSize、reseller_id、target | 审批操作记录 |
+| GET | /templates | 无 | 基础套餐销售模板 |
+| POST | /templates/save | id、base_plan_id、enabled、sort | 发布或撤下基础套餐模板 |
+| GET | /payment-drivers | 无 | 已安装与已允许支付驱动 |
+| POST | /payment-drivers | allowed[] | 保存支付驱动白名单 |
+| GET | /orders | page、pageSize、status、keyword | 倒卖商订单审计，不返回支付密钥 |
+
+兼容旧版管理员前端的别名仍保留：`/reseller/fetch`、`/reseller/update`、`/reseller/template/fetch`、`/reseller/template/save`。
+
+### 14.4 店铺前台接口
+
+店铺地址为 `/store/{slug}`，API 基础路径为 `/api/v1/store/{slug}`。店铺必须存在且账号、店铺均为 `active`；否则公开接口返回 404。`reseller_enable=0` 时公开销售接口返回 503。
+
+公开接口：
+
+| 方法 | 接口路径 | 请求参数 | 说明 |
+| --- | --- | --- | --- |
+| GET | /config | 无 | 店铺名称、描述、Logo 等公开信息 |
+| GET | /plans | 无 | 已启用且基础模板仍在售的套餐；价格字段为整数分 |
+| GET | /payments | 无 | 已启用且被管理员允许的支付方式，仅返回 id、name、driver |
+| POST | /passport/register | email、password；以及主站注册所需字段 | 使用现有 `v2_user` 注册，并建立当前店铺客户关联 |
+| POST | /passport/login | email、password | 登录现有 `v2_user` 并建立当前店铺客户关联 |
+| POST | /passport/verify2fa | challenge、code 或 recovery_code | 完成店铺用户二步验证 |
+| GET/POST | /payment/notify/{payment_uuid} | 支付平台回调参数 | 校验支付配置、店铺、订单和金额后开通订阅 |
+
+登录后接口使用现有用户 `auth_data`：
+
+| 方法 | 接口路径 | 请求参数 | 说明 |
+| --- | --- | --- | --- |
+| POST | /order/save | plan_id、period；可选 subscription_id | 创建新购或同店同基础套餐续费订单，返回 trade_no |
+| POST | /order/checkout | trade_no、method；Stripe 可传 token | 使用店铺支付配置发起支付 |
+| GET | /order/check | trade_no | 查询订单状态 |
+| GET | /order/detail | trade_no | 查询当前店铺订单详情 |
+| GET | /order/fetch | page、pageSize | 当前客户在当前店铺的订单 |
+| POST | /order/cancel | trade_no | 取消待支付订单 |
+| GET | /subscription | 无 | 获取当前店铺订阅及流量汇总 |
+
+支付回调是已创建订单的异步入口：店铺停用或倒卖商总开关关闭后，已绑定支付配置的回调仍允许完成验签；普通公开、注册、下单和支付发起接口不会绕过店铺状态。
+
+### 14.5 共享套餐接口
+
+共享套餐购买后以群主的一条真实订阅承载全组流量和设备限制。成员不会创建额外订单、订阅或节点身份。
+
+| 方法 | 接口路径 | 请求参数 | 权限/说明 |
+| --- | --- | --- | --- |
+| GET | /shared/subscription | 无 | 群主或成员获取共享套餐、人数和流量汇总 |
+| GET | /shared/members | 无 | 群主查看成员状态，不返回成员流量记录 |
+| POST | /shared/invitations | email | 群主创建单次邀请 |
+| GET | /shared/invitations | 无 | 群主查看邀请状态 |
+| POST | /shared/invitations/{id}/revoke | id | 群主撤销未接受邀请 |
+| POST | /shared/invitations/accept | token | 受邀用户接受与邮箱绑定的邀请 |
+| POST | /shared/members/{id}/remove | id、reason | 群主移除成员；reason 可选 |
+| POST | /shared/credential/rotate | 无 | 群主轮换共享订阅凭据 |
+
+共享返回字段包括 `total`、`used`、`remaining`、`usage_percent`、`member_limit`、`member_count`、`expired_at` 和 `subscribe_url`，并返回 `shared_subscription=true`、`traffic_log_available=false`。共享成员可以查看总量进度，但 `/api/v1/user/stat/getTrafficLog` 不返回共享订阅的流量明细。移除成员、倒卖商强制移除或停用群组后会轮换订阅凭据，旧地址失效。
+
+### 14.6 倒卖商功能开关和状态
+
+| 配置 | 默认值 | 影响 |
+| --- | --- | --- |
+| reseller_enable | 0 | 倒卖商注册、登录、管理和店铺公开访问总开关 |
+| arithmetic_verification_enable | 0 | 主站注册算术验证开关，不影响倒卖商注册 |
+| site_status | normal | `maintenance` 或 `shutdown` 时阻断普通公共业务 |
+| reseller_allowed_payment_drivers | [] | 管理员允许倒卖商使用的支付驱动白名单 |
+
+倒卖商功能关闭不会删除账号、客户、订单、共享群组或已有订阅。站点维护和停运期间，公共配置接口仍用于展示状态页，管理员接口、节点通信和已有支付回调按当前中间件规则处理。
 
 接口变更时应同步更新本文档，并以当前控制器和 FormRequest 校验规则为最终依据。
