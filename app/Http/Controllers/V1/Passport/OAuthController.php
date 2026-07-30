@@ -32,6 +32,25 @@ class OAuthController extends Controller
         return redirect()->to((new OAuthService())->callback((string)$provider, $request));
     }
 
+    /**
+     * Hand out a bare state so the Telegram login widget can be rendered
+     * without first bouncing the browser through /redirect. Only Telegram
+     * qualifies: the redirect providers must go through begin() so the
+     * authorization URL carries the verifier and nonce belonging to the same
+     * state, and handing those out over JSON would defeat PKCE.
+     */
+    public function state(Request $request, $provider)
+    {
+        $service = new OAuthService();
+        $provider = $service->assertProvider((string)$provider);
+        if ($provider !== 'telegram') {
+            abort(404, 'This provider does not issue a bare state');
+        }
+
+        [$state] = $service->issueState($provider, $request);
+        return response(['data' => ['state' => $state]]);
+    }
+
     public function complete(Request $request)
     {
         $service = new OAuthService();

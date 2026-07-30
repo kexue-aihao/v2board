@@ -40,6 +40,9 @@ class PassportRoute
             // Third-party login. The callback only creates a short-lived ticket;
             // the frontend consumes it through /oauth/complete.
             $router->get ('/oauth/{provider}/redirect', 'V1\\Passport\\OAuthController@redirect');
+            // Telegram only: lets the login widget render up front and fetch a
+            // state at the moment it calls back, instead of a redirect round trip.
+            $router->get ('/oauth/{provider}/state', 'V1\\Passport\\OAuthController@state');
             $router->get ('/oauth/{provider}/callback', 'V1\\Passport\\OAuthController@callback');
             $router->post('/oauth/complete', 'V1\\Passport\\OAuthController@complete');
             // Comm

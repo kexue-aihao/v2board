@@ -51,6 +51,30 @@ class OAuthService
     public function begin(string $provider, Request $request): string
     {
         $provider = $this->assertProvider($provider);
+        [$state, $payload] = $this->issueState($provider, $request);
+
+        if ($provider === 'telegram') {
+            return $this->frontendLoginUrl(['telegram_state' => $state]);
+        }
+
+        return $this->authorizationUrl($provider, $payload);
+    }
+
+    /**
+     * Mint and store a state, returning it alongside its payload.
+     *
+     * Split out of begin() so the Telegram login widget can be shown before
+     * the user commits to it. The widget itself needs no state -- only
+     * /oauth/complete does -- so the frontend asks for one at the moment
+     * Telegram calls back. That keeps the value alive for milliseconds instead
+     * of the full STATE_TTL, and avoids minting one per login page view.
+     *
+     * The caller is responsible for assertProvider(); begin() already did it.
+     *
+     * @return array{0: string, 1: array}
+     */
+    public function issueState(string $provider, Request $request): array
+    {
         $state = $this->randomToken();
         $payload = [
             'provider' => $provider,
@@ -63,11 +87,7 @@ class OAuthService
         ];
         Cache::put(CacheKey::get('OAUTH_STATE', $state), $payload, self::STATE_TTL);
 
-        if ($provider === 'telegram') {
-            return $this->frontendLoginUrl(['telegram_state' => $state]);
-        }
-
-        return $this->authorizationUrl($provider, $payload);
+        return [$state, $payload];
     }
 
     public function callback(string $provider, Request $request): string
