@@ -18,12 +18,6 @@
       "default_value": "default"
     },
     {
-      "label": "Background URL",
-      "placeholder": "Optional same-origin background image URL",
-      "field_name": "background_url",
-      "field_type": "input"
-    },
-    {
       "label": "Custom HTML",
       "placeholder": "Optional footer HTML",
       "field_name": "custom_html",
