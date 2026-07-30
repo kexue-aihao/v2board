@@ -211,6 +211,21 @@ class OAuthService
         return strtolower(ltrim(trim((string)$username), '@'));
     }
 
+    /**
+     * v2_user.email is required by the existing account model. Telegram users
+     * do not provide an email, so keep a deterministic, non-deliverable value
+     * for internal uniqueness only. Telegram identity remains the login key.
+     */
+    public function telegramAccountEmail(string $subject): string
+    {
+        $subject = trim($subject);
+        if ($subject === '' || !ctype_digit($subject)) {
+            abort(422, 'Telegram identity is invalid');
+        }
+
+        return 'telegram_' . hash('sha256', 'v2board:telegram:' . $subject) . '@telegram.invalid';
+    }
+
     private function authorizationUrl(string $provider, array $state): string
     {
         $redirect = $this->redirectUri($provider);

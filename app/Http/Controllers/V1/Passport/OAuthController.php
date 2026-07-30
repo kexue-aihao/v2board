@@ -108,8 +108,17 @@ class OAuthController extends Controller
                 return $this->loginResponse($user, $request);
             }
 
+            $isTelegram = ($profile['provider'] ?? '') === 'telegram';
             $email = strtolower(trim((string)($profile['email'] ?? '')));
-            if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL) || empty($profile['verified_email'])) {
+            if ($isTelegram) {
+                // Telegram is the verified identity for this account. The
+                // synthetic email only satisfies v2_user's existing unique
+                // column and must never be used for account linking.
+                $email = $service->telegramAccountEmail((string)$profile['subject']);
+                $profile['email'] = $email;
+                $profile['verified_email'] = true;
+                $service->updateTicketProfile($ticket, $profile);
+            } elseif (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL) || empty($profile['verified_email'])) {
                 $email = strtolower(trim((string)$request->input('email', $email)));
                 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     return response(['data' => [
@@ -124,6 +133,11 @@ class OAuthController extends Controller
                 $service->updateTicketProfile($ticket, $profile);
             }
             if (User::where('email', $email)->exists()) {
+                if ($isTelegram) {
+                    // Never let a Telegram authorization claim an existing
+                    // account through the internal placeholder email.
+                    abort(409, 'Telegram account cannot be linked to an existing account');
+                }
                 return response(['data' => [
                     'link_required' => true,
                     'ticket' => $ticket,
@@ -132,7 +146,7 @@ class OAuthController extends Controller
                 ]]);
             }
 
-            $requirements = $this->registrationRequirements($request);
+            $requirements = $this->registrationRequirements($request, $isTelegram);
             if ($requirements) {
                 return response(['data' => [
                     'registration_required' => true,
@@ -143,24 +157,24 @@ class OAuthController extends Controller
                 ]]);
             }
 
-            $this->validateRegistration($request, $email, $profile);
+            $this->validateRegistration($request, $email, $profile, $isTelegram);
             $user = $this->createUser($request, $email, $profile);
             $service->forgetTicket($ticket);
             return $this->loginResponse($user, $request);
         });
     }
 
-    private function registrationRequirements(Request $request): array
+    private function registrationRequirements(Request $request, bool $isTelegram = false): array
     {
         $requirements = [];
 
         if ((int)config('v2board.invite_force', 0) && trim((string)$request->input('invite_code', '')) === '') {
             $requirements[] = 'invite_code';
         }
-        if ((int)config('v2board.recaptcha_enable', 0) && trim((string)$request->input('recaptcha_data', '')) === '') {
+        if (!$isTelegram && (int)config('v2board.recaptcha_enable', 0) && trim((string)$request->input('recaptcha_data', '')) === '') {
             $requirements[] = 'recaptcha';
         }
-        if ((int)config('v2board.arithmetic_verification_enable', 0)
+        if (!$isTelegram && (int)config('v2board.arithmetic_verification_enable', 0)
             && (trim((string)$request->input('arithmetic_challenge_id', '')) === ''
                 || trim((string)$request->input('arithmetic_answer', '')) === '')) {
             $requirements[] = 'arithmetic';
@@ -169,7 +183,7 @@ class OAuthController extends Controller
         return $requirements;
     }
 
-    private function validateRegistration(Request $request, string $email, array $profile): void
+    private function validateRegistration(Request $request, string $email, array $profile, bool $isTelegram = false): void
     {
         $rateKey = CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip());
         $registerCount = (int)Cache::get($rateKey, 0);
@@ -180,25 +194,25 @@ class OAuthController extends Controller
             ]));
         }
         if ((int)config('v2board.stop_register', 0)) abort(403, __('Registration has closed'));
-        if ((int)config('v2board.recaptcha_enable', 0)) {
+        if (!$isTelegram && (int)config('v2board.recaptcha_enable', 0)) {
             $result = (new ReCaptcha(config('v2board.recaptcha_key')))->verify($request->input('recaptcha_data'));
             if (!$result->isSuccess()) abort(422, __('Invalid code is incorrect'));
         }
-        if ((int)config('v2board.email_whitelist_enable', 0)
+        if (!$isTelegram && (int)config('v2board.email_whitelist_enable', 0)
             && !Helper::emailSuffixVerify($email, config('v2board.email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT))) {
             abort(422, __('Email suffix is not in the Whitelist'));
         }
-        if ((int)config('v2board.email_gmail_limit_enable', 0)) {
+        if (!$isTelegram && (int)config('v2board.email_gmail_limit_enable', 0)) {
             $prefix = explode('@', $email)[0];
             if (strpos($prefix, '.') !== false || strpos($prefix, '+') !== false) abort(422, __('Gmail alias is not supported'));
         }
         if ((int)config('v2board.invite_force', 0) && !$request->input('invite_code')) {
             abort(422, __('You must use the invitation code to register'));
         }
-        if (empty($profile['verified_email'])) {
+        if (!$isTelegram && empty($profile['verified_email'])) {
             $this->validateEmailVerification($request, $email);
         }
-        if ((int)config('v2board.arithmetic_verification_enable', 0)) {
+        if (!$isTelegram && (int)config('v2board.arithmetic_verification_enable', 0)) {
             try {
                 $verified = (new ArithmeticVerificationService())->consume(
                     (string)$request->input('arithmetic_challenge_id'),
