@@ -236,14 +236,20 @@ class OAuthService
      * do not provide an email, so keep a deterministic, non-deliverable value
      * for internal uniqueness only. Telegram identity remains the login key.
      *
-     * The result MUST fit v2_user.email, which is varchar(64). The budget here
-     * is 9 + 32 + 17 = 58 characters. Do not lengthen any of the three parts
-     * without widening the column first: the full sha256 digest made this 90
-     * characters, and MySQL rejected the insert with 1406 Data too long as an
-     * uncaught QueryException, so every Telegram registration answered 500
-     * with the handler's generic message and no detail outside the query log.
-     * 32 hex characters is 128 bits over an input that is already a unique
-     * account id, so the truncation costs nothing that matters here.
+     * The local part is the raw Telegram UID so operators can tell at a
+     * glance which Telegram account owns a panel account. The UID is not a
+     * secret (any group member's UID is visible to bots), and login never
+     * goes through this value -- identity lookup uses v2_user_oauth_identity
+     * and consumeTicket() aborts with 409 before a placeholder email can
+     * claim an existing user. Registration of @telegram.invalid addresses is
+     * blocked in AuthController::register(), so the predictable name cannot
+     * be squatted to deny the real owner sign-up.
+     *
+     * The result MUST fit v2_user.email, which is varchar(64). The budget is
+     * 9 + <=19 (bigint UID) + 17 = <=45 characters. Do not lengthen any part
+     * without widening the column first: an earlier 90-character variant made
+     * MySQL reject the insert with 1406 Data too long as an uncaught
+     * QueryException, so every Telegram registration answered 500.
      */
     public function telegramAccountEmail(string $subject): string
     {
@@ -252,7 +258,7 @@ class OAuthService
             abort(422, 'Telegram identity is invalid');
         }
 
-        return 'telegram_' . substr(hash('sha256', 'v2board:telegram:' . $subject), 0, 32) . '@telegram.invalid';
+        return 'telegram_' . $subject . '@telegram.invalid';
     }
 
     private function authorizationUrl(string $provider, array $state): string
