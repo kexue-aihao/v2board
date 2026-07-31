@@ -1,33 +1,27 @@
 {
-    "name": "signature",
-    "description": "品牌化套餐落地主题",
-    "version": "1.0.0",
-    "images": "",
-    "configs": [
-        {
-            "label": "主题色",
-            "placeholder": "请选择主题颜色",
-            "field_name": "theme_color",
-            "field_type": "select",
-            "select_options": {
-                "default": "默认蓝色",
-                "green": "青绿色",
-                "black": "石墨色",
-                "darkblue": "深蓝色"
-            },
-            "default_value": "default"
-        },
-        {
-            "label": "背景",
-            "placeholder": "可选背景图片 URL",
-            "field_name": "background_url",
-            "field_type": "input"
-        },
-        {
-            "label": "自定义页脚 HTML",
-            "placeholder": "可选的页脚补充内容",
-            "field_name": "custom_html",
-            "field_type": "textarea"
-        }
-    ]
+  "name": "signature",
+  "description": "品牌化套餐落地主题",
+  "version": "0.1.0",
+  "images": "",
+  "configs": [
+    {
+      "label": "主题色",
+      "placeholder": "请选择主题颜色",
+      "field_name": "theme_color",
+      "field_type": "select",
+      "select_options": {
+        "default": "默认蓝色",
+        "green": "青绿色",
+        "black": "石墨色",
+        "darkblue": "深蓝色"
+      },
+      "default_value": "default"
+    },
+    {
+      "label": "自定义页脚 HTML",
+      "placeholder": "可以加入客服或统计代码",
+      "field_name": "custom_html",
+      "field_type": "textarea"
+    }
+  ]
 }
