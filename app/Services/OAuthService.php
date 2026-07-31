@@ -261,6 +261,38 @@ class OAuthService
         return 'telegram_' . $subject . '@telegram.invalid';
     }
 
+    /**
+     * Placeholder email for GitHub registrations, in the operator-requested
+     * shape <github-email-local>_<github-username>@github.io. Same semantics
+     * as telegramAccountEmail: it only satisfies v2_user's unique email
+     * column, login goes through v2_user_oauth_identity, and consumeTicket()
+     * aborts with 409 before a placeholder can claim an existing account.
+     * Plain registration of @github.io addresses is blocked in
+     * AuthController::register() against squatting.
+     *
+     * Only [a-z0-9_-] survives sanitising: the gmail-alias limit rejects any
+     * prefix containing '.' or '+', and a placeholder must never trip gates
+     * meant for real mailboxes. v2_user.email is varchar(64) and the suffix
+     * takes 10 characters, so the local part is capped at 54.
+     */
+    public function githubAccountEmail(array $profile): string
+    {
+        $local = strtolower(trim((string)explode('@', (string)($profile['email'] ?? ''))[0]));
+        $username = strtolower(trim((string)($profile['username'] ?? '')));
+        $parts = [];
+        if ($local !== '') $parts[] = $local;
+        if ($username !== '' && $username !== $local) $parts[] = $username;
+        $combined = preg_replace('/[^a-z0-9_-]+/', '_', implode('_', $parts));
+        $combined = trim((string)preg_replace('/_+/', '_', $combined), '_-');
+        if ($combined === '') {
+            $subject = trim((string)($profile['subject'] ?? ''));
+            if ($subject === '') abort(422, 'GitHub identity is invalid');
+            $combined = 'github_' . $subject;
+        }
+
+        return substr($combined, 0, 54) . '@github.io';
+    }
+
     private function authorizationUrl(string $provider, array $state): string
     {
         $redirect = $this->redirectUri($provider);

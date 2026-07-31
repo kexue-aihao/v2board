@@ -7,7 +7,6 @@ use App\Models\InviteCode;
 use App\Models\OAuthIdentity;
 use App\Models\Plan;
 use App\Models\User;
-use App\Services\ArithmeticVerificationService;
 use App\Services\AuthService;
 use App\Services\OAuthService;
 use App\Services\TwoFactorService;
@@ -135,12 +134,22 @@ class OAuthController extends Controller
             }
 
             $isTelegram = ($profile['provider'] ?? '') === 'telegram';
+            $isGithub = ($profile['provider'] ?? '') === 'github';
             $email = strtolower(trim((string)($profile['email'] ?? '')));
             if ($isTelegram) {
                 // Telegram is the verified identity for this account. The
                 // synthetic email only satisfies v2_user's existing unique
                 // column and must never be used for account linking.
                 $email = $service->telegramAccountEmail((string)$profile['subject']);
+                $profile['email'] = $email;
+                $profile['verified_email'] = true;
+                $service->updateTicketProfile($ticket, $profile);
+            } elseif ($isGithub) {
+                // Operator requirement: GitHub accounts never carry the real
+                // GitHub email into the panel -- they get the synthetic
+                // <email-local>_<username>@github.io address, with the same
+                // never-links-accounts semantics as the Telegram placeholder.
+                $email = $service->githubAccountEmail($profile);
                 $profile['email'] = $email;
                 $profile['verified_email'] = true;
                 $service->updateTicketProfile($ticket, $profile);
@@ -163,6 +172,12 @@ class OAuthController extends Controller
                     // Never let a Telegram authorization claim an existing
                     // account through the internal placeholder email.
                     abort(409, 'Telegram account cannot be linked to an existing account');
+                }
+                if ($isGithub) {
+                    // Same rule for the GitHub placeholder: a collision means
+                    // another GitHub account produced the same combination (or
+                    // a lost identity row) -- never a licence to take over.
+                    abort(409, 'GitHub account cannot be linked to an existing account');
                 }
                 return response(['data' => [
                     'link_required' => true,
@@ -200,11 +215,9 @@ class OAuthController extends Controller
         if (!$isTelegram && (int)config('v2board.recaptcha_enable', 0) && trim((string)$request->input('recaptcha_data', '')) === '') {
             $requirements[] = 'recaptcha';
         }
-        if (!$isTelegram && (int)config('v2board.arithmetic_verification_enable', 0)
-            && (trim((string)$request->input('arithmetic_challenge_id', '')) === ''
-                || trim((string)$request->input('arithmetic_answer', '')) === '')) {
-            $requirements[] = 'arithmetic';
-        }
+        // No arithmetic here: every completion in this controller already
+        // authenticated against a provider (GitHub/Google/Microsoft/Telegram).
+        // The bot check stays on the plain email path (AuthController::register).
 
         return $requirements;
     }
@@ -220,36 +233,26 @@ class OAuthController extends Controller
             ]));
         }
         if ((int)config('v2board.stop_register', 0)) abort(403, __('Registration has closed'));
+        // 占位邮箱（telegram/github）不适用面向真实邮箱的门槛：白名单、gmail 别名
+        // 限制、验证码都以「用户拥有该邮箱」为前提，占位邮箱谁都不拥有。
+        $syntheticEmail = $isTelegram || ($profile['provider'] ?? '') === 'github';
         if (!$isTelegram && (int)config('v2board.recaptcha_enable', 0)) {
             $result = (new ReCaptcha(config('v2board.recaptcha_key')))->verify($request->input('recaptcha_data'));
             if (!$result->isSuccess()) abort(422, __('Invalid code is incorrect'));
         }
-        if (!$isTelegram && (int)config('v2board.email_whitelist_enable', 0)
+        if (!$syntheticEmail && (int)config('v2board.email_whitelist_enable', 0)
             && !Helper::emailSuffixVerify($email, config('v2board.email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT))) {
             abort(422, __('Email suffix is not in the Whitelist'));
         }
-        if (!$isTelegram && (int)config('v2board.email_gmail_limit_enable', 0)) {
+        if (!$syntheticEmail && (int)config('v2board.email_gmail_limit_enable', 0)) {
             $prefix = explode('@', $email)[0];
             if (strpos($prefix, '.') !== false || strpos($prefix, '+') !== false) abort(422, __('Gmail alias is not supported'));
         }
         if ((int)config('v2board.invite_force', 0) && !$request->input('invite_code')) {
             abort(422, __('You must use the invitation code to register'));
         }
-        if (!$isTelegram && empty($profile['verified_email'])) {
+        if (!$syntheticEmail && empty($profile['verified_email'])) {
             $this->validateEmailVerification($request, $email);
-        }
-        if (!$isTelegram && (int)config('v2board.arithmetic_verification_enable', 0)) {
-            try {
-                $verified = (new ArithmeticVerificationService())->consume(
-                    (string)$request->input('arithmetic_challenge_id'),
-                    $request->input('arithmetic_answer'),
-                    (string)$request->ip()
-                );
-            } catch (\Throwable $e) {
-                report($e);
-                abort(503, __('Arithmetic verification is temporarily unavailable'));
-            }
-            if (!$verified) abort(422, __('Incorrect arithmetic verification'));
         }
     }
 

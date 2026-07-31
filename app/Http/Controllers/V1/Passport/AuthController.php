@@ -39,12 +39,12 @@ class AuthController extends Controller
                 abort(500, __('Invalid code is incorrect'));
             }
         }
-        // @telegram.invalid 是 Telegram OAuth 注册的内部占位域（本地部分就是对方的
-        // UID，完全可预测）。邮箱验证关闭时，任何人都能抢注 telegram_<uid>@telegram.invalid，
-        // 让那个 UID 的真主人永远在 consumeTicket() 的 409 上撞墙。OAuth 手动补邮箱那条
-        // 路不用拦 —— validateEmailVerification 必须收到发往该邮箱的验证码，而 .invalid
-        // 是 RFC 2606 保留域，收不到信。
-        if (preg_match('/@telegram\.invalid$/i', (string)$request->input('email'))) {
+        // @telegram.invalid / @github.io 是 OAuth 注册的内部占位域（本地部分来自
+        // UID 或「邮箱局部_用户名」，都可预测）。邮箱验证关闭时，任何人都能抢注
+        // 占位地址，让真主人永远在 consumeTicket() 的 409 上撞墙。OAuth 手动补邮箱
+        // 那条路不用拦 —— validateEmailVerification 必须收到发往该邮箱的验证码，
+        // 而这两个域都收不到信。
+        if (preg_match('/@(telegram\.invalid|github\.io)$/i', (string)$request->input('email'))) {
             abort(422, 'This email domain is reserved');
         }
         if ((int)config('v2board.email_whitelist_enable', 0)) {
