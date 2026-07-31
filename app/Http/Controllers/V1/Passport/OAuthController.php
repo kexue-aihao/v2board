@@ -121,10 +121,17 @@ class OAuthController extends Controller
                 ->first();
             if ($identity) {
                 $user = User::find($identity->user_id);
-                if (!$user || $user->banned) abort(403, 'Your account has been suspended');
-                $this->touchIdentity($identity, $profile);
-                $service->forgetTicket($ticket);
-                return $this->loginResponse($user, $request);
+                if ($user) {
+                    if ($user->banned) abort(403, 'Your account has been suspended');
+                    $this->touchIdentity($identity, $profile);
+                    $service->forgetTicket($ticket);
+                    return $this->loginResponse($user, $request);
+                }
+                // Admin user deletion (delUser/allDel) does not cascade to
+                // this table, so a mapping can outlive its user -- and it
+                // would pin this provider identity to a 403 forever. Drop the
+                // orphan and fall through to registration as a fresh account.
+                $identity->delete();
             }
 
             $isTelegram = ($profile['provider'] ?? '') === 'telegram';
