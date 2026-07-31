@@ -61317,14 +61317,29 @@
         return node;
     }
 
+    function mountGithubButtonStyle() {
+        if (document.getElementById('v2board-github-button-style')) return;
+        var style = document.createElement('style');
+        style.id = 'v2board-github-button-style';
+        style.textContent = '.v2board-github-button{display:flex;align-items:center;justify-content:center;gap:8px;width:auto;height:40px;padding:0 21px;margin:0 auto .5rem;border:0;border-radius:20px;background:#181717;color:#fff;font-size:15px;font-weight:500;cursor:pointer}.v2board-github-button:hover{background:#2b2b2b}.v2board-github-button svg{display:block}';
+        document.head.appendChild(style);
+    }
+
     function oauthButton(provider, label) {
         var button = document.createElement('button');
         button.type = 'button';
-        button.className = 'btn btn-outline-secondary btn-block mb-2 v2board-oauth-button';
-        button.textContent = label;
         button.addEventListener('click', function () {
             window.location.assign('/api/v1/passport/oauth/' + provider + '/redirect');
         });
+        if (provider === 'github') {
+            // 对齐 Telegram 官方组件的观感：官方 Octocat 标 + 黑底白字胶囊居中。
+            mountGithubButtonStyle();
+            button.className = 'v2board-oauth-button v2board-github-button';
+            button.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span>Log in With Github</span>';
+            return button;
+        }
+        button.className = 'btn btn-outline-secondary btn-block mb-2 v2board-oauth-button';
+        button.textContent = label;
         return button;
     }
 
@@ -61501,25 +61516,8 @@
              invite = buildField('邀请码', 'text', 'oauth_invite_code');
              panel.appendChild(invite.group);
          }
-         var arithmeticId = '';
-         var arithmetic = null;
-         var arithmeticAnswer = null;
-         if (guestConfig && (guestConfig.is_arithmetic_verification === 1 || guestConfig.is_arithmetic_verification === '1')) {
-             arithmetic = document.createElement('div');
-             arithmetic.className = 'form-group';
-             var expression = document.createElement('p');
-             expression.className = 'text-muted small';
-             expression.textContent = '正在加载算术验证…';
-             arithmeticAnswer = buildField('算术答案', 'text', 'oauth_arithmetic_answer');
-             arithmeticAnswer.input.inputMode = 'numeric';
-             arithmetic.appendChild(expression);
-             arithmetic.appendChild(arithmeticAnswer.group);
-             panel.appendChild(arithmetic);
-             request('/guest/comm/arithmetic').then(function (challenge) {
-                 arithmeticId = challenge && challenge.challenge_id ? String(challenge.challenge_id) : '';
-                 if (challenge) expression.textContent = String(challenge.left) + ' ' + String(challenge.operator) + ' ' + String(challenge.right) + ' = ?';
-             }).catch(function (error) { expression.textContent = error.message; });
-         }
+         // 不渲染算术验证：OAuth 补全在后端已按「提供方实名」豁免算术
+         // （OAuthController::registrationRequirements），这里再出题纯属拦路。
          var captcha = mountOAuthCaptcha();
          if (captcha) panel.appendChild(captcha);
          var submit = document.createElement('button');
@@ -61531,10 +61529,6 @@
              var completeBody = { ticket: ticket };
              if (invite && invite.input.value) completeBody.invite_code = invite.input.value;
              if (captcha && captcha._token) completeBody.recaptcha_data = captcha._token;
-             if (arithmeticId && arithmeticAnswer) {
-                 completeBody.arithmetic_challenge_id = arithmeticId;
-                 completeBody.arithmetic_answer = arithmeticAnswer.input.value;
-             }
              request('/passport/oauth/complete', { method: 'POST', body: completeBody }).then(function (data) {
                  if (data && data.registration_required) {
                      showRegistrationCompletion(ticket, provider, emailValue);
