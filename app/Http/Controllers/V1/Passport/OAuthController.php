@@ -309,9 +309,23 @@ class OAuthController extends Controller
             ]);
             return $user;
         });
-        $user->last_login_at = $now;
-        $user->last_login_ip = ip2long((string)$request->ip());
-        $user->save();
+        // This save runs after the registration transaction has committed, so
+        // anything it throws turns "account created" into an error response --
+        // the user sees a failed login while the row exists. Hence the
+        // try/catch: the write is cosmetic bookkeeping and must never take
+        // the login response down with it. The ip2long() guard is a data
+        // fix, not a crash fix: for an IPv6 client it returns false, which
+        // Laravel's prepareBindings() coerces to int 0 -- silently recording
+        // every IPv6 registration as 0.0.0.0. NULL is the honest value an
+        // int(11) IPv4 column can hold for an IPv6 address.
+        try {
+            $ip = ip2long((string)$request->ip());
+            $user->last_login_at = $now;
+            $user->last_login_ip = $ip === false ? null : $ip;
+            $user->save();
+        } catch (\Throwable $e) {
+            report($e);
+        }
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             $key = CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip());
             Cache::put($key, (int)Cache::get($key, 0) + 1, (int)config('v2board.register_limit_expire', 60) * 60);
