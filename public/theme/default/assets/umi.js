@@ -61314,6 +61314,10 @@
         return button;
     }
 
+    function telegramWidgetAvailable() {
+        return Boolean(oauthConfig && oauthConfig.telegram && oauthConfig.telegram_bot_username);
+    }
+
     function mountOAuthButtons() {
         if (!authRoute() || !oauthConfig) return;
         var content = authContent();
@@ -61326,16 +61330,18 @@
         divider.className = 'text-center text-muted small mb-2';
         divider.textContent = '或使用以下账号继续';
         entry.appendChild(divider);
+        // telegram 不在按钮列表里：那个按钮引导的是「先跳 /redirect 再回来挂 widget」
+        // 的两步流，widget 现在由 mountTelegramWidget 直接就位，中转按钮只剩误导。
         var providers = [
             ['google', 'Google'],
             ['github', 'GitHub'],
-            ['microsoft', 'Microsoft'],
-            ['telegram', 'Telegram']
+            ['microsoft', 'Microsoft']
         ];
         providers.forEach(function (item) {
             if (oauthConfig[item[0]]) entry.appendChild(oauthButton(item[0], item[1] + ' 登录 / 注册'));
         });
-        if (!entry.querySelector('button')) return;
+        // 只启用 telegram 时这里没有任何按钮，但分隔条要留给随后挂进来的 widget。
+        if (!entry.querySelector('button') && !telegramWidgetAvailable()) return;
         if (footer) footer.parentNode.insertBefore(entry, footer); else content.appendChild(entry);
     }
 
@@ -61592,27 +61598,51 @@
     }
 
     function mountTelegramWidget() {
-        var params = hashQuery();
-        var state = params.get('telegram_state');
-        if (!state || !oauthConfig || !oauthConfig.telegram || !oauthConfig.telegram_bot_username || !authRoute()) return;
+        // 不再要求 URL 里带 telegram_state —— widget 本身用不到 state，只有
+        // /oauth/complete 需要，所以 state 改成授权回调那一刻按需向
+        // /oauth/telegram/state 索取。widget 因此可以直接就位，省掉先点一次
+        // 「Telegram 登录 / 注册」跳 /redirect 再回来的整个中转。
+        if (!telegramWidgetAvailable() || !authRoute()) return;
         var content = authContent();
         if (!content || content.querySelector('.v2board-telegram-widget')) return;
         var wrapper = document.createElement('div');
         wrapper.className = 'v2board-telegram-widget mt-3 text-center';
+        // 页面自己不声明 color-scheme：OS 处于深色模式时，Chromium 判定嵌入方与
+        // iframe 配色不一致，会给这个跨域 iframe 涂上不透明的黑底（widget 四周的
+        // 黑边就是它）。widget 始终是浅色的，容器声明 light 底色即恢复透明。
+        wrapper.style.colorScheme = 'light';
         var text = document.createElement('p');
         text.className = 'text-muted small';
         text.textContent = '使用 Telegram 完成身份验证';
         var target = document.createElement('div');
         wrapper.appendChild(text);
         wrapper.appendChild(target);
-        content.appendChild(wrapper);
+        // 挂进「或使用以下账号继续」分组，保持在页脚上方；分组不存在才退回 content 尾部。
+        var entry = content.querySelector('.v2board-oauth-entry');
+        if (entry) entry.appendChild(wrapper); else content.appendChild(wrapper);
         var callback = '__v2boardTelegramAuth_' + Date.now();
         window[callback] = function (data) {
-             request('/passport/oauth/complete', { method: 'POST', body: { provider: 'telegram', state: state, data: data } }).then(function (result) {
-                 if (result && result.requires_email) showEmailCompletion(result.ticket, 'telegram');
-                 else if (result && result.registration_required) showRegistrationCompletion(result.ticket, 'telegram', result.email || '');
-                 else if (result && result.link_required) showLinkCompletion(result.ticket, result.email || '');
-                 else completeLogin(result, '');
+            // 老的 /redirect 回跳路径仍会在 URL 里带一张现成的 state，有就先用掉
+            // （用前从 URL 抹去 —— 烧过的票刷新重试只会 422）；否则现要一张，
+            // state 的存活时间从满额 10 分钟缩到毫秒级。
+            var urlState = hashQuery().get('telegram_state');
+            var statePromise;
+            if (urlState) {
+                resetHashToLogin();
+                statePromise = Promise.resolve(urlState);
+            } else {
+                statePromise = request('/passport/oauth/telegram/state').then(function (result) {
+                    return result && result.state;
+                });
+            }
+            statePromise.then(function (state) {
+                if (!state) throw new Error('Telegram 登录暂时不可用，请稍后再试');
+                return request('/passport/oauth/complete', { method: 'POST', body: { provider: 'telegram', state: state, data: data } });
+            }).then(function (result) {
+                if (result && result.requires_email) showEmailCompletion(result.ticket, 'telegram');
+                else if (result && result.registration_required) showRegistrationCompletion(result.ticket, 'telegram', result.email || '');
+                else if (result && result.link_required) showLinkCompletion(result.ticket, result.email || '');
+                else completeLogin(result, '');
             }).catch(function (error) { message(wrapper, error.message, true); });
         };
         var script = document.createElement('script');
