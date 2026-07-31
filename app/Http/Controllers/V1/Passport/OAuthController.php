@@ -272,7 +272,9 @@ class OAuthController extends Controller
             $user->password = password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT);
             $user->uuid = Helper::guid(true);
             $user->token = Helper::guid();
-            \App\Services\PasswordPolicyService::stampRequired($user);
+            // 不打 password_reset_required：这条路径的密码是上面 random_bytes(32)
+            // 生成的，从未被用户设置过，「自设密码有撞库风险」的提醒对它是谎言 ——
+            // Telegram 注册的账号甚至根本无从知道自己的密码。列默认 0 即「合规」。
             $invite = null;
             if ($request->input('invite_code')) {
                 $invite = InviteCode::where('code', $request->input('invite_code'))->where('status', 0)->lockForUpdate()->first();

@@ -586,16 +586,23 @@ class SchemaUpgradeService
         $this->ensureColumn('v2_user', 'password_reset_required', "tinyint(1) NOT NULL DEFAULT '0'");
 
         // 不建索引：这一列只会以「按主键读某个用户」的方式访问，且取值只有两种。
-        if (!$freshColumn) {
-            return;
+        if ($freshColumn) {
+            // 一次性回填：现存普通用户的密码全是自己敲的，按策略都要重置。管理员和员工不打扰
+            // —— 提醒只出现在用户端，而他们主要用管理端，被提醒了也无处可点。
+            DB::table('v2_user')
+                ->where('is_admin', 0)
+                ->where('is_staff', 0)
+                ->update(['password_reset_required' => 1]);
         }
 
-        // 一次性回填：现存普通用户的密码全是自己敲的，按策略都要重置。管理员和员工不打扰
-        // —— 提醒只出现在用户端，而他们主要用管理端，被提醒了也无处可点。
+        // 纠偏（每次部署重跑，幂等，必须放在回填之后）：@telegram.invalid 是 OAuth 注册
+        // 的保留占位域，这些账号的密码只能是系统生成的 —— register() 拒绝该域名注册，
+        // 面板改密码又要求先知道旧密码 —— 却被上面的一次性回填和 OAuth 注册路径早期的
+        // stampRequired 误标成「自设密码待重置」。按语义清零，横幅不再对它们撒谎。
         DB::table('v2_user')
-            ->where('is_admin', 0)
-            ->where('is_staff', 0)
-            ->update(['password_reset_required' => 1]);
+            ->where('password_reset_required', 1)
+            ->where('email', 'like', '%@telegram.invalid')
+            ->update(['password_reset_required' => 0]);
     }
 
     private function applyOAuthIdentitySchema(): void
