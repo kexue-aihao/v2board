@@ -99,7 +99,7 @@ class TelegramController extends Controller
                 report($e);
                 $this->telegramService->sendMessage(
                     (int)$message['chat']['id'],
-                    '绑定失败，请返回网站重新生成绑定链接后再试。'
+                    $this->bindingFailureReply($e)
                 );
                 return true;
             }
@@ -121,6 +121,27 @@ class TelegramController extends Controller
             return true;
         }
         return false;
+    }
+
+    /**
+     * 把已知的绑定失败原因逐条翻译成可行动的提示。此前一律回「请重新生成
+     * 绑定链接」，对「已绑定其他账号」这类失败是误导 —— 照做一百遍也不会成功。
+     * 只按异常消息全文匹配，绝不能按 instanceof RuntimeException 分派：
+     * QueryException 继承链上有 RuntimeException，类型匹配会把 SQL 错误也
+     * 当成已知原因。未匹配的一律走笼统兜底，不外泄内部细节。
+     */
+    private function bindingFailureReply(\Throwable $e): string
+    {
+        $known = [
+            'Binding link is invalid or expired' => '绑定失败：绑定链接已失效（每条链接仅可使用一次，10 分钟内有效），请返回网站重新生成。',
+            'Telegram account is already bound to another account' => '绑定失败：该 Telegram 账号已绑定其他面板账号，请先用原账号解绑，或联系客服处理。',
+            'Subscription is no longer active' => '绑定失败：所选订阅已失效，请返回网站选择有效订阅后重新生成绑定链接。',
+            'Subscription link has changed; prepare a new binding' => '绑定失败：订阅链接已重置，请返回网站重新生成绑定链接。',
+            'Binding group is invalid' => '绑定失败：售后群配置已变更，请返回网站重新生成绑定链接。',
+            'Telegram subscription binding is disabled' => '绑定失败：售后群绑定功能已关闭。',
+            'Telegram subscription binding is not ready' => '绑定失败：售后群绑定功能尚未就绪，请联系管理员。',
+        ];
+        return $known[$e->getMessage()] ?? '绑定失败，请返回网站重新生成绑定链接后再试。';
     }
 
     public function handle()

@@ -79,7 +79,9 @@ class TelegramBindingService
         }
 
         $previous = null;
-        $binding = DB::transaction(function () use ($payload, $telegramUserId, $username, &$previous) {
+        $staleLinks = [];
+        $binding = DB::transaction(function () use ($payload, $telegramUserId, $username, &$previous, &$staleLinks) {
+            $staleLinks = [];
             $user = User::where('id', (int)$payload['user_id'])->lockForUpdate()->first();
             $subscription = Subscription::where('id', (int)$payload['subscription_id'])
                 ->where('user_id', (int)$payload['user_id'])->lockForUpdate()->first();
@@ -89,12 +91,31 @@ class TelegramBindingService
             if (!hash_equals((string)$payload['token_hash'], $this->tokenHash($subscription->token))) {
                 throw new RuntimeException('Subscription link has changed; prepare a new binding');
             }
-            $conflict = TelegramSubscriptionBinding::where('chat_id', $this->chatId())
+            // telegram_chat 唯一索引不分 status，所以这个 Telegram UID 至多还有
+            // 一行属于别人。只有 active 且主人健在才是真冲突；其余 —— 解绑/失效
+            // 留下的尸位行、后台删号留下的孤儿行（delUser 不级联本表）—— 只是
+            // 占着索引，放任不管的话下面的 create/update 就是裸 1062，这个 UID
+            // 从此对全站锁死。摘掉尸位行放行；原主的卡片会从「已失效」变成
+            // 「未绑定」，效果等价（两种状态都得重新绑定）。不派踢人 Job：这个
+            // UID 正是当前绑定者本人，踢了就是踢刚生效的新成员。
+            $occupant = TelegramSubscriptionBinding::where('chat_id', $this->chatId())
                 ->where('telegram_user_id', $telegramUserId)
-                ->where('status', 'active')
                 ->where('user_id', '!=', $user->id)
                 ->lockForUpdate()->first();
-            if ($conflict) throw new RuntimeException('Telegram account is already bound to another account');
+            if ($occupant) {
+                // 主人存在性探测不能加锁：锁别人的 v2_user 行会与对方自己的
+                // completeFromBot（先锁自己的 user 再锁绑定行）互成反向加锁死锁。
+                if ($occupant->status === 'active' && User::where('id', $occupant->user_id)->exists()) {
+                    throw new RuntimeException('Telegram account is already bound to another account');
+                }
+                // 孤儿 active 行可能还揣着没过期的一次性入群链接；行删了链接在
+                // Telegram 那边照样能用，捕下来到事务外回收。
+                if (trim((string)$occupant->invite_link) !== ''
+                    && (int)$occupant->invite_link_expires_at > time()) {
+                    $staleLinks[] = ['chat_id' => (int)$occupant->chat_id, 'link' => (string)$occupant->invite_link];
+                }
+                $occupant->delete();
+            }
 
             $existing = TelegramSubscriptionBinding::where('user_id', $user->id)
                 ->where('chat_id', $this->chatId())
@@ -129,6 +150,18 @@ class TelegramBindingService
                 'created_at' => time()
             ]));
         });
+        // 摘尸位行时捕到的入群链接在事务外回收（Telegram HTTP 不进事务），
+        // fail-open：回收失败只记日志，不影响已落库的新绑定。
+        foreach ($staleLinks as $stale) {
+            try {
+                (new TelegramService())->revokeChatInviteLink($stale['chat_id'], $stale['link']);
+            } catch (\Throwable $e) {
+                Log::error('Failed to revoke a stale Telegram invite link', [
+                    'chat_id' => $stale['chat_id'],
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
         if ($previous) {
             KickTelegramBinding::dispatch(
                 $previous['binding_id'],
