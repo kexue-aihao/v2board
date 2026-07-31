@@ -16121,6 +16121,20 @@
                 }, l.a.createElement("div", {
                     className: "col-md-12"
                 }, l.a.createElement("div", {
+                    className: "block block-rounded"
+                }, l.a.createElement("div", {
+                    className: "block-header block-header-default"
+                }, l.a.createElement("h3", {
+                    className: "block-title"
+                }, "Telegram 售后群")), l.a.createElement("div", {
+                    className: "block-content"
+                }, l.a.createElement("div", {
+                    id: "v2board-telegram-binding-inline"
+                }))))), l.a.createElement("div", {
+                    className: "row mb-3 mb-md-0"
+                }, l.a.createElement("div", {
+                    className: "col-md-12"
+                }, l.a.createElement("div", {
                     className: "block block-rounded "
                 }, l.a.createElement("div", {
                     className: "block-header block-header-default"
@@ -61664,25 +61678,22 @@
     }
 
     function mountTelegramBinding() {
-        var path = (window.location.hash || '').split('?')[0];
-        if (path !== '#/profile' || document.querySelector('.v2board-telegram-binding') || telegramBindingLoading) return;
-        var host = document.querySelector('#page-container .block-content-full:last-child') || document.querySelector('#page-container main') || document.querySelector('#page-container');
-        if (!host) return;
+        // 占位卡由 React 个人中心组件渲染（与 v2board-2fa-inline 同构），这里只负责填充；
+        // 换页再回来时 React 会渲染全新的占位节点（无 data-loaded），自然重挂。
+        var root = document.getElementById('v2board-telegram-binding-inline');
+        if (!root || root.getAttribute('data-loaded') || telegramBindingLoading) return;
         telegramBindingLoading = true;
         request('/user/telegram/binding').then(function (binding) {
-            if (!binding || !binding.enabled) return;
-            var card = document.createElement('div');
-            card.className = 'block block-rounded v2board-telegram-binding mt-3';
-            var body = document.createElement('div');
-            body.className = 'block-content';
-            var heading = document.createElement('h3');
-            heading.className = 'font-size-h4';
-            heading.textContent = 'Telegram 售后群';
+            root.setAttribute('data-loaded', '1');
+            if (!binding || !binding.enabled) {
+                // 功能未开启：占位卡是恒渲染的，连同所在行一起摘掉
+                var row = root.closest('.row');
+                if (row) row.remove(); else root.remove();
+                return;
+            }
             var status = document.createElement('p');
             status.className = 'text-muted small';
             status.textContent = binding.binding ? ('当前状态：' + binding.binding.status) : '请选择有效订阅进行绑定';
-            body.appendChild(heading);
-            body.appendChild(status);
             var select = document.createElement('select');
             select.className = 'form-control mb-2';
             var button = document.createElement('button');
@@ -61705,10 +61716,9 @@
                     status.textContent = '已生成一次性链接，请在 Telegram 私聊中完成绑定。';
                 }).catch(function (error) { status.textContent = error.message; }).finally(function () { button.disabled = false; });
             });
-            body.appendChild(select);
-            body.appendChild(button);
-            card.appendChild(body);
-            host.appendChild(card);
+            root.appendChild(status);
+            root.appendChild(select);
+            root.appendChild(button);
         }).catch(function () {}).finally(function () { telegramBindingLoading = false; });
     }
 
