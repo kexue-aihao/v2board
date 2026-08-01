@@ -6147,6 +6147,12 @@
                     checked: parseInt(_.email_verify),
                     onChange: e=>this.set("safe", "email_verify", e ? 1 : 0)
                 })), f.a.createElement(m, {
+                    title: "\u4ec5\u5141\u8bb8\u7b2c\u4e09\u65b9\u8d26\u53f7\u6ce8\u518c",
+                    description: "\u5f00\u542f\u540e\u5173\u95ed\u90ae\u7bb1\u6ce8\u518c\uff0c\u4ec5\u53ef\u901a\u8fc7\u5df2\u542f\u7528\u7684\u7b2c\u4e09\u65b9\u767b\u5f55\u6ce8\u518c\uff1b\u8bf7\u786e\u4fdd\u81f3\u5c11\u542f\u7528\u4e00\u4e2a\u7b2c\u4e09\u65b9\u767b\u5f55"
+                }, f.a.createElement(l["a"], {
+                    checked: parseInt(_.oauth_register_only),
+                    onChange: e=>this.set("safe", "oauth_register_only", e ? 1 : 0)
+                })), f.a.createElement(m, {
                     title: "\u7981\u6b62\u4f7f\u7528Gmail\u591a\u522b\u540d",
                     description: "\u5f00\u542f\u540eGmail\u591a\u522b\u540d\u5c06\u65e0\u6cd5\u6ce8\u518c\u3002"
                 }, f.a.createElement(l["a"], {

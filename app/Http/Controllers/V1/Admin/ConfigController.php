@@ -169,6 +169,8 @@ class ConfigController extends Controller
             ],
             'safe' => [
                 'email_verify' => (int)config('v2board.email_verify', 0),
+                // 仅第三方注册：与 email_verify / oauth_* 同在 safe 组，admin 注册设置区消费
+                'oauth_register_only' => (int)config('v2board.oauth_register_only', 0),
                 'safe_mode_enable' => (int)config('v2board.safe_mode_enable', 0),
                 'secure_path' => config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))),
                 'email_whitelist_enable' => (int)config('v2board.email_whitelist_enable', 0),

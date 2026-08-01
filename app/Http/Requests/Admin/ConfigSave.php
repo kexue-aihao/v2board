@@ -117,6 +117,7 @@ class ConfigSave extends FormRequest
         'recaptcha_key' => '',
         'recaptcha_site_key' => '',
         'email_verify' => 'in:0,1',
+        'oauth_register_only' => 'in:0,1',
         'safe_mode_enable' => 'in:0,1',
         'register_limit_by_ip_enable' => 'in:0,1',
         'register_limit_count' => 'integer',

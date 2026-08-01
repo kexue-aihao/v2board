@@ -48,6 +48,8 @@ class CommController extends Controller
                 'is_recaptcha' => (int)config('v2board.recaptcha_enable', 0) ? 1 : 0,
                 'recaptcha_site_key' => config('v2board.recaptcha_site_key'),
                 'is_arithmetic_verification' => (int)config('v2board.arithmetic_verification_enable', 0) ? 1 : 0,
+                // 仅第三方注册开关：主题注册页据此隐藏邮箱注册表单，只留 OAuth 区
+                'oauth_register_only' => (int)config('v2board.oauth_register_only', 0) ? 1 : 0,
                 'oauth' => [
                     'google' => (int)config('v2board.oauth_google_enable', 0) === 1,
                     'github' => (int)config('v2board.oauth_github_enable', 0) === 1,

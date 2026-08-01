@@ -24,6 +24,19 @@ class AuthController extends Controller
 {
     public function register(AuthRegister $request, bool $skipEmailVerification = false)
     {
+        // 仅第三方注册开关：必须钉死在函数最顶部、一切副作用之前 —— 本函数后面依次有
+        // IP 限流计数写入、邮箱验证码核销（Cache::forget）、邀请码消耗（status=1 落库）、
+        // 算术验证 consume（一次性核销）。认知文档（EZ-COGNITION）登记过 register()
+        // 「先烧邀请码、后验算术」的历史缺陷：拦截一旦放到副作用之后，被拒绝的用户会
+        // 白白烧掉一次性资源。OAuth 注册走 OAuthController 自己的流程，不经过这里，
+        // 天然不受本开关影响；登录/找回密码也不在此函数内。
+        // 波及面：Store\Controller::register（reseller 店面注册）内部调用本函数，
+        // 因此开关开启时店面邮箱注册同样被 403——店面页面不含 OAuth 按钮，等于
+        // 关闭全部 reseller 店面新客注册。这是「拦截钉死在最顶部」规格的自然覆盖，
+        // 详见 Store\Controller::register 处的波及面声明。
+        if ((int)config('v2board.oauth_register_only', 0)) {
+            abort(403, __('Registration is only available through third-party accounts'));
+        }
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             $registerCountByIP = Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip())) ?? 0;
             if ((int)$registerCountByIP >= (int)config('v2board.register_limit_count', 3)) {
