@@ -61363,8 +61363,7 @@
         // 的两步流，widget 现在由 mountTelegramWidget 直接就位，中转按钮只剩误导。
         var providers = [
             ['google', 'Google'],
-            ['github', 'GitHub'],
-            ['microsoft', 'Microsoft']
+            ['github', 'GitHub']
         ];
         providers.forEach(function (item) {
             if (oauthConfig[item[0]]) entry.appendChild(oauthButton(item[0], item[1] + ' 登录 / 注册'));

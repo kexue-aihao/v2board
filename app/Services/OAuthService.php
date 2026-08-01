@@ -10,7 +10,7 @@ use RuntimeException;
 
 class OAuthService
 {
-    public const PROVIDERS = ['google', 'github', 'microsoft', 'telegram'];
+    public const PROVIDERS = ['google', 'github', 'telegram'];
     private const STATE_TTL = 600;
     private const TICKET_TTL = 300;
     private const TELEGRAM_AUTH_MAX_AGE = 86400;
@@ -321,19 +321,7 @@ class OAuthService
                 'allow_signup' => 'true'
             ]);
         }
-        $tenant = trim((string)config('v2board.oauth_microsoft_tenant', 'common')) ?: 'common';
-        return 'https://login.microsoftonline.com/' . rawurlencode($tenant) . '/oauth2/v2.0/authorize?' . http_build_query([
-            'client_id' => config('v2board.oauth_microsoft_client_id'),
-            'redirect_uri' => $redirect,
-            'response_type' => 'code',
-            'response_mode' => 'query',
-            'scope' => 'openid profile email User.Read',
-            'state' => $state['state'],
-            'nonce' => $state['nonce'],
-            'code_challenge' => $challenge,
-            'code_challenge_method' => 'S256',
-            'prompt' => 'select_account'
-        ]);
+        throw new RuntimeException('Unsupported OAuth provider');
     }
 
     private function fetchProfile(string $provider, string $code, array $state): array
@@ -380,20 +368,7 @@ class OAuthService
                 'display_name' => (string)($claims['name'] ?? '')
             ];
         }
-        $graph = $this->getJson('https://graph.microsoft.com/v1.0/me?$select=id,mail,userPrincipalName,displayName', [
-            'Authorization' => 'Bearer ' . $token['access_token'],
-            'Accept' => 'application/json'
-        ]);
-        $email = strtolower(trim((string)($graph['mail'] ?? $graph['userPrincipalName'] ?? $claims['email'] ?? '')));
-        return [
-            'provider' => 'microsoft',
-            'subject' => (string)($claims['oid'] ?? $graph['id'] ?? $claims['sub'] ?? ''),
-            'tenant' => (string)($claims['tid'] ?? ''),
-            'email' => $email ?: null,
-            'verified_email' => $email !== '',
-            'username' => (string)($graph['userPrincipalName'] ?? $claims['preferred_username'] ?? ''),
-            'display_name' => (string)($graph['displayName'] ?? '')
-        ];
+        throw new RuntimeException('Unsupported OAuth provider');
     }
 
     private function exchangeCode(string $provider, string $code, array $state): array
@@ -418,10 +393,7 @@ class OAuthService
                 'code_verifier' => $state['verifier']
             ], ['Accept' => 'application/json']);
         }
-        $tenant = trim((string)config('v2board.oauth_microsoft_tenant', 'common')) ?: 'common';
-        $params['client_id'] = config('v2board.oauth_microsoft_client_id');
-        $params['client_secret'] = config('v2board.oauth_microsoft_client_secret');
-        return $this->postForm('https://login.microsoftonline.com/' . rawurlencode($tenant) . '/oauth2/v2.0/token', $params);
+        throw new RuntimeException('Unsupported OAuth provider');
     }
 
     private function verifyOidcToken(string $provider, string $token, string $nonce): array
@@ -459,13 +431,7 @@ class OAuthService
                 throw new RuntimeException('OIDC issuer is invalid');
             }
         } else {
-            $tenant = trim((string)config('v2board.oauth_microsoft_tenant', 'common')) ?: 'common';
-            $tid = (string)($claims['tid'] ?? '');
-            if ($tid === '') throw new RuntimeException('OIDC tenant is invalid');
-            $expected = $tenant === 'common' || $tenant === 'organizations' || $tenant === 'consumers'
-                ? 'https://login.microsoftonline.com/' . $tid . '/v2.0'
-                : 'https://login.microsoftonline.com/' . $tenant . '/v2.0';
-            if ($issuer !== $expected) throw new RuntimeException('OIDC issuer is invalid');
+            throw new RuntimeException('Unsupported OIDC provider');
         }
         $kid = (string)($header['kid'] ?? '');
         foreach ((array)($discovery['keys'] ?? []) as $jwk) {
@@ -484,8 +450,7 @@ class OAuthService
         if ($provider === 'google') {
             $url = 'https://accounts.google.com/.well-known/openid-configuration';
         } else {
-            $tenant = trim((string)config('v2board.oauth_microsoft_tenant', 'common')) ?: 'common';
-            $url = 'https://login.microsoftonline.com/' . rawurlencode($tenant) . '/v2.0/.well-known/openid-configuration';
+            throw new RuntimeException('Unsupported OIDC provider');
         }
         $key = CacheKey::get('OAUTH_JWKS', md5($url));
         $discovery = Cache::get($key);

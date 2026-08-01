@@ -51,7 +51,6 @@ class CommController extends Controller
                 'oauth' => [
                     'google' => (int)config('v2board.oauth_google_enable', 0) === 1,
                     'github' => (int)config('v2board.oauth_github_enable', 0) === 1,
-                    'microsoft' => (int)config('v2board.oauth_microsoft_enable', 0) === 1,
                     'telegram' => (int)config('v2board.oauth_telegram_enable', 0) === 1,
                     'telegram_bot_username' => config('v2board.oauth_telegram_bot_username'),
                     'telegram_login_domain' => config('v2board.oauth_telegram_login_domain')

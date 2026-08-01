@@ -186,11 +186,6 @@ class ConfigController extends Controller
                 'oauth_github_client_id' => config('v2board.oauth_github_client_id'),
                 'oauth_github_client_secret_configured' => (bool)config('v2board.oauth_github_client_secret'),
                 'oauth_github_redirect_uri' => config('v2board.oauth_github_redirect_uri'),
-                'oauth_microsoft_enable' => (int)config('v2board.oauth_microsoft_enable', 0),
-                'oauth_microsoft_client_id' => config('v2board.oauth_microsoft_client_id'),
-                'oauth_microsoft_client_secret_configured' => (bool)config('v2board.oauth_microsoft_client_secret'),
-                'oauth_microsoft_tenant' => config('v2board.oauth_microsoft_tenant', 'common'),
-                'oauth_microsoft_redirect_uri' => config('v2board.oauth_microsoft_redirect_uri'),
                 'oauth_telegram_enable' => (int)config('v2board.oauth_telegram_enable', 0),
                 'oauth_telegram_login_domain' => config('v2board.oauth_telegram_login_domain'),
                 'oauth_telegram_bot_username' => config('v2board.oauth_telegram_bot_username'),
@@ -227,7 +222,7 @@ class ConfigController extends Controller
         $data = $request->validated();
         $previousTelegramBindingEnabled = (int)config('v2board.telegram_subscription_binding_enable', 0);
         $previousTelegramDiscussId = trim((string)config('v2board.telegram_discuss_id', ''));
-        foreach (['google', 'github', 'microsoft'] as $provider) {
+        foreach (['google', 'github'] as $provider) {
             $secret = 'oauth_' . $provider . '_client_secret';
             if (array_key_exists($secret, $data) && trim((string)$data[$secret]) === '') {
                 unset($data[$secret]);

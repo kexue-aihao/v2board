@@ -216,7 +216,7 @@ class OAuthController extends Controller
             $requirements[] = 'recaptcha';
         }
         // No arithmetic here: every completion in this controller already
-        // authenticated against a provider (GitHub/Google/Microsoft/Telegram).
+        // authenticated against a provider (GitHub/Google/Telegram).
         // The bot check stays on the plain email path (AuthController::register).
 
         return $requirements;
