@@ -222,6 +222,16 @@ class TicketController extends Controller
 
     private function sendNotify(Ticket $ticket, string $message, $userid = null)
 	{
+		// 2026-08-01 问题三修复（改动后需重启服务）：通知旁路绝不允许影响工单主流程。
+		// 根因证据链：本方法在 save() 的 try 内、DB::commit() 之后同步执行（reply() L136 则完全
+		// 未套 try），而下方 file_get_contents("http://ip-api.com/json/...") 原先无超时、无错误
+		// 抑制、且不受 telegram_bot_enable 开关保护——Laravel 会把流打开失败的 PHP warning 升格
+		// 为 ErrorException：服务器外网不通 / ip-api.com 不可达 / 免费档限流（45 次/分）时，
+		// 工单/回复其实已入库，接口却返回 500，前端 toast「提交工单报错」。前端两主题请求体
+		// （subject/message/level=int 0|1|2）与 TicketSave 验证规则、default 主题 umi.js 生产
+		// 契约三方比对一致，根因确证在后端本方法。处置：整体 try/catch 兜底（通知失败只记日志），
+		// IP 归属地查询加 3 秒超时（Workerman 常驻进程内默认 60 秒超时会拖住整个 worker）。
+		try {
 		$telegramService = new TelegramService();
 		if (!empty($userid)) {
 			$user = User::find($userid);
@@ -241,7 +251,9 @@ class TicketController extends Controller
 				}
 
 				$api_url = "http://ip-api.com/json/{$ip_address}?fields=520191&lang=zh-CN";
-				$response = file_get_contents($api_url);
+				// 2026-08-01 问题三：加 3 秒超时与错误抑制；查询失败 $response=false →
+				// json_decode 得 null → 走下方既有「无法确定用户地址」降级分支，不再抛异常。
+				$response = @file_get_contents($api_url, false, stream_context_create(['http' => ['timeout' => 3]]));
 				$user_location = json_decode($response, true);
 				if ($user_location && $user_location['status'] === 'success') {
 					$location =  $user_location['city'] . ", " . $user_location['country'];
@@ -261,6 +273,10 @@ class TicketController extends Controller
 			}
 		} else {
 			$telegramService->sendMessageWithAdmin("📮工单提醒 #{$ticket->id}\n———————————————\n主题：\n`{$ticket->subject}`\n内容：\n {$message} ", true);
+		}
+		} catch (\Throwable $e) {
+			// 2026-08-01 问题三：通知失败只记日志，工单主流程照常返回成功。
+			\Illuminate\Support\Facades\Log::error('[Ticket] sendNotify failed: ' . $e->getMessage());
 		}
 	}
 
