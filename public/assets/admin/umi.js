@@ -41788,6 +41788,42 @@
             a(t.slice(i)),
             r
         }
+        function v2boardParseTicketImages(e) {
+            var t = String(null == e ? "" : e)
+              , n = /!\[[^\]\r\n]*\]\((https?:\/\/[^\s)]+)\)/gi
+              , r = []
+              , i = 0
+              , o = 0
+              , a = null;
+            for (n.lastIndex = 0; null !== (a = n.exec(t)); )
+                a.index > i && r.push(d.a.createElement("span", {
+                    key: "v2img-text-" + o++
+                }, w(t.slice(i, a.index)))),
+                r.push(d.a.createElement("a", {
+                    key: "v2img-link-" + o++,
+                    className: "v2-ticket-inline-image",
+                    href: a[1],
+                    target: "_blank",
+                    rel: "noopener noreferrer"
+                }, d.a.createElement("img", {
+                    className: "v2-ticket-message-image",
+                    src: a[1],
+                    alt: "工单图片",
+                    loading: "lazy",
+                    decoding: "async",
+                    referrerPolicy: "no-referrer",
+                    style: {
+                        maxWidth: "min(100%, 360px)",
+                        height: "auto",
+                        borderRadius: "8px",
+                        cursor: "zoom-in"
+                    }
+                }))),
+                i = a.index + a[0].length;
+            return 0 === i ? w(t) : (i < t.length && r.push(d.a.createElement("span", {
+                key: "v2img-text-" + o++
+            }, w(t.slice(i)))), r)
+        }
         class b extends d.a.Component {
             constructor(e) {
                 super(e),
@@ -41927,7 +41963,7 @@
                     className: "v2-ticket-message-meta"
                 }, v()(1e3 * e.created_at).format("YYYY/MM/DD HH:mm")), d.a.createElement("div", {
                     className: "v2-ticket-bubble"
-                }, w(e.message)))), d.a.createElement("div", {
+                }, v2boardParseTicketImages(e.message)))), d.a.createElement("div", {
                     className: "v2-ticket-composer"
                 }, d.a.createElement("textarea", {
                     className: "v2-ticket-composer-input",
