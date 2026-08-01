@@ -26,6 +26,24 @@
         $signatureThemeColor = $signatureThemeColors[$signatureThemeColorKey];
         [$signatureR, $signatureG, $signatureB] = sscanf($signatureThemeColor, '#%02x%02x%02x');
 
+        // 配色修复（补暗色覆盖）：暗色 accent 预热映射，与 baseConfig.js 的
+        // SIGNATURE_DARK_ACCENT_MAP 同表——暗底 #111110 上 #171717 仅 1.05:1、
+        // #243b68 1.71:1、#287d73 作文字 3.84:1，暗色分别反转/提亮为
+        // #f5f5f4（17.32:1）/ #5b81c8（4.88:1）/ #2f9287（5.02:1），色相不动。
+        // 配色复扫微调（2026-08）：green/darkblue 首版 #2d8c81/#567cc5 作按钮底时
+        // 墨字仅 4.42/4.34:1 <4.5:1，提亮 1~2% 明度与 baseConfig.js
+        // SIGNATURE_DARK_ACCENT_MAP 同步为 #2f9287/#5b81c8（墨字 4.77/4.63:1）。
+        // 仅作首屏预热：useTheme.applyTheme 挂载后按 localStorage 实际主题以
+        // inline style 覆盖，优先级更高，不冲突。
+        $signatureThemeColorsDark = [
+            'default' => '#f5f5f4',
+            'green' => '#2f9287',
+            'black' => '#f5f5f4',
+            'darkblue' => '#5b81c8',
+        ];
+        $signatureThemeColorDark = $signatureThemeColorsDark[$signatureThemeColorKey];
+        [$signatureDarkR, $signatureDarkG, $signatureDarkB] = sscanf($signatureThemeColorDark, '#%02x%02x%02x');
+
         $signatureAssetRoot = public_path("theme/{$theme}/assets");
         $signatureManifestPath = $signatureAssetRoot . '/manifest.json';
         $signatureManifest = is_file($signatureManifestPath)
@@ -42,6 +60,12 @@
         $signatureAssetUrl = function ($file) use ($theme, $signatureAssetVersion) {
             return '/theme/' . $theme . '/assets/' . ltrim($file, '/') . '?v=' . $signatureAssetVersion;
         };
+
+        // 2026-08-01 问题四：imgbb 图床 key 后台配置化。config.json configs[] 新增 imgbb_api_key
+        // （后台主题配置表单 → ThemeController::saveThemeConfig 白名单写入 config/theme/signature.php），
+        // 此处照 theme_color 的注入通道透传给前端 window.settings.theme；旧配置文件无此键时
+        // ?? '' 兜底，前端留空回退主题内置 key。
+        $signatureImgbbApiKey = trim((string)($theme_config['imgbb_api_key'] ?? ''));
     @endphp
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -57,9 +81,15 @@
            首屏底色为 signature 自己的预热底色（signature 皮肤值：亮 #f8f7f2 = sig-ivory /
            暗 #111110 = sig-ivory 暗色，值源 signature-identity.md 1.2，已替换冲压阶段的
            modern 占位值）。 */
-        :root { --theme-color: {{ $signatureThemeColor }}; --theme-color-rgb: {{ $signatureR }}, {{ $signatureG }}, {{ $signatureB }}; }
+        /* --on-theme-color：accent 上的文字色预热（亮 accent 四色皆深、取白；暗 accent
+           映射后皆偏浅、取墨），运行时由 useTheme.applyTheme 按实际 accent 亮度重算覆盖 */
+        :root { --theme-color: {{ $signatureThemeColor }}; --theme-color-rgb: {{ $signatureR }}, {{ $signatureG }}, {{ $signatureB }}; --on-theme-color: #fff; }
         html { background-color: #f8f7f2; }
-        @media (prefers-color-scheme: dark) { html { background-color: #111110; } }
+        @media (prefers-color-scheme: dark) {
+            /* 配色修复：暗色首屏预热同步吃暗色 accent 映射（见上方 PHP 注释） */
+            :root { --theme-color: {{ $signatureThemeColorDark }}; --theme-color-rgb: {{ $signatureDarkR }}, {{ $signatureDarkG }}, {{ $signatureDarkB }}; --on-theme-color: #171717; }
+            html { background-color: #111110; }
+        }
     </style>
     <script>window.routerBase = "/";</script>
     <script>
@@ -69,7 +99,7 @@
             logo: @json($logo),
             assets_path: @json('/theme/' . $theme . '/assets'),
             version: @json($version),
-            theme: { color: @json($signatureThemeColor) },
+            theme: { color: @json($signatureThemeColor), imgbb_api_key: @json($signatureImgbbApiKey) },
             i18n: ['zh-CN', 'en-US', 'ja-JP', 'vi-VN', 'ko-KR', 'zh-TW', 'fa-IR']
         };
     </script>

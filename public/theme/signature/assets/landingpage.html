@@ -172,6 +172,36 @@
       --text-light: #a1a1a6;
       --background-color: #1a1a1a;
       --section-bg: #0f0f0f;
+      /* 配色修复（补暗色覆盖）：主色 #171717 对 #1a1a1a 仅 1.03:1（调 L 不可达标），
+         暗色下透明洗色/阴影基色切到墨金搭配中的金（sig-gold 暗色 #e0a54b，色相不动）；
+         文字/描边消费点见下方 :root.dark-theme 消费点覆盖块。
+         按钮 background 用法保持 #171717（白字 17.93:1 不受影响），
+         .cta-button 为白底墨字（17.93:1）与主题无关，同样不切换。 */
+      --primary-rgb: 224, 165, 75;
+      --primary-shadow: rgba(224, 165, 75, 0.3);
+    }
+
+    /* 配色修复（补暗色覆盖）：以 var(--primary-color)（#171717）作文字/SVG 描边/spinner 的
+       消费点在暗底 #1a1a1a 上仅 1.03:1，暗色下统一切 var(--primary-color-light)
+       （#e0a54b 对 #1a1a1a 8.00:1，≥4.5:1 正文与 3:1 UI 双达标，墨金身份内色相不动）。 */
+    :root.dark-theme .nav-links a:hover,
+    :root.dark-theme .footer-links a:hover {
+      color: var(--primary-color-light);
+    }
+
+    :root.dark-theme .feature-icon svg,
+    :root.dark-theme .client-card svg,
+    :root.dark-theme .footer-logo svg {
+      stroke: var(--primary-color-light);
+    }
+
+    :root.dark-theme .loader {
+      border-top-color: var(--primary-color-light);
+    }
+
+    /* 同款暗色覆盖：hero 渐变标题起点 #171717 在暗底不可见，起点切象牙字色、终点保持金。 */
+    :root.dark-theme .hero h2 {
+      background-image: linear-gradient(to right, var(--text-color), var(--primary-color-light));
     }
 
     :root.dark-theme header {

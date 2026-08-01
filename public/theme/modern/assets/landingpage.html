@@ -172,6 +172,38 @@
       --text-light: #a1a1a6;
       --background-color: #1a1a1a;
       --section-bg: #0f0f0f;
+      /* 配色复扫修复（回退 A3 的全局 --primary-color 覆盖，与 signature 同位置策略对齐）：
+         整体切 --primary-color:#5b9ee5 会连累按钮类消费点——.primary-button/.cta-container
+         白字对 #5b9ee5 仅 2.81:1（旧 #0665d0 为 5.56:1）。暗色下保持 --primary-color 不动，
+         仅透明洗色/阴影基色切浅变体 rgb（#5b9ee5），文字/描边/spinner 消费点见下方覆盖块。
+         注意：window.EZ_CONFIG 存在时下方脚本仍会以 inline style 写入亮色 primaryColor，
+         本组规则兜底静态/无配置场景。 */
+      --primary-rgb: 91, 158, 229;
+      --primary-shadow: rgba(91, 158, 229, 0.3);
+    }
+
+    /* 配色修复（补暗色覆盖，镜像 signature 消费点切换法）：以 var(--primary-color)（#0665d0）
+       作文字/SVG 描边/spinner 的消费点在暗底 #1a1a1a 上仅 3.13:1（正文 4.5:1 不过），
+       暗色下统一切 var(--primary-color-light)（#5b9ee5 对 #1a1a1a 6.19:1，
+       ≥4.5:1 正文与 3:1 UI 双达标，同一蓝系色相不动）。 */
+    :root.dark-theme .nav-links a:hover,
+    :root.dark-theme .footer-links a:hover {
+      color: var(--primary-color-light);
+    }
+
+    :root.dark-theme .feature-icon svg,
+    :root.dark-theme .client-card svg,
+    :root.dark-theme .footer-logo svg {
+      stroke: var(--primary-color-light);
+    }
+
+    :root.dark-theme .loader {
+      border-top-color: var(--primary-color-light);
+    }
+
+    /* 同款暗色覆盖：hero 渐变标题起点 #0665d0 在暗底仅 3.13:1，起点切正文字色、终点保持浅蓝。 */
+    :root.dark-theme .hero h2 {
+      background-image: linear-gradient(to right, var(--text-color), var(--primary-color-light));
     }
 
     :root.dark-theme header {

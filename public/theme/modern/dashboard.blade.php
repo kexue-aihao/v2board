@@ -15,9 +15,15 @@
         // #3b5998 暗色下仅约 2.55:1。modern 的皮肤体系在暗色下另有一套 accent
         // （black 暗色 #8c969f、darkblue 暗色 #7393cf，见 modern-identity.md 1.3），
         // 该暗色覆盖属 M6 样式里程碑；M6 落地前，暗色模式下这两色的对比度问题原样存在。
+        // 2026-08 配色审计（A3）补记：上述存疑保留注释里的暗色 accent 欠账已在 theme-src
+        // baseConfig.js 的 THEME_CONFIG.dark 接线（MODERN_DARK_ACCENT_MAP，identity 1.3 映射），
+        // 原注释 1:1 保留作历史背景。
+        // green 亮色 #319795 → #287c7a（同批次 A3）：白按钮字对它 3.51→4.94:1、作前景落
+        // 亮底 #f4f7f5 3.25→4.58:1（色相不动只降明度，与 identity green accent-strong #257a78
+        // 同向）；baseConfig.js hexToRgb 兜底不受影响，暗色映射表已含新旧两个 green 键。
         $modernThemeColors = [
             'default' => '#0665d0',   // modern 默认蓝
-            'green' => '#319795',     // 青绿色
+            'green' => '#287c7a',     // 青绿色（原 #319795，见上方 2026-08 审计注释）
             'black' => '#343a40',     // 石墨色（modern 自有值，见上方存疑保留注释）
             'darkblue' => '#3b5998',  // 深蓝色（modern 自有值，见上方存疑保留注释）
         ];
@@ -27,6 +33,22 @@
         }
         $modernThemeColor = $modernThemeColors[$modernThemeColorKey];
         [$modernR, $modernG, $modernB] = sscanf($modernThemeColor, '#%02x%02x%02x');
+
+        // 配色复扫修复（补暗色预热分支，与 signature blade 同位置同策略）：暗色 accent
+        // 预热映射，与 baseConfig.js 的 MODERN_DARK_ACCENT_MAP 同表——暗底 #111714 上
+        // #343a40 仅 1.58:1、#3b5998 2.65:1、#0665d0 作文字 3.27:1，暗色分别切
+        // identity 1.3 的暗色 accent：#5b9ee5（6.46:1）/ #55c3a7（8.43:1）/
+        // #8c969f（6.03:1）/ #7393cf（5.88:1）。
+        // 仅作首屏预热：useTheme.applyTheme 挂载后按 localStorage 实际主题以
+        // inline style 覆盖，优先级更高，不冲突。
+        $modernThemeColorsDark = [
+            'default' => '#5b9ee5',
+            'green' => '#55c3a7',
+            'black' => '#8c969f',
+            'darkblue' => '#7393cf',
+        ];
+        $modernThemeColorDark = $modernThemeColorsDark[$modernThemeColorKey];
+        [$modernDarkR, $modernDarkG, $modernDarkB] = sscanf($modernThemeColorDark, '#%02x%02x%02x');
 
         $modernAssetRoot = public_path("theme/{$theme}/assets");
         $modernManifestPath = $modernAssetRoot . '/manifest.json';
@@ -44,6 +66,12 @@
         $modernAssetUrl = function ($file) use ($theme, $modernAssetVersion) {
             return '/theme/' . $theme . '/assets/' . ltrim($file, '/') . '?v=' . $modernAssetVersion;
         };
+
+        // 2026-08-01 问题四：imgbb 图床 key 后台配置化。config.json configs[] 新增 imgbb_api_key
+        // （后台主题配置表单 → ThemeController::saveThemeConfig 白名单写入 config/theme/modern.php），
+        // 此处照 theme_color 的注入通道透传给前端 window.settings.theme；旧配置文件无此键时
+        // ?? '' 兜底，前端留空回退主题内置 key。
+        $modernImgbbApiKey = trim((string)($theme_config['imgbb_api_key'] ?? ''));
     @endphp
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -57,9 +85,15 @@
            这里写的 --theme-color 只是首屏预热：useTheme 的 applyTheme() 会在 onMounted
            时用 documentElement 的 inline style 覆盖它，优先级更高，不冲突。
            首屏底色用 modern 自己的皮肤值（亮 #f4f7f5 / 暗 #111714，M0 决议 1）。 */
-        :root { --theme-color: {{ $modernThemeColor }}; --theme-color-rgb: {{ $modernR }}, {{ $modernG }}, {{ $modernB }}; }
+        /* --on-theme-color：accent 上的文字色预热（亮 accent 四色皆深、取白；暗 accent
+           映射后皆偏浅、取墨 #171717），运行时由 useTheme.applyTheme 按实际 accent 亮度重算覆盖 */
+        :root { --theme-color: {{ $modernThemeColor }}; --theme-color-rgb: {{ $modernR }}, {{ $modernG }}, {{ $modernB }}; --on-theme-color: #fff; }
         html { background-color: #f4f7f5; }
-        @media (prefers-color-scheme: dark) { html { background-color: #111714; } }
+        @media (prefers-color-scheme: dark) {
+            /* 配色复扫修复：暗色首屏预热同步吃暗色 accent 映射（见上方 PHP 注释） */
+            :root { --theme-color: {{ $modernThemeColorDark }}; --theme-color-rgb: {{ $modernDarkR }}, {{ $modernDarkG }}, {{ $modernDarkB }}; --on-theme-color: #171717; }
+            html { background-color: #111714; }
+        }
     </style>
     <script>window.routerBase = "/";</script>
     <script>
@@ -69,7 +103,7 @@
             logo: @json($logo),
             assets_path: @json('/theme/' . $theme . '/assets'),
             version: @json($version),
-            theme: { color: @json($modernThemeColor) },
+            theme: { color: @json($modernThemeColor), imgbb_api_key: @json($modernImgbbApiKey) },
             i18n: ['zh-CN', 'en-US', 'ja-JP', 'vi-VN', 'ko-KR', 'zh-TW', 'fa-IR']
         };
     </script>

@@ -22,6 +22,12 @@
       "placeholder": "可以加入客服或统计代码",
       "field_name": "custom_html",
       "field_type": "textarea"
+    },
+    {
+      "label": "Imgbb API Key",
+      "placeholder": "工单图床上传密钥，留空则使用主题内置 Key",
+      "field_name": "imgbb_api_key",
+      "field_type": "input"
     }
   ]
 }
