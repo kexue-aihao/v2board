@@ -13,10 +13,17 @@
         // （值源 EZ-COGNITION/work/signature-identity.md §5.2「signature 四主色」，
         // 已替换冲压阶段的 modern 占位值）。default/black 同为墨色 #171717 是 identity
         // 文档原样映射（signature 的品牌身份即墨色 ink，石墨枚举与之同值）。
+        // 2026-08 主题色切换诊断修复：上一行 identity 原样映射被推翻——black 与 default
+        // 同值 #171717 使「石墨色」档位切了等于没切（后台四选一里有一档是死的）。black
+        // 改为石墨灰 #44403c（stone-700 系暖灰，与 signature 皮肤的暖石中性色
+        // secondaryText #57534e / border #d6d3d1 同族）：白字对它 10.27:1、作前景落
+        // 象牙底 #f8f7f2 9.58:1，均过 4.5:1 正文线；与墨色 default 1.75:1，明度差可感知。
+        // 暗色映射同步见下方 $signatureThemeColorsDark 与 baseConfig.js
+        // SIGNATURE_DARK_ACCENT_MAP（'#44403c' => '#a8a29e'，三处必须同表）。
         $signatureThemeColors = [
             'default' => '#171717',   // signature 默认墨色（sig-ink）
             'green' => '#287d73',     // 青绿色
-            'black' => '#171717',     // 石墨色（identity 原样与 default 同值）
+            'black' => '#44403c',     // 石墨色（2026-08 修复：原 #171717 与 default 同值，档位无效）
             'darkblue' => '#243b68',  // 深蓝色
         ];
         $signatureThemeColorKey = $theme_config['theme_color'] ?? 'default';
@@ -35,10 +42,14 @@
         // SIGNATURE_DARK_ACCENT_MAP 同步为 #2f9287/#5b81c8（墨字 4.77/4.63:1）。
         // 仅作首屏预热：useTheme.applyTheme 挂载后按 localStorage 实际主题以
         // inline style 覆盖，优先级更高，不冲突。
+        // 2026-08 主题色切换诊断修复：black 暗色随亮色新值 #44403c 独立映射为 #a8a29e
+        //（stone-400 系暖灰，作文字落暗底 #111110 7.49:1、上墨字 #171717 7.11:1，
+        // 与 default 暗色 #f5f5f4 拉开 2.31:1 明度差），与 baseConfig.js
+        // SIGNATURE_DARK_ACCENT_MAP 同表更新，原 black=>'#f5f5f4' 与 default 同值作废。
         $signatureThemeColorsDark = [
             'default' => '#f5f5f4',
             'green' => '#2f9287',
-            'black' => '#f5f5f4',
+            'black' => '#a8a29e',
             'darkblue' => '#5b81c8',
         ];
         $signatureThemeColorDark = $signatureThemeColorsDark[$signatureThemeColorKey];
