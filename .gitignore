@@ -1,4 +1,6 @@
 /node_modules
+# 主题源码只保留在本地，仓库只承载编译产物（public/theme/**，产物即真源；历史已于 2026-08-01 用 filter-repo 清除）
+/theme-src/
 /config/v2board.php
 /public/hot
 /public/storage
