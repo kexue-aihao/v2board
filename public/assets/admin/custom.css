@@ -1,20 +1,33 @@
-/* V2Board admin external theme: graphite, ivory and restrained gold. */
+/* V2Board 管理端 custom.css — 功能修复层（2026-08-02 起）。
+
+   本文件曾承载两套完整视觉体系（graphite/ivory/gold 外观层与 dense blue 控制台层，连同
+   登录页精修），应站长要求整体移除，管理端外观回归 umi.css(OneUI) + theme/<主题色>.css
+   的原生形态：侧栏、顶栏、按钮、表格、登录页的配色重新由「系统配置 → 前端主题色」驱动。
+   旧视觉层如需找回，看 git 历史里本文件 a34b407 及更早的版本。
+
+   保留下来的全部是功能性修复，逐段附因。删除时已核实过的三件事：
+   - .child_node 高亮回归 umi.css 原生的 .child_node{background:#eee}（原生规则实存，
+     父子节点区分不丢）；.v2board-copyright / .v2board-nav-mask / .v2board-auth-box /
+     .v2board-background 同样原生有完整样式；
+   - 移动端弹窗适配回归 components.chunk.css 内建的
+     @media(max-width:767px){.ant-modal{max-width:calc(100vw - 16px)}}；
+   - 旧文件的 .v2board-logo 规则未保留 —— umi.js 全文没有这个类名，本就是死选择器。
+
+   保留段用到的 --v2-* 令牌在下方重新定义：金色系令牌名照旧、值已中性化为灰阶 ——
+   改名会牵动工单工作台四十多处声明，风险大于收益。 */
 :root {
   --v2-ink: #111827;
-  --v2-ink-soft: #1f2937;
   --v2-ink-muted: #667085;
   --v2-text: #1d2939;
   --v2-text-soft: #475467;
   --v2-surface: #ffffff;
   --v2-surface-soft: #f8fafc;
-  --v2-surface-warm: #fcfaf6;
   --v2-border: #e4e7ec;
   --v2-border-strong: #cfd4dc;
-  --v2-gold: #b5893f;
-  --v2-gold-dark: #7a5b1e;
-  --v2-gold-deep: #5e4315;
-  --v2-gold-soft: #f6f0e6;
-  --v2-gold-line: #dfcda9;
+  --v2-gold: #98a2b3;
+  --v2-gold-dark: #344054;
+  --v2-gold-soft: #f2f4f7;
+  --v2-gold-line: #d0d5dd;
   --v2-success: #067647;
   --v2-success-soft: #ecfdf3;
   --v2-warning: #b54708;
@@ -27,739 +40,13 @@
   --v2-radius-md: 10px;
   --v2-radius-lg: 14px;
   --v2-shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
-  --v2-shadow-md: 0 8px 24px rgb(16 24 40 / 8%);
-  --v2-shadow-lg: 0 18px 48px rgb(16 24 40 / 14%);
   --v2-motion: 160ms ease;
 }
 
-html,
-body {
-  min-width: 320px;
-  color: var(--v2-text);
-  background: var(--v2-surface-soft);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
-  letter-spacing: 0;
-}
-
-body {
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-#root,
-#page-container {
-  min-height: 100%;
-}
-
-#page-container,
-#main-container {
-  background: var(--v2-surface-soft) !important;
-}
-
-#main-container {
-  color: var(--v2-text);
-}
-
-#main-container .content {
-  width: 100%;
-  padding-top: 30px;
-  padding-bottom: 42px;
-}
-
-/* Sidebar and header */
-#sidebar {
-  overflow: hidden;
-  background: var(--v2-ink) !important;
-  box-shadow: 10px 0 30px rgb(16 24 40 / 8%);
-}
-
-#sidebar .bg-header-dark,
-#sidebar .bg-sidebar-dark,
-#sidebar .content-header {
-  background: var(--v2-ink) !important;
-}
-
-#sidebar .content-header {
-  min-height: 68px;
-  border-bottom: 1px solid rgb(255 255 255 / 10%);
-}
-
-#sidebar .link-fx {
-  color: #fff !important;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: .01em;
-}
-
-#sidebar .text-white-75 {
-  color: rgb(255 255 255 / 92%) !important;
-}
-
-#sidebar .content-side {
-  padding-top: 18px;
-  background: var(--v2-ink) !important;
-}
-
-#sidebar .nav-main-heading {
-  margin-top: 20px;
-  padding: 0 18px 8px;
-  color: rgb(255 255 255 / 42%);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-}
-
-#sidebar .nav-main-heading:first-child {
-  margin-top: 0;
-}
-
-#sidebar .nav-main-item {
-  margin: 3px 12px;
-}
-
-#sidebar .nav-main-link {
-  min-height: 42px;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--v2-radius-sm);
-  color: rgb(255 255 255 / 68%) !important;
-  transition: color var(--v2-motion), background-color var(--v2-motion), transform var(--v2-motion);
-}
-
-#sidebar .nav-main-link:hover {
-  color: #fff !important;
-  background: rgb(255 255 255 / 8%) !important;
-  transform: translateX(2px);
-}
-
-#sidebar .nav-main-link.active {
-  color: #fff !important;
-  background: rgb(181 137 63 / 22%) !important;
-  box-shadow: inset 3px 0 0 var(--v2-gold);
-}
-
-#sidebar .nav-main-link-icon {
-  width: 20px;
-  color: rgb(255 255 255 / 46%);
-  text-align: center;
-  transition: color var(--v2-motion);
-}
-
-#sidebar .nav-main-link:hover .nav-main-link-icon,
-#sidebar .nav-main-link.active .nav-main-link-icon {
-  color: #e5c98d;
-}
-
-#sidebar .v2board-copyright {
-  color: rgb(255 255 255 / 42%);
-}
-
-#page-header {
-  z-index: 998;
-  min-height: 64px;
-  border-bottom: 1px solid var(--v2-border);
-  background: rgb(255 255 255 / 94%) !important;
-  box-shadow: 0 1px 8px rgb(16 24 40 / 4%);
-  backdrop-filter: blur(12px);
-}
-
-#page-header .content-header {
-  min-height: 64px;
-  padding-right: 28px;
-  padding-left: 28px;
-}
-
-#page-header .text-muted,
-#page-header .text-body-color,
-#page-header .text-black-50 {
-  color: var(--v2-ink-muted) !important;
-}
-
-#page-header a:not(.btn):hover {
-  color: var(--v2-gold-dark) !important;
-}
-
-/* Base surfaces and page headings */
-.bg-white,
-.bg-body-light,
-.bg-gray-lighter,
-.bg-light {
-  background-color: var(--v2-surface) !important;
-}
-
-.bg-body,
-.bg-body-dark {
-  background-color: var(--v2-surface-soft) !important;
-}
-
-.block {
-  margin-bottom: 20px;
-  border: 1px solid var(--v2-border);
-  border-radius: var(--v2-radius-lg);
-  background: var(--v2-surface);
-  box-shadow: var(--v2-shadow-sm);
-}
-
-.block.block-rounded,
-.block.block-transparent {
-  border-radius: var(--v2-radius-lg);
-}
-
-.block-header {
-  min-height: 58px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--v2-border);
-  background: var(--v2-surface);
-}
-
-.block-header h1,
-.block-header h2,
-.block-header h3,
-.block-header h4,
-.block-title {
-  margin-bottom: 0;
-  color: var(--v2-text);
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.block-content {
-  padding: 22px 20px;
-}
-
-.block-content-full {
-  padding: 22px 20px;
-}
-
-.content-heading {
-  margin-bottom: 22px;
-  color: var(--v2-text);
-  font-size: 24px;
-  font-weight: 700;
-}
-
-.content-header h1,
-.content-header h2,
-.content-header h3,
-.content-header h4 {
-  color: var(--v2-text);
-}
-
-.text-muted,
-.text-black-50,
-.text-body-color {
-  color: var(--v2-text-soft) !important;
-}
-
-a {
-  color: var(--v2-gold-dark);
-}
-
-a:hover {
-  color: var(--v2-gold-deep);
-}
-
-/* Buttons */
-.btn,
-.ant-btn {
-  min-height: 38px;
-  padding-right: 15px;
-  padding-left: 15px;
-  border-radius: var(--v2-radius-sm) !important;
-  font-weight: 600;
-  transition: color var(--v2-motion), background-color var(--v2-motion), border-color var(--v2-motion), box-shadow var(--v2-motion), transform var(--v2-motion);
-}
-
-.btn:hover:not(:disabled),
-.ant-btn:hover:not([disabled]) {
-  transform: translateY(-1px);
-}
-
-.btn-primary,
-.ant-btn-primary {
-  border-color: var(--v2-gold-dark) !important;
-  color: #fff !important;
-  background: var(--v2-gold-dark) !important;
-  box-shadow: 0 2px 5px rgb(122 91 30 / 18%);
-}
-
-.btn-primary:hover:not(:disabled),
-.btn-primary:focus:not(:disabled),
-.ant-btn-primary:hover:not([disabled]),
-.ant-btn-primary:focus:not([disabled]) {
-  border-color: var(--v2-gold-deep) !important;
-  background: var(--v2-gold-deep) !important;
-  box-shadow: 0 4px 10px rgb(122 91 30 / 24%);
-}
-
-.btn-light,
-.btn-secondary,
-.ant-btn-default,
-.ant-btn:not(.ant-btn-primary):not(.ant-btn-danger) {
-  border-color: var(--v2-border-strong) !important;
-  color: var(--v2-text) !important;
-  background: var(--v2-surface) !important;
-}
-
-.btn-light:hover:not(:disabled),
-.btn-secondary:hover:not(:disabled),
-.ant-btn-default:hover:not([disabled]),
-.ant-btn:not(.ant-btn-primary):not(.ant-btn-danger):hover:not([disabled]) {
-  border-color: var(--v2-gold) !important;
-  color: var(--v2-gold-deep) !important;
-  background: var(--v2-gold-soft) !important;
-}
-
-.btn-danger,
-.ant-btn-danger {
-  border-color: var(--v2-danger) !important;
-  color: #fff !important;
-  background: var(--v2-danger) !important;
-}
-
-.btn:disabled,
-.ant-btn[disabled],
-.ant-btn-disabled {
-  opacity: .55;
-  cursor: not-allowed;
-  transform: none !important;
-}
-
-/* Form controls */
-.form-control,
-.ant-input,
-.ant-input-affix-wrapper,
-.ant-select-selection,
-.ant-select-selection--single,
-.ant-picker,
-.ant-input-number,
-.ant-input-number-input {
-  min-height: 40px;
-  border: 1px solid var(--v2-border-strong) !important;
-  border-radius: var(--v2-radius-sm) !important;
-  color: var(--v2-text) !important;
-  background: var(--v2-surface) !important;
-  box-shadow: none !important;
-  transition: border-color var(--v2-motion), box-shadow var(--v2-motion), background-color var(--v2-motion);
-}
-
-.form-control,
-.ant-input,
-.ant-input-affix-wrapper,
-.ant-select-selection--single,
-.ant-picker {
-  padding: 8px 12px;
-}
-
-textarea.form-control,
-textarea.ant-input {
-  min-height: 96px;
-  line-height: 1.6;
-}
-
-.form-control::placeholder,
-.ant-input::placeholder {
-  color: #98a2b3;
-}
-
-.form-control:focus,
-.ant-input:focus,
-.ant-input-affix-wrapper-focused,
-.ant-select-focused .ant-select-selection,
-.ant-picker-focused,
-.ant-input-number-focused {
-  border-color: var(--v2-gold) !important;
-  box-shadow: 0 0 0 3px rgb(181 137 63 / 18%) !important;
-  outline: 0;
-}
-
-.form-group label,
-.ant-form-item-label > label {
-  color: var(--v2-text);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.custom-control-input:checked ~ .custom-control-label::before,
-.ant-checkbox-checked .ant-checkbox-inner,
-.ant-radio-checked .ant-radio-inner::after {
-  border-color: var(--v2-gold-dark) !important;
-  background-color: var(--v2-gold-dark) !important;
-}
-
-.custom-control-input:focus ~ .custom-control-label::before,
-.ant-checkbox-input:focus + .ant-checkbox-inner,
-.ant-radio-input:focus + .ant-radio-inner {
-  box-shadow: 0 0 0 3px rgb(181 137 63 / 18%);
-}
-
-/* Tables, tags and data states */
-.table,
-.ant-table {
-  color: var(--v2-text);
-  background: var(--v2-surface);
-}
-
-.table thead th,
-.ant-table-thead > tr > th {
-  padding-top: 13px;
-  padding-bottom: 13px;
-  border-bottom: 1px solid var(--v2-border) !important;
-  color: var(--v2-text-soft);
-  background: var(--v2-surface-soft) !important;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-.table td,
-.table th,
-.ant-table-tbody > tr > td {
-  padding: 13px 14px;
-  border-top-color: var(--v2-border) !important;
-  vertical-align: middle;
-}
-
-.table-hover tbody tr:hover,
-.ant-table-tbody > tr:hover > td {
-  color: var(--v2-text);
-  background: var(--v2-surface-warm) !important;
-}
-
-.ant-table-wrapper,
-.table-responsive,
-.v2board-table {
-  max-width: 100%;
-  overflow-x: auto;
-}
-
-.badge,
-.ant-tag {
-  min-height: 23px;
-  padding: 3px 9px;
-  border: 1px solid var(--v2-border);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.badge-primary,
-.ant-tag-blue,
-.ant-tag-geekblue {
-  border-color: #b2ddff;
-  color: var(--v2-info);
-  background: var(--v2-info-soft);
-}
-
-.badge-success,
-.ant-tag-green {
-  border-color: #abefc6;
-  color: var(--v2-success);
-  background: var(--v2-success-soft);
-}
-
-.badge-warning,
-.ant-tag-orange,
-.ant-tag-gold {
-  border-color: #fedf89;
-  color: var(--v2-warning);
-  background: var(--v2-warning-soft);
-}
-
-.badge-danger,
-.ant-tag-red {
-  border-color: #fecdca;
-  color: var(--v2-danger);
-  background: var(--v2-danger-soft);
-}
-
-.alert,
-.ant-alert {
-  border: 1px solid var(--v2-border);
-  border-radius: var(--v2-radius-md);
-}
-
-.alert-warning,
-.ant-alert-warning {
-  border-color: #fedf89;
-  color: var(--v2-warning);
-  background: var(--v2-warning-soft);
-}
-
-.alert-danger,
-.ant-alert-error {
-  border-color: #fecdca;
-  color: var(--v2-danger);
-  background: var(--v2-danger-soft);
-}
-
-.alert-success,
-.ant-alert-success {
-  border-color: #abefc6;
-  color: var(--v2-success);
-  background: var(--v2-success-soft);
-}
-
-/* Tabs, pagination and overlays */
-.nav-tabs,
-.ant-tabs-bar {
-  border-bottom-color: var(--v2-border) !important;
-}
-
-.nav-tabs .nav-link,
-.ant-tabs-tab {
-  color: var(--v2-text-soft);
-  transition: color var(--v2-motion), border-color var(--v2-motion);
-}
-
-.nav-tabs .nav-link:hover,
-.nav-tabs .nav-link.active,
-.ant-tabs-tab:hover,
-.ant-tabs-tab-active {
-  border-color: var(--v2-gold) !important;
-  color: var(--v2-gold-deep) !important;
-}
-
-.ant-tabs-ink-bar {
-  background: var(--v2-gold) !important;
-}
-
-.pagination .page-link,
-.ant-pagination-item,
-.ant-pagination-prev,
-.ant-pagination-next {
-  min-width: 32px;
-  min-height: 32px;
-  border-color: var(--v2-border);
-  border-radius: var(--v2-radius-sm);
-  color: var(--v2-text-soft);
-  background: var(--v2-surface);
-}
-
-.pagination .page-item.active .page-link,
-.ant-pagination-item-active {
-  border-color: var(--v2-gold-dark) !important;
-  color: #fff !important;
-  background: var(--v2-gold-dark) !important;
-}
-
-.ant-modal-content,
-.ant-drawer-content,
-.ant-dropdown-menu,
-.ant-popover-inner {
-  border: 1px solid var(--v2-border);
-  border-radius: var(--v2-radius-lg);
-  background: var(--v2-surface);
-  box-shadow: var(--v2-shadow-lg);
-}
-
-.ant-modal-header,
-.ant-drawer-header {
-  border-bottom: 1px solid var(--v2-border);
-  border-radius: var(--v2-radius-lg) var(--v2-radius-lg) 0 0;
-  background: var(--v2-surface);
-}
-
-.ant-modal-title,
-.ant-drawer-title {
-  color: var(--v2-text);
-  font-weight: 700;
-}
-
-.ant-modal-footer,
-.ant-drawer-footer {
-  border-top: 1px solid var(--v2-border);
-  background: var(--v2-surface-soft);
-}
-
-.ant-dropdown-menu-item:hover,
-.ant-dropdown-menu-submenu-title:hover {
-  color: var(--v2-gold-deep);
-  background: var(--v2-gold-soft);
-}
-
-/* Authentication */
-.v2board-background {
-  opacity: .12;
-  filter: saturate(.65);
-}
-
-.v2board-auth-box {
-  padding: 24px 16px;
-}
-
-.v2board-auth-box .block {
-  overflow: hidden;
-  border: 1px solid var(--v2-border);
-  border-radius: var(--v2-radius-lg);
-  box-shadow: var(--v2-shadow-lg) !important;
-}
-
-.v2board-auth-box .block-content {
-  padding: 34px 32px 28px;
-}
-
-.v2board-auth-box .block-content > .mb-3:first-child {
-  padding-bottom: 22px;
-  border-bottom: 1px solid var(--v2-border);
-}
-
-.v2board-auth-box .text-dark {
-  color: var(--v2-ink) !important;
-  font-weight: 800;
-}
-
-.v2board-auth-box .font-size-h1 {
-  letter-spacing: .01em;
-}
-
-.v2board-auth-box .text-center.bg-gray-lighter {
-  color: var(--v2-text-soft);
-  border-top: 1px solid var(--v2-border);
-  background: var(--v2-surface-warm) !important;
-}
-
-.v2board-logo {
-  max-width: 180px;
-  max-height: 64px;
-  object-fit: contain;
-}
-
-/* Code editors and traffic/node panels */
-#ace-editor,
-.ace_editor {
-  border: 1px solid var(--v2-border);
-  border-radius: var(--v2-radius-md);
-}
-
-/* .v2board-node_mobile 已删：umi.js 输出的类名是 v2board_node_mobile（下划线），
-   这个连字符版本从来没匹配到任何元素。但也不要改成下划线版 —— .child_node 本来就同时
-   挂在移动端 List.Item 上，子节点高亮已经生效；加上下划线版会把暖色底打到每一张节点
-   卡片，反而抹掉父子区分。 */
-.child_node {
-  border-color: var(--v2-border) !important;
-  background: var(--v2-surface-warm) !important;
-}
-
-.v2board-stats-bar {
-  scrollbar-color: var(--v2-gold-line) transparent;
-}
-
-/* Keyboard focus and motion preferences */
-:focus-visible {
-  outline: 3px solid rgb(181 137 63 / 52%) !important;
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    transition-duration: .01ms !important;
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-  }
-}
-
-@media (max-width: 991.98px) {
-  #page-header .content-header {
-    padding-right: 18px;
-    padding-left: 18px;
-  }
-
-  #main-container .content {
-    padding-top: 22px;
-  }
-
-  .block-header,
-  .block-content,
-  .block-content-full {
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-}
-
-@media (max-width: 767.98px) {
-  #main-container .content {
-    padding: 18px 12px 30px;
-  }
-
-  .content-heading {
-    margin-bottom: 16px;
-    font-size: 21px;
-  }
-
-  .block {
-    margin-bottom: 14px;
-    border-radius: var(--v2-radius-md);
-  }
-
-  .block-header {
-    min-height: 52px;
-    padding-top: 13px;
-    padding-bottom: 13px;
-  }
-
-  .block-content,
-  .block-content-full {
-    padding-top: 17px;
-    padding-bottom: 17px;
-  }
-
-  .v2board-auth-box .block-content {
-    padding: 26px 20px 22px;
-  }
-
-  .v2board-auth-box {
-    padding: 16px 10px;
-  }
-
-  .ant-drawer-content-wrapper {
-    width: 100% !important;
-  }
-
-  .ant-modal {
-    max-width: calc(100vw - 24px);
-    margin: 12px auto;
-  }
-
-  .ant-modal-content,
-  .ant-drawer-content {
-    border-radius: var(--v2-radius-md);
-  }
-
-  .table-responsive,
-  .ant-table-wrapper,
-  .v2board-table {
-    margin-right: -16px;
-    margin-left: -16px;
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-}
-
-@media (max-width: 420px) {
-  #page-header .content-header {
-    padding-right: 12px;
-    padding-left: 12px;
-  }
-
-  .btn,
-  .ant-btn {
-    min-height: 36px;
-    padding-right: 11px;
-    padding-left: 11px;
-  }
-
-  .v2board-auth-box .form-control {
-    min-height: 42px;
-  }
-}
-
-/* Embedded ticket workspace */
+/* Embedded ticket workspace（功能布局，保留）。
+   工单页的「列表 + 会话」双栏工作台是 umi.js 补丁渲染的自有 DOM（v2-ticket-* 类只在
+   本文件有样式），删掉这段整页布局即散架。原金色点缀已随视觉体系一并中性化：改动只有
+   上方令牌值与本段两处写死的金色 rgb()，选择器与盒模型一字未动。 */
 .v2-ticket-workspace {
   display: grid;
   grid-template-columns: minmax(360px, 38%) minmax(0, 1fr);
@@ -963,7 +250,7 @@ textarea.ant-input {
   overflow-wrap: anywhere;
   color: var(--v2-gold-dark);
   text-decoration: underline;
-  text-decoration-color: rgb(181 137 63 / 35%);
+  text-decoration-color: rgb(52 64 84 / 35%);
   text-underline-offset: 2px;
 }
 
@@ -1017,7 +304,7 @@ textarea.ant-input {
 .v2-ticket-composer-input:focus {
   border-color: var(--v2-gold);
   background: var(--v2-surface);
-  box-shadow: 0 0 0 3px rgb(181 137 63 / 14%);
+  box-shadow: 0 0 0 3px rgb(152 162 179 / 25%);
 }
 
 .v2-ticket-send {
@@ -1177,720 +464,17 @@ textarea.ant-input {
   }
 }
 
-/* Login page refinement */
-#page-container:has(.v2board-auth-box) {
-  position: relative;
-  overflow: hidden;
-  background: #eef2f5 !important;
-}
-
-#page-container:has(.v2board-auth-box)::before {
-  position: fixed;
-  z-index: 0;
-  inset: 0;
-  pointer-events: none;
-  content: "";
-  background:
-    linear-gradient(120deg, rgb(23 38 59 / 7%), transparent 40%),
-    repeating-linear-gradient(90deg, rgb(23 38 59 / 3%) 0 1px, transparent 1px 84px),
-    repeating-linear-gradient(0deg, rgb(23 38 59 / 2.5%) 0 1px, transparent 1px 84px);
-}
-
-#page-container:has(.v2board-auth-box)::after {
-  position: fixed;
-  z-index: 0;
-  top: 0;
-  right: 0;
-  width: 42vw;
-  height: 5px;
-  pointer-events: none;
-  content: "";
-  background: var(--v2-gold);
-  opacity: .9;
-}
-
-#page-container:has(.v2board-auth-box) #main-container {
-  position: relative;
-  z-index: 1;
-  min-height: 100vh;
-  background: transparent !important;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-background {
-  z-index: -1;
-  opacity: .18;
-  filter: saturate(.55) contrast(.95);
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box {
-  z-index: 2;
-  padding: 32px 18px;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box > div {
-  max-width: 460px !important;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .block {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid rgb(23 38 59 / 10%);
-  border-radius: 18px;
-  background: rgb(255 255 255 / 96%);
-  box-shadow: 0 24px 70px rgb(23 38 59 / 16%), 0 3px 12px rgb(23 38 59 / 6%) !important;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .block::before {
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 4px;
-  content: "";
-  background: var(--v2-gold);
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .block-content {
-  padding: 42px 40px 34px;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .block-content > .mb-3:first-child {
-  padding-bottom: 28px;
-  border-bottom: 0;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .font-size-h1 {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  color: var(--v2-ink) !important;
-  font-size: 28px;
-  font-weight: 800;
-  line-height: 1.15;
-  letter-spacing: .01em;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .font-size-h1::before {
-  width: 46px;
-  height: 46px;
-  border: 1px solid rgb(255 255 255 / 18%);
-  border-radius: 13px;
-  content: "V2";
-  color: #fff;
-  background: var(--v2-ink);
-  box-shadow: 0 8px 16px rgb(23 38 59 / 18%);
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 44px;
-  letter-spacing: .04em;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .font-size-sm {
-  color: var(--v2-ink-muted) !important;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .text-center > p {
-  margin-bottom: 0;
-  color: var(--v2-ink-muted) !important;
-  font-size: 13px;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .form-group {
-  margin-bottom: 14px;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .form-control {
-  min-height: 50px;
-  padding: 13px 16px;
-  border: 1px solid #d8e0e7 !important;
-  border-radius: 9px !important;
-  color: var(--v2-ink) !important;
-  background: #f8fafc !important;
-  font-size: 14px;
-  box-shadow: inset 0 1px 1px rgb(23 38 59 / 2%) !important;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .form-control:hover {
-  border-color: #b9c5d0 !important;
-  background: #fff !important;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .form-control:focus {
-  border-color: var(--v2-gold) !important;
-  background: #fff !important;
-  box-shadow: 0 0 0 4px rgb(181 137 63 / 13%), 0 3px 10px rgb(23 38 59 / 5%) !important;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .form-control::placeholder {
-  color: #9aa7b5;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .btn-primary {
-  min-height: 50px;
-  margin-top: 4px;
-  border: 1px solid var(--v2-ink) !important;
-  border-radius: 9px !important;
-  color: #fff !important;
-  background: var(--v2-ink) !important;
-  box-shadow: 0 8px 16px rgb(23 38 59 / 16%);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: .04em;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .btn-primary:hover:not(:disabled),
-#page-container:has(.v2board-auth-box) .v2board-auth-box .btn-primary:focus:not(:disabled) {
-  border-color: var(--v2-gold-deep) !important;
-  background: var(--v2-gold-deep) !important;
-  box-shadow: 0 10px 20px rgb(94 67 21 / 22%);
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .text-center.bg-gray-lighter {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 58px;
-  padding: 15px 24px;
-  border-top: 1px solid #edf0f2;
-  background: #fbfcfd !important;
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .text-center.bg-gray-lighter a {
-  color: var(--v2-text-soft) !important;
-  font-size: 13px;
-  transition: color var(--v2-motion);
-}
-
-#page-container:has(.v2board-auth-box) .v2board-auth-box .text-center.bg-gray-lighter a:hover {
-  color: var(--v2-gold-deep) !important;
-}
-
-@media (max-width: 767.98px) {
-  #page-container:has(.v2board-auth-box) .v2board-auth-box {
-    padding: 20px 12px;
-  }
-
-  #page-container:has(.v2board-auth-box) .v2board-auth-box .block-content {
-    padding: 34px 24px 28px;
-  }
-}
-
-@media (max-width: 420px) {
-  #page-container:has(.v2board-auth-box) .v2board-auth-box {
-    padding: 14px 8px;
-  }
-
-  #page-container:has(.v2board-auth-box) .v2board-auth-box .block-content {
-    padding: 30px 18px 24px;
-  }
-}
-
-/* Admin console UI system: dense, calm and data-first. */
-#page-container:not(:has(.v2board-auth-box)) {
-  --admin-bg: #f5f7fa;
-  --admin-surface: #fff;
-  --admin-surface-subtle: #f8fafc;
-  --admin-ink: #111827;
-  --admin-ink-soft: #344054;
-  --admin-muted: #667085;
-  --admin-border: #e4e7ec;
-  --admin-border-strong: #cfd4dc;
-  --admin-primary: #2563eb;
-  --admin-primary-soft: #eff6ff;
-  --admin-accent: #b5893f;
-  --admin-success: #067647;
-  --admin-success-soft: #ecfdf3;
-  --admin-warning: #b54708;
-  --admin-warning-soft: #fffaeb;
-  --admin-danger: #b42318;
-  --admin-danger-soft: #fef3f2;
-  --admin-radius-sm: 6px;
-  --admin-radius-md: 10px;
-  --admin-radius-lg: 12px;
-  --admin-shadow-sm: 0 1px 2px rgb(16 24 40 / 5%);
-  --admin-shadow-md: 0 8px 22px rgb(16 24 40 / 7%);
-  --admin-motion: 180ms ease-out;
-}
-
-#page-container:not(:has(.v2board-auth-box)),
-#page-container:not(:has(.v2board-auth-box)) #main-container {
-  background: var(--admin-bg) !important;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container {
-  min-height: 100vh;
-  color: var(--admin-ink);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .content {
-  width: min(100%, 1600px);
-  margin: 0 auto;
-  padding: 24px 28px 40px;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .content > .row {
-  row-gap: 16px;
-}
-
-/* Sidebar */
-#page-container:not(:has(.v2board-auth-box)) #sidebar {
-  width: 240px;
-  border-right: 1px solid rgb(255 255 255 / 7%);
-  background: var(--admin-ink) !important;
-  box-shadow: 8px 0 24px rgb(16 24 40 / 8%);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .content-header {
-  min-height: 64px;
-  padding: 0 22px;
-  border-bottom: 1px solid rgb(255 255 255 / 9%);
-  background: var(--admin-ink) !important;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .link-fx {
-  color: #f8fafc !important;
-  font-size: 16px;
-  font-weight: 750;
-  letter-spacing: 0;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .content-side {
-  padding: 14px 0 20px;
-  background: var(--admin-ink) !important;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-heading {
-  margin: 20px 18px 7px;
-  padding: 0 10px 0;
-  color: rgb(255 255 255 / 42%);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .12em;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-item {
-  margin: 2px 10px;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link {
-  position: relative;
-  min-height: 44px;
-  gap: 10px;
-  padding: 11px 12px;
-  border-radius: var(--admin-radius-sm);
-  color: rgb(255 255 255 / 68%) !important;
-  transition: color var(--admin-motion), background-color var(--admin-motion), box-shadow var(--admin-motion);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link:hover {
-  color: #fff !important;
-  background: rgb(255 255 255 / 7%) !important;
-  transform: none;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link.active {
-  color: #fff !important;
-  background: rgb(181 137 63 / 16%) !important;
-  box-shadow: inset 3px 0 0 var(--admin-accent);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link-icon {
-  width: 20px;
-  color: rgb(255 255 255 / 46%);
-  font-size: 17px;
-  text-align: center;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link:hover .nav-main-link-icon,
-#page-container:not(:has(.v2board-auth-box)) #sidebar .nav-main-link.active .nav-main-link-icon {
-  color: #e5c98d;
-}
-
-/* Header */
-#page-container:not(:has(.v2board-auth-box)) #page-header {
-  min-height: 64px;
-  border-bottom: 1px solid var(--admin-border);
-  background: rgb(255 255 255 / 94%) !important;
-  box-shadow: 0 1px 10px rgb(16 24 40 / 4%);
-  backdrop-filter: blur(12px);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #page-header .content-header {
-  min-height: 64px;
-  padding: 12px 28px;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #page-header .btn,
-#page-container:not(:has(.v2board-auth-box)) #page-header .ant-btn,
-#page-container:not(:has(.v2board-auth-box)) #page-header a[role="button"] {
-  min-width: 40px;
-  min-height: 40px;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #page-header .text-muted,
-#page-container:not(:has(.v2board-auth-box)) #page-header .text-body-color,
-#page-container:not(:has(.v2board-auth-box)) #page-header .text-black-50 {
-  color: var(--admin-muted) !important;
-}
-
-/* Sections and cards */
-#page-container:not(:has(.v2board-auth-box)) #main-container .block {
-  margin-bottom: 16px;
-  border: 1px solid var(--admin-border);
-  border-radius: var(--admin-radius-lg);
-  background: var(--admin-surface);
-  box-shadow: var(--admin-shadow-sm);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .block:hover {
-  box-shadow: var(--admin-shadow-md);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .block-header {
-  min-height: 54px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--admin-border);
-  background: var(--admin-surface);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .block-title,
-#page-container:not(:has(.v2board-auth-box)) #main-container .block-header h1,
-#page-container:not(:has(.v2board-auth-box)) #main-container .block-header h2,
-#page-container:not(:has(.v2board-auth-box)) #main-container .block-header h3,
-#page-container:not(:has(.v2board-auth-box)) #main-container .block-header h4 {
-  color: var(--admin-ink);
-  font-size: 15px;
-  font-weight: 700;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .block-content,
-#page-container:not(:has(.v2board-auth-box)) #main-container .block-content-full {
-  padding: 20px;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .content-heading {
-  margin-bottom: 20px;
-  color: var(--admin-ink);
-  font-size: 22px;
-  font-weight: 750;
-  line-height: 1.3;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .content-heading small,
-#page-container:not(:has(.v2board-auth-box)) #main-container .text-muted,
-#page-container:not(:has(.v2board-auth-box)) #main-container .text-black-50,
-#page-container:not(:has(.v2board-auth-box)) #main-container .text-body-color {
-  color: var(--admin-muted) !important;
-}
-
-/* Metrics and dashboard data */
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-statistic,
-#page-container:not(:has(.v2board-auth-box)) #main-container [class*="stat"] {
-  color: var(--admin-ink);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-statistic-title {
-  margin-bottom: 8px;
-  color: var(--admin-muted);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-statistic-content,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-statistic-content-value {
-  color: var(--admin-ink);
-  font-variant-numeric: tabular-nums;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container canvas {
-  max-width: 100%;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card-bordered {
-  border-color: var(--admin-border);
-  border-radius: var(--admin-radius-lg);
-  box-shadow: var(--admin-shadow-sm);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card-head {
-  min-height: 54px;
-  padding: 0 20px;
-  border-bottom-color: var(--admin-border);
-  color: var(--admin-ink);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card-head-title {
-  color: var(--admin-ink);
-  font-size: 15px;
-  font-weight: 700;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-card-body {
-  padding: 20px;
-}
-
-/* Buttons and controls */
-#page-container:not(:has(.v2board-auth-box)) #main-container .btn,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn {
-  min-height: 40px;
-  border-radius: var(--admin-radius-sm) !important;
-  font-weight: 600;
-  transition: color var(--admin-motion), background-color var(--admin-motion), border-color var(--admin-motion), box-shadow var(--admin-motion), transform var(--admin-motion);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .btn:hover:not(:disabled),
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn:hover:not([disabled]) {
-  transform: translateY(-1px);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .btn-primary,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-primary {
-  border-color: var(--admin-primary) !important;
-  color: #fff !important;
-  background: var(--admin-primary) !important;
-  box-shadow: 0 3px 8px rgb(37 99 235 / 18%);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .btn-primary:hover:not(:disabled),
-#page-container:not(:has(.v2board-auth-box)) #main-container .btn-primary:focus:not(:disabled),
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-primary:hover:not([disabled]),
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-primary:focus:not([disabled]) {
-  border-color: #1d4ed8 !important;
-  background: #1d4ed8 !important;
-  box-shadow: 0 5px 12px rgb(37 99 235 / 24%);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .btn-light,
-#page-container:not(:has(.v2board-auth-box)) #main-container .btn-secondary,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-default {
-  border-color: var(--admin-border-strong) !important;
-  color: var(--admin-ink-soft) !important;
-  background: var(--admin-surface) !important;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .btn-light:hover:not(:disabled),
-#page-container:not(:has(.v2board-auth-box)) #main-container .btn-secondary:hover:not(:disabled),
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn-default:hover:not([disabled]) {
-  border-color: #93b4f4 !important;
-  color: #1d4ed8 !important;
-  background: var(--admin-primary-soft) !important;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .form-control,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input-affix-wrapper,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-select-selection,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-picker,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input-number {
-  min-height: 40px;
-  border-color: var(--admin-border-strong) !important;
-  border-radius: var(--admin-radius-sm) !important;
-  color: var(--admin-ink) !important;
-  background: var(--admin-surface) !important;
-  box-shadow: none !important;
-  transition: border-color var(--admin-motion), box-shadow var(--admin-motion), background-color var(--admin-motion);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .form-control:focus,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input:focus,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input-affix-wrapper-focused,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-select-focused .ant-select-selection,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-picker-focused,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-input-number-focused {
-  border-color: var(--admin-primary) !important;
-  box-shadow: 0 0 0 3px rgb(37 99 235 / 14%) !important;
-  outline: 0;
-}
-
-/* Tables, tags and feedback */
-#page-container:not(:has(.v2board-auth-box)) #main-container .table,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table {
-  color: var(--admin-ink-soft);
-  background: var(--admin-surface);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .table thead th,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-thead > tr > th {
-  height: 44px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--admin-border) !important;
-  color: var(--admin-muted);
-  background: var(--admin-surface-subtle) !important;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .table td,
-#page-container:not(:has(.v2board-auth-box)) #main-container .table th,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-tbody > tr > td {
-  min-height: 48px;
-  padding: 12px 14px;
-  border-top-color: var(--admin-border) !important;
-  vertical-align: middle;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .table-hover tbody tr:hover,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-tbody > tr:hover > td {
-  color: var(--admin-ink);
-  background: #f8fbff !important;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .badge,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag {
-  min-height: 24px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .badge-success,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag-green {
-  border-color: #abefc6;
-  color: var(--admin-success);
-  background: var(--admin-success-soft);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .badge-warning,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag-orange,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag-gold {
-  border-color: #fedf89;
-  color: var(--admin-warning);
-  background: var(--admin-warning-soft);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .badge-danger,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-tag-red {
-  border-color: #fecdca;
-  color: var(--admin-danger);
-  background: var(--admin-danger-soft);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .alert,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-alert {
-  border-radius: var(--admin-radius-md);
-}
-
-/* Overlays and keyboard states */
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-modal-content,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-drawer-content,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-dropdown-menu,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-popover-inner {
-  border: 1px solid var(--admin-border);
-  border-radius: var(--admin-radius-lg);
-  box-shadow: 0 18px 48px rgb(16 24 40 / 14%);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-dropdown-menu-item:hover,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-dropdown-menu-submenu-title:hover {
-  color: #1d4ed8;
-  background: var(--admin-primary-soft);
-}
-
-#page-container:not(:has(.v2board-auth-box)) :focus-visible {
-  outline: 3px solid rgb(37 99 235 / 36%) !important;
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  #page-container:not(:has(.v2board-auth-box)) *,
-  #page-container:not(:has(.v2board-auth-box)) *::before,
-  #page-container:not(:has(.v2board-auth-box)) *::after {
-    scroll-behavior: auto !important;
-    transition-duration: .01ms !important;
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-  }
-}
-
-@media (max-width: 1199.98px) {
-  #page-container:not(:has(.v2board-auth-box)) #main-container .content {
-    padding-right: 20px;
-    padding-left: 20px;
-  }
-}
-
-@media (max-width: 991.98px) {
-  #page-container:not(:has(.v2board-auth-box)) #main-container .content {
-    padding-top: 20px;
-    padding-bottom: 32px;
-  }
-
-  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content,
-  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content-full {
-    padding: 18px;
-  }
-}
-
-@media (max-width: 767.98px) {
-  #page-container:not(:has(.v2board-auth-box)) #main-container .content {
-    padding: 16px 12px 28px;
-  }
-
-  #page-container:not(:has(.v2board-auth-box)) #page-header .content-header {
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-
-  #page-container:not(:has(.v2board-auth-box)) #main-container .block {
-    margin-bottom: 12px;
-    border-radius: var(--admin-radius-md);
-  }
-
-  #page-container:not(:has(.v2board-auth-box)) #main-container .block-header {
-    min-height: 50px;
-    padding: 14px 16px;
-  }
-
-  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content,
-  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content-full {
-    padding: 16px;
-  }
-
-  #page-container:not(:has(.v2board-auth-box)) #main-container .table-responsive,
-  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-wrapper {
-    margin-right: -16px;
-    margin-left: -16px;
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-}
-
-@media (max-width: 420px) {
-  #page-container:not(:has(.v2board-auth-box)) #main-container .content {
-    padding-right: 10px;
-    padding-left: 10px;
-  }
-
-  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content,
-  #page-container:not(:has(.v2board-auth-box)) #main-container .block-content-full {
-    padding: 14px;
-  }
-
-  #page-container:not(:has(.v2board-auth-box)) #main-container .btn,
-  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-btn {
-    min-height: 44px;
-  }
-}
-
-/* 手工补丁：放开捏合缩放之后唯一真实的新增退化 —— antd 的成功/失败提示会跑到可视区外。
-   components.chunk.css 把 .ant-message 定成 position:fixed;top:16px;left:0;width:100%，
-   而 position:fixed 定位在「布局视口」，捏合缩放只移动「可视视口」：放大后往下翻表格时，
-   顶部那条约 16-60px 的提示带整块落在可视区之外，用户看不到「保存成功／失败」，3 秒后
-   自动消失。纯 CSS 无法让元素跟随可视视口（那要监听 visualViewport 事件，只能改 JS），
-   但挪到布局视口的垂直正中可以把最坏情况兜住：2 倍缩放下可视视口正好是布局视口的一半，
-   无论怎么平移都必然包含中心点；贴顶那条窄带只有约 10-15%。
-
-   作用域只能挂在 body 上。antd 的 message 经 rc-notification 挂到 document.body，不在
-   #page-container 里面，所以本文件 1388 行起统一使用的
-   #page-container:not(:has(.v2board-auth-box)) 前缀对它完全无效 —— 本文件 1778-1791 行
-   给 .ant-modal-content / .ant-dropdown-menu 加的同款前缀就是这么失效的（那批 overlay
-   同样 portal 到 body），别重复那个错。
+/* 手工补丁（保留）：放开捏合缩放之后唯一真实的新增退化 —— antd 的成功/失败提示会跑到
+   可视区外。components.chunk.css 把 .ant-message 定成 position:fixed;top:16px;left:0;
+   width:100%，而 position:fixed 定位在「布局视口」，捏合缩放只移动「可视视口」：放大后
+   往下翻表格时，顶部那条约 16-60px 的提示带整块落在可视区之外，用户看不到「保存成功／
+   失败」，3 秒后自动消失。纯 CSS 无法让元素跟随可视视口（那要监听 visualViewport 事件，
+   只能改 JS），但挪到布局视口的垂直正中可以把最坏情况兜住：2 倍缩放下可视视口正好是布局
+   视口的一半，无论怎么平移都必然包含中心点；贴顶那条窄带只有约 10-15%。
+
+   作用域只能挂在 body 上。antd 的 message 经 rc-notification 挂到 document.body，
+   任何 #page-container 前缀都轮不到它 —— portal 到 body 的弹层一律如此，改这段时
+   别把前缀加回去。
 
    也不能写成 body:has(#page-container:not(:has(...)))：:has() 不允许嵌套在 :has() 里面，
    那样整条规则会被当成语法错误整块丢弃。这里只用一层 :has()。
@@ -1924,33 +508,39 @@ textarea.ant-input {
 }
 
 /* ==========================================================================
-   移动端表格档 + 三个既有 bug 修复
-   作用域沿用本文件 1388 行起的约定：#page-container:not(:has(.v2board-auth-box))
-   [+ #main-container]。裸选择器打不过 1714 / 1730 已锁死的 12px 14px 与 height:44px。
+   移动端表格档（保留，功能版）
+   视觉体系删除后，这里只保留纯功能的六段；原「撤销出血」段随出血规则一并消失（出血
+   本来就是视觉层自己加的），原「overflow-x:clip 降级」段失去对象（已无任何规则把
+   .ant-table-wrapper 变成滚动容器）。
+   作用域沿用 #page-container:not(:has(.v2board-auth-box))[ + #main-container]，
+   既排除登录页，也保证双 id 特异性能压过 umi.css 的裸类规则。
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
-   1) 尺寸变量
-   宿主选择器与 1389 完全相同：同特异性、位置更靠后 → 只是往同一份自定义属性集合里
-   追加条目，不会覆盖任何已有的 --admin-* 颜色。
-   --admin-table-rev 是哨兵：一条 getComputedStyle 就能同时证明「新 CSS 上线了」
-   和「:has() 作用域匹配成功」，是上线后最先要看的一项。
+   1) 尺寸与颜色变量
+   --admin-table-rev 是部署哨兵：一条 getComputedStyle 就能同时证明「新 CSS 上线了」
+   和「:has() 作用域匹配成功」。值 2 = 「恢复原生外观」版。
+   四个颜色变量只服务于下方保留段（滚动条、工具条），取中性灰，不与主题色竞争。
    -------------------------------------------------------------------------- */
 #page-container:not(:has(.v2board-auth-box)) {
-  --admin-cell-py: 12px;         /* td/th 纵向内距，= 现状 1716 / 1730 */
-  --admin-cell-px: 14px;         /* td/th 横向内距，= 现状 1716 / 1730 */
-  --admin-cell-fz: 14px;         /* td 字号，= antd .ant-table 基线 */
-  --admin-head-fz: 11px;         /* th 字号，= 现状 1720 */
-  --admin-head-h: 44px;          /* th 高度，= 现状 1715 */
-  --admin-row-min-h: 48px;       /* td 最小高，= 现状 1729 */
+  --admin-border: #e4e7ec;
+  --admin-border-strong: #cfd4dc;
+  --admin-surface: #fff;
+  --admin-surface-subtle: #f8fafc;
   --admin-tap: 40px;             /* 触控最小边长 */
   --admin-page-header-h: 65px;   /* 固定顶栏实占高，上线后用 getBoundingClientRect 校准 */
   --admin-hint-w: 18px;          /* 横滚边缘提示宽度 */
-  --admin-table-rev: 1;          /* 部署哨兵 */
+  --admin-table-rev: 2;          /* 部署哨兵 */
 }
 
-/* 断点只换变量值，不新增任何 th/td 选择器 —— 这是规避「主表与固定列浮层必须同时命中」
-   的结构性手段，见下面第 2 段。 */
+/* --------------------------------------------------------------------------
+   2) 移动端密度：全站只有一条 th 规则、一条 td 规则
+   旧实现在桌面端取「等于视觉体系现状」的值来实现无操作，视觉体系已删，无操作改为
+   结构表达：规则只存在于断点内，桌面端回归 umi.css/antd 原生密度。
+   关键约束不变：选择器里没有 .ant-table-scroll / .ant-table-body / .ant-table-fixed-*
+   任何一段，所以断点内它同时命中主表和 .ant-table-fixed-right 的浮层表格 —— antd 用
+   JS 把主表行高内联同步给浮层，两边尺寸必须一致，否则行高错位。
+   -------------------------------------------------------------------------- */
 @media (max-width: 767.98px) {
   #page-container:not(:has(.v2board-auth-box)) {
     --admin-cell-py: 9px;
@@ -1960,88 +550,25 @@ textarea.ant-input {
     --admin-head-h: 36px;
     --admin-row-min-h: 40px;
   }
-}
 
-/* --------------------------------------------------------------------------
-   2) 密度：全站只有一条 th 规则、一条 td 规则
-   选择器逐字复制 1713-1714 与 1726-1728（同特异性、位置更靠后 → 那两处的
-   height / padding / font-size 作废，其余声明仍然生效）。
-   关键：选择器里没有 .ant-table-scroll / .ant-table-body / .ant-table-fixed-* /
-   .ant-table-content 任何一段，所以它同时命中主表和 .ant-table-fixed-right 里
-   那份浮层表格。antd 用 JS 把主表量出的行高内联同步给浮层，两边尺寸必须一致，
-   否则行高错位 —— 这是本档最容易踩的坑。
-   -------------------------------------------------------------------------- */
-#page-container:not(:has(.v2board-auth-box)) #main-container .table thead th,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-thead > tr > th {
-  height: var(--admin-head-h);
-  padding: var(--admin-cell-py) var(--admin-cell-px);
-  font-size: var(--admin-head-fz);
-}
-
-#page-container:not(:has(.v2board-auth-box)) #main-container .table td,
-#page-container:not(:has(.v2board-auth-box)) #main-container .table th,
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-tbody > tr > td {
-  min-height: var(--admin-row-min-h);
-  padding: var(--admin-cell-py) var(--admin-cell-px);
-  font-size: var(--admin-cell-fz);
-}
-
-/* --------------------------------------------------------------------------
-   3) 撤掉那个不成立的「出血」—— 移动端第一可见缺陷
-   732-739 与 1853-1859 的负 margin + 等量 padding 本意是让表格铺满屏宽，但
-   12 张表全部挂在 .block > .bg-white 下，这两层都没有 padding，压根没有内槽可以
-   出血；再叠加 434 行的 max-width:100% 把 border-box 钳回容器宽度，净效果是
-   「整体左移 16px + 右边空出 32px」—— 固定操作列于是悬在离卡片右缘 32px 的地方。
-   归零后表格铺满卡片宽度，.ant-table-fixed-right 才真的贴在右边缘。
-   -------------------------------------------------------------------------- */
-@media (max-width: 767.98px) {
-  #page-container:not(:has(.v2board-auth-box)) #main-container .table-responsive,
-  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-wrapper,
-  #page-container:not(:has(.v2board-auth-box)) #main-container .v2board-table {
-    margin-right: 0;
-    margin-left: 0;
-    padding-right: 0;
-    padding-left: 0;
+  #page-container:not(:has(.v2board-auth-box)) #main-container .table thead th,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-thead > tr > th {
+    height: var(--admin-head-h);
+    padding: var(--admin-cell-py) var(--admin-cell-px);
+    font-size: var(--admin-head-fz);
   }
 
-  /* 上面那条会连带清掉 antd 给展开行内嵌表的负边距，按实际 td 内距还原横向部分。
-     只影响订阅溯源页的展开行。 */
-  #page-container:not(:has(.v2board-auth-box)) #main-container tr.ant-table-expanded-row > td > .ant-table-wrapper {
-    margin-right: calc(var(--admin-cell-px) * -1);
-    margin-left: calc(var(--admin-cell-px) * -1);
+  #page-container:not(:has(.v2board-auth-box)) #main-container .table td,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .table th,
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-tbody > tr > td {
+    min-height: var(--admin-row-min-h);
+    padding: var(--admin-cell-py) var(--admin-cell-px);
+    font-size: var(--admin-cell-fz);
   }
 }
 
 /* --------------------------------------------------------------------------
-   4) 让「外层 wrapper 横滚」结构上不可能发生
-   431-436 给 .ant-table-wrapper 加了 overflow-x:auto。一旦它真的滚起来，
-   position:absolute 的 .ant-table-fixed-right 会跟着整体位移（它的包含块是
-   .ant-table，在可滚动内容里）。用 overflow-x:clip 把它从「滚动容器」降级成
-   「裁剪容器」：不存在 scrollLeft，浮层不可能位移。
-   :has(.ant-table-fixed-*) 精确圈定有固定列因而危险的那 9 张表；另外几张没设
-   scroll.x 的表保留 auto，长 token 溢出时仍然能滚到。
-   overflow-y:visible 显式写出：clip 不像 auto/hidden 会把另一轴逼成 auto。
-   不支持 overflow:clip 的浏览器整条声明被丢弃 → 退回今天的行为，优雅降级。
-   -------------------------------------------------------------------------- */
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-wrapper:has(.ant-table-fixed-right),
-#page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-wrapper:has(.ant-table-fixed-left) {
-  overflow-x: clip;
-  overflow-y: visible;
-}
-
-/* 成因层再补一刀：wrapper 里唯一可能超宽的东西是分页器（float:right，且 umi.css
-   给它的 margin 带 !important 所以这里也必须 !important）。float:none + 居中让它
-   必定换行而不是横向溢出。 */
-@media (max-width: 767.98px) {
-  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-pagination {
-    float: none;
-    margin: 12px 0 4px !important;
-    text-align: center;
-  }
-}
-
-/* --------------------------------------------------------------------------
-   5) 横滚行为：防穿透
+   3) 横滚行为：防穿透
    .ant-table-body 才是真正的 x 滚动容器（rc-table 给它内联 overflow-x:scroll）。
    overscroll-behavior 是非布局属性，不动任何尺寸，也不参与行高同步。
    代价：手指起点落在表格内时浏览器的边缘返回手势会被吞掉 —— 在管理端正是想要的。
@@ -2051,7 +578,7 @@ textarea.ant-input {
 }
 
 /* --------------------------------------------------------------------------
-   6) 横滚提示
+   4) 横滚提示
    谓词直接用 rc-table 自己维护的类，不需要一行 JS：
      内容装得下 → -left 与 -right 同时存在 → 两侧提示都被 :not() 关掉
      在最左     → 只有 -left              → 只出右侧提示
@@ -2059,7 +586,7 @@ textarea.ant-input {
      在最右     → 只有 -right             → 只出左侧提示
    左侧用伪元素（全项目 fixed:"left" 零处，左缘永远没有浮层可挡）。
    右侧不用伪元素（会盖住 z-index:1 的固定列），改为放大 antd 自带的位置感知投影；
-   只有没有右固定列的 3 张表才补右侧渐变。
+   只有没有右固定列的表才补右侧渐变。
    锚点选 .ant-table：它已经是 position:relative，不需要新建包含块，也不会抢走
    .ant-table-fixed-right 的包含块；三份样式表确认它自身没有 ::before/::after。
    伪元素 z-index:auto → 画在非定位后代之上、但在 z-index:1 的固定列之下。
@@ -2097,7 +624,7 @@ textarea.ant-input {
 }
 
 /* --------------------------------------------------------------------------
-   7) 滚动条可见性
+   5) 滚动条可见性
    刻意只在 pointer:fine（鼠标/触控板）下生效。在触摸设备上定义 ::-webkit-scrollbar
    会把系统的「覆盖式」滚动条变成「占位式」，凭空给主表加 8px 高度，而
    .ant-table-fixed-right 那份表格不会加 —— 等于自己制造一处底边错位。
@@ -2124,12 +651,18 @@ textarea.ant-input {
 }
 
 /* --------------------------------------------------------------------------
-   8) 分页器触控尺寸
+   6) 分页器触控尺寸
    antd 基线 32px，而用户/节点/溯源三页传了 size:"small" → .ant-pagination.mini 是
-   24px。这里两个 id 压过 antd 所有 .mini 变体。40px × 7~9 项必定换成两行，
-   上一段的 text-align:center 让换行不难看。
+   24px。这里两个 id 压过 antd 所有 .mini 变体。40px × 7~9 项必定换行，居中让换行
+   不难看（umi.css 给分页器的 margin 带 !important，所以这里也必须 !important）。
    -------------------------------------------------------------------------- */
 @media (max-width: 767.98px) {
+  #page-container:not(:has(.v2board-auth-box)) #main-container .ant-table-pagination {
+    float: none;
+    margin: 12px 0 4px !important;
+    text-align: center;
+  }
+
   #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-item,
   #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-prev,
   #page-container:not(:has(.v2board-auth-box)) #main-container .ant-pagination-next,
@@ -2153,27 +686,17 @@ textarea.ant-input {
 }
 
 /* ==========================================================================
-   既有 bug 修复
+   既有 bug 修复（保留）
    ========================================================================== */
 
-/* B1) 1436 行的 #sidebar{width:240px} 没有包在任何断点里。
-   桌面端不只是留 10px 缝：布局恒定带 side-scroll 类，umi.css 用
-   #page-container.side-scroll #sidebar .content-header, .content-side{width:250px!important}
-   把侧栏内层钉死在 250px，外层 240px 时内层会漫过 240px 处的 border-right 与
-   box-shadow。而 #page-container.sidebar-o{padding-left:250px} 也仍是 250。
-   移动端：umi.css 顶层是 #sidebar{width:80%}（不是 100%），被 240px 压掉了。
-   这里用 min(80%, 320px) —— 纯 80% 在 991px 的横屏平板上会摊成 793px。
-   两条都与 1436 同特异性、位置更靠后 → 胜出，不必回去改 1436。
-   -------------------------------------------------------------------------- */
+/* B1) 移动端侧栏宽度钳制。umi.css 原生的移动端侧栏是 width:100% 全屏 —— 打开后把
+   .v2board-nav-mask 遮罩完整盖住，「点外面关闭」无处可点。钳到 min(80%, 320px) 给
+   遮罩留出可点区（纯 80% 在 991px 横屏平板上会摊成 793px，所以再封顶 320px）。
+   桌面端不需要动：umi.css 原生就是 #sidebar{width:250px}，与 .side-scroll 内层的
+   250px 锁定、.sidebar-o 的 padding-left:250px 自洽。 */
 @media (max-width: 991.98px) {
   #page-container:not(:has(.v2board-auth-box)) #sidebar {
     width: min(80%, 320px);
-  }
-}
-
-@media (min-width: 992px) {
-  #page-container:not(:has(.v2board-auth-box)) #sidebar {
-    width: 250px;
   }
 }
 
@@ -2189,7 +712,10 @@ textarea.ant-input {
    显然想要的「工具条吸顶」意图。祖先 .bg-white / .block / .content（overflow-x:visible）
    / #main-container 均无 overflow，sticky 的滚动端口就是文档，能正常工作。
    z-index 沿用 umi.css 的 100 → 低于顶栏的 998，不会盖住顶栏。
-   -------------------------------------------------------------------------- */
+
+   同一断点里 umi.css 还有 .v2board-table{padding-top:60px} —— 那是给 position:fixed
+   工具条腾的补偿位；工具条回到文档流之后它只剩一段 60px 死空白（表格上方悬空），
+   这里一并归零（双 id 前缀胜过裸类）。 */
 @media (max-width: 767.98px) {
   #page-container:not(:has(.v2board-auth-box)) #main-container .v2board-table-action {
     position: sticky;
@@ -2197,5 +723,33 @@ textarea.ant-input {
     width: auto;
     border-bottom: 1px solid var(--admin-border);
     background: var(--admin-surface);
+  }
+
+  #page-container:not(:has(.v2board-auth-box)) #main-container .v2board-table {
+    padding-top: 0;
+  }
+}
+
+/* 移动端抽屉全宽（保留）。umi.css 只给 plan/server/user 三页的抽屉 max-width:500px，
+   .v2board-filter-drawer 另有 30%/80% 两档 —— 都没管手机：编辑抽屉的内联 width 在
+   500-767px 视口下由 max-width 钳到 500px 刚好放得下，更窄的手机上如果没有这条，
+   500px 的抽屉会被裁掉一截。width:100% 配 max-width:500px 的净效果是 min(100%, 500px)。
+   !important 与原生 .v2board-filter-drawer 规则同强度，但那条特异性更高，筛选抽屉
+   仍保持 80%，与既有行为一致。 */
+@media (max-width: 767.98px) {
+  .ant-drawer-content-wrapper {
+    width: 100% !important;
+  }
+}
+
+/* 动效偏好（保留）：系统开了「减少动态效果」时压平所有过渡与动画。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
