@@ -68,7 +68,7 @@ class SubscribeAuditRetentionService
      * 清理单个用户的审计记录。这里连判定一起删：冻结之后这是唯一能重置误判徽章的
      * 路径，而留着引用了具体 IP 的判定、下面证据却已清空，等于一条无法核实的指控。
      *
-     * @return array{subscribe_request_log:int,node_connection_log:int,subscription_risk_cycle:int}
+     * @return array{subscribe_request_log:int,node_connection_log:int,subscription_risk_cycle:int,ip_account_link:int}
      */
     public function purgeUser(int $userId, bool $withRisk = true, int $chunk = 5000): array
     {
@@ -76,13 +76,18 @@ class SubscribeAuditRetentionService
         $counts = [
             'subscribe_request_log' => 0,
             'node_connection_log' => 0,
-            'subscription_risk_cycle' => 0
+            'subscription_risk_cycle' => 0,
+            'ip_account_link' => 0
         ];
         if ($userId <= 0) {
             return $counts;
         }
 
         $counts['subscribe_request_log'] = $this->purgeUserTable('v2_subscribe_request_log', $userId, $chunk);
+        // 同 IP 关联累积表跟着原始日志一起清。它不参与保留期清理（派生结论要比证据活得久），
+        // 但按用户清必须带上：否则清空/注销之后，该账号的真实 IP 会以派生形式残留在关联
+        // 分析里，与当年漏掉 v2_node_connection_log 是同一类问题。
+        $counts['ip_account_link'] = $this->purgeUserTable('v2_ip_account_link', $userId, $chunk);
         $counts['node_connection_log'] = $this->purgeUserTable('v2_node_connection_log', $userId, $chunk);
         if ($withRisk) {
             $counts['subscription_risk_cycle'] = $this->purgeUserTable('v2_subscription_risk_cycle', $userId, $chunk);

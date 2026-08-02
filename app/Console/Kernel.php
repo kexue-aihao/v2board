@@ -40,6 +40,11 @@ class Kernel extends ConsoleKernel
         // reset
         $schedule->command('reset:traffic')->daily();
         $schedule->command('reset:log')->daily();
+        // 每小时整点把订阅拉取日志增量聚合成「IP + 账号 + UA」累积记录。整点这个位置同时
+        // 满足两件事：① 0:00 那次落在 audit:clean（0:40）之前，当天要被保留期删掉的原始行
+        // 一定已经进过累积表；② 与订阅拉取写路径完全无关 —— 聚合只读已落库的日志，拉取
+        // 路径上没有为本功能增加任何查询。
+        $schedule->command('audit:ip-link')->hourly()->withoutOverlapping();
         // 必须排在 subscription:risk 之后：先让隔夜完成的周期被评估，其证据才可以清理。
         $schedule->command('audit:clean')->dailyAt('0:40')->withoutOverlapping();
         // 排在清理之后：本命令只读活凭证列并补历史，与保留期清理无关，但排开可以避开

@@ -638,6 +638,27 @@ CREATE TABLE `v2_subscribe_request_log` (
                                   KEY `requested_at` (`requested_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+DROP TABLE IF EXISTS `v2_ip_account_link`;
+CREATE TABLE `v2_ip_account_link` (
+                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                  `request_ip` varchar(45) NOT NULL,
+                                  `user_id` int(11) NOT NULL,
+                                  `ua_hash` char(64) NOT NULL,
+                                  `user_agent` varchar(1000) NOT NULL,
+                                  `hit_count` bigint(20) NOT NULL DEFAULT '0',
+                                  `first_seen_at` bigint(20) NOT NULL,
+                                  `last_seen_at` bigint(20) NOT NULL,
+                                  `last_log_id` bigint(20) NOT NULL DEFAULT '0',
+                                  `created_at` int(11) NOT NULL,
+                                  `updated_at` int(11) NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `ip_user_ua` (`request_ip`,`user_id`,`ua_hash`),
+                                  KEY `ip_user_seen_hits` (`request_ip`,`user_id`,`last_seen_at`,`first_seen_at`,`hit_count`),
+                                  KEY `user_last_seen` (`user_id`,`last_seen_at`),
+                                  KEY `seen_ip_user_hits` (`last_seen_at`,`request_ip`,`user_id`,`hit_count`,`first_seen_at`),
+                                  KEY `last_log_id` (`last_log_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 DROP TABLE IF EXISTS `v2_subscription_risk_cycle`;
 CREATE TABLE `v2_subscription_risk_cycle` (
                                   `id` bigint(20) NOT NULL AUTO_INCREMENT,

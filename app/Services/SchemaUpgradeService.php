@@ -20,7 +20,8 @@ class SchemaUpgradeService
         'reseller_approval_schema' => 'reseller_approval_schema_v1',
         'reseller_shared_subscription_schema' => 'reseller_shared_subscription_schema_v1',
         'oauth_identity_schema' => 'oauth_identity_schema_v1',
-        'telegram_binding_schema' => 'telegram_binding_schema_v1'
+        'telegram_binding_schema' => 'telegram_binding_schema_v1',
+        'ip_account_link_schema' => 'ip_account_link_schema_v1'
     ];
 
     public function run(): array
@@ -95,6 +96,9 @@ class SchemaUpgradeService
                 return;
             case 'telegram_binding_schema':
                 $this->applyTelegramBindingSchema();
+                return;
+            case 'ip_account_link_schema':
+                $this->applyIpAccountLinkSchema();
                 return;
         }
 
@@ -269,6 +273,15 @@ class SchemaUpgradeService
         // loose index scan 要求 GROUP BY 列是索引最左前缀、且聚合列紧随其后；
         // user_subscription_requested_at 中间夹了 subscription_id 用不上，会退化成整索引扫描。
         $this->ensureIndex('v2_subscribe_request_log', 'user_requested_at', ['user_id', 'requested_at']);
+        // 以上五个索引里 request_ip 一次都没出现，任何「按 IP 聚合」都只能整索引/全表扫描
+        // ——这就是 RiskTraceController::history() 里那句「刻意不含 distinct_ip_count」的原因。
+        // **刻意不补 request_ip 前导索引**：多账号同 IP 分析改从累积表 v2_ip_account_link 读
+        // （见 applyIpAccountLinkSchema），一条按 IP 聚合的查询都不打在这张原始日志上；仓库
+        // 里唯一按 IP 过滤原始日志的地方是 UserController::subscribeRequests 的
+        // `where('request_ip','like','%'.$kw.'%')`，前导 % 用不上任何索引。这张表是订阅拉取
+        // 每次都要 INSERT 的全站最高频写路径，多一个二级索引就是每行多一次索引维护，
+        // 而且在已有数百万行的表上跑 ALTER TABLE ADD KEY 本身也是一次与表规模成正比的
+        // 在线 DDL。没有查询会用到的索引一律不加。
 
         DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_cycle` (
             `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -315,6 +328,81 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_subscription_risk_cycle', 'subscription_cycle_start', ['subscription_id', 'cycle_start'], true);
         $this->ensureIndex('v2_subscription_risk_cycle', 'user_cycle_end', ['user_id', 'cycle_end']);
         $this->ensureIndex('v2_subscription_risk_cycle', 'status', ['status']);
+    }
+
+    /**
+     * 多账号同 IP 关联分析的累积表。
+     *
+     * 为什么不直接对 v2_subscribe_request_log 做 GROUP BY request_ip：那张表有保留期清理
+     * （audit:clean，默认 180 天、下限 35 天），过期原始行会被物理删除，而需求要的「历史
+     * 累积」恰恰是比保留期更长的记忆。这张表与 v2_subscription_risk_cycle 同性质 ——
+     * 派生结论必须比原始证据活得更久，所以它刻意不参与 purgeExpired()，只在账号注销 /
+     * 清空该用户审计记录时被 purgeUser() 带走（否则已注销账号的真实 IP 会以派生形式残留，
+     * 与当年漏掉 v2_node_connection_log 是同一类问题）。
+     *
+     * 粒度取「IP + 账号 + UA 指纹」三元组，一行一个三元组，用 first_seen_at /
+     * last_seen_at / hit_count 表达历史：规模由去重后的三元组基数决定，不随时间线性增长
+     * （形制照 v2_node_connection_log）。UA 进唯一键而不是另立一张表，是因为需求要的正是
+     * 「同一 IP 下的不同账号各自用什么客户端」，一张表就同时喂列表页（GROUP BY request_ip）
+     * 与明细页（WHERE request_ip = ? GROUP BY user_id）。
+     *
+     * 填充由 audit:ip-link 命令离线增量完成，订阅拉取写路径一条 SQL 都没加。
+     */
+    private function applyIpAccountLinkSchema(): void
+    {
+        $this->requireTable('v2_subscribe_request_log');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_ip_account_link` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `request_ip` varchar(45) NOT NULL,
+            `user_id` int(11) NOT NULL,
+            `ua_hash` char(64) NOT NULL,
+            `user_agent` varchar(1000) NOT NULL,
+            `hit_count` bigint(20) NOT NULL DEFAULT '0',
+            `first_seen_at` bigint(20) NOT NULL,
+            `last_seen_at` bigint(20) NOT NULL,
+            `last_log_id` bigint(20) NOT NULL DEFAULT '0',
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'request_ip' => 'varchar(45) NOT NULL',
+            'user_id' => 'int(11) NOT NULL',
+            'ua_hash' => 'char(64) NOT NULL',
+            'user_agent' => 'varchar(1000) NOT NULL',
+            'hit_count' => "bigint(20) NOT NULL DEFAULT '0'",
+            'first_seen_at' => 'bigint(20) NOT NULL',
+            'last_seen_at' => 'bigint(20) NOT NULL',
+            'last_log_id' => "bigint(20) NOT NULL DEFAULT '0'",
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_ip_account_link', $column, $definition);
+        }
+
+        // upsert 的冲突键。utf8mb4 下键长 180 + 4 + 256 = 440 字节，远低于 767/3072 上限。
+        $this->ensureIndex('v2_ip_account_link', 'ip_user_ua', ['request_ip', 'user_id', 'ua_hash'], true);
+        // 列表页那条聚合（GROUP BY request_ip，COUNT(DISTINCT user_id)/SUM(hit_count)/
+        // MIN(first_seen_at)/MAX(last_seen_at)，按 last_seen_at 卡时间窗）用的就是这个索引：
+        // 五列把聚合要读的列全包住，走 index-only 扫描且天然按 request_ip 有序，分组不落临时表。
+        // 唯一键 ip_user_ua 不能替代它 —— 那里没有 hit_count / last_seen_at，分组时要逐行回表。
+        $this->ensureIndex('v2_ip_account_link', 'ip_user_seen_hits',
+            ['request_ip', 'user_id', 'last_seen_at', 'first_seen_at', 'hit_count']);
+        // 按邮箱/UID 筛选时先把账号换成它涉及的 IP 集合，再回到上面那条聚合。
+        $this->ensureIndex('v2_ip_account_link', 'user_last_seen', ['user_id', 'last_seen_at']);
+        // 时间窗要真的能限制扫描量，就必须有一条以 last_seen_at 为**前导列**的覆盖索引：
+        // 上面的 ip_user_seen_hits 里 last_seen_at 是第三列，窗口条件卡在它上面只能过滤、
+        // 不能定位，优化器只会做 index-only 全索引扫描（把窗口从 365 天收窄到 7 天不会更快）。
+        // 这条索引让窗口变成区间扫描，同时把列表页聚合要读的五列全包住（仍是 index-only）。
+        // 代价是扫出来的行不再天然按 request_ip 有序，GROUP BY request_ip 要落临时表 ——
+        // 所以两条索引并存、由优化器按窗口的实际选择性挑：窄窗口走这条，宽到接近全表时
+        // 走 ip_user_seen_hits 的流式分组。它的前导列同时接管了原来单列 last_seen_at 索引的
+        // 两个用途（新鲜度信号 MAX(last_seen_at) 与 prune 的区间删除），所以那条不再单独建。
+        $this->ensureIndex('v2_ip_account_link', 'seen_ip_user_hits',
+            ['last_seen_at', 'request_ip', 'user_id', 'hit_count', 'first_seen_at']);
+        // 增量游标 MAX(last_log_id)：游标从数据本身推导，不另存状态，取值必须是常数级。
+        $this->ensureIndex('v2_ip_account_link', 'last_log_id', ['last_log_id']);
     }
 
     private function applyNodeConnectionLogSchema(): void

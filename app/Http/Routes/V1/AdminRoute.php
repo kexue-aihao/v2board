@@ -145,6 +145,9 @@ class AdminRoute
             // nginx 访问日志、浏览器历史与 Referer。详见控制器方法注释。
             $router->post('/risk/trace/token/lookup', 'V1\\Admin\\RiskTraceController@lookup');
             $router->post('/risk/trace/token/reveal', 'V1\\Admin\\RiskTraceController@reveal');
+            // 多账号同 IP 关联分析。只读，数据来自 audit:ip-link 离线聚合出的累积表。
+            $router->get ('/risk/shared-ip/fetch', 'V1\\Admin\\RiskSharedIpController@fetch');
+            $router->get ('/risk/shared-ip/detail', 'V1\\Admin\\RiskSharedIpController@detail');
             // Stat
             $router->get ('/stat/getStat', 'V1\\Admin\\StatController@getStat');
             $router->get ('/stat/getOverride', 'V1\\Admin\\StatController@getOverride');

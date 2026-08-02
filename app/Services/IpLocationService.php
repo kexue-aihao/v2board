@@ -19,6 +19,80 @@ class IpLocationService
         return $this->decorate($this->resolve($ip));
     }
 
+    /**
+     * 批量解析。逐行调用 lookup() 是 N+1：一屏 100 个 IP 就是 100 次
+     * `SELECT ... WHERE ip = ?`，未命中的还各带一次 INSERT。这里把「查缓存」合并成一条
+     * whereIn，只有真正没缓存过的 IP 才逐个读 mmdb 并回填缓存 —— 一整页从没见过的 IP
+     * 由 100 次 SELECT + 100 次 INSERT 降到 1 次 SELECT + 100 次 INSERT。
+     *
+     * 单个 IP 的解析口径与 lookup() 完全一致（非法/内网地址同样返回 unknown、同样经
+     * decorate() 补 is_idc 三态），差别只在缓存查询的合并。
+     *
+     * @param array $ips 原始 IP 字符串数组，允许重复与空值
+     * @return array<string, array> 以 IP 原文为键；调用方取不到键时应回落到 lookup()
+     */
+    public function lookupMany(array $ips): array
+    {
+        $result = [];
+        $pending = [];
+        foreach ($ips as $value) {
+            $ip = trim((string)$value);
+            if ($ip === '' || isset($result[$ip]) || isset($pending[$ip])) {
+                continue;
+            }
+            // 私有/保留地址与非法字面量（例如 SubscribeAuditService 写下的 'unknown'）
+            // 根本不进 mmdb 也不进缓存，直接给 unknown，省掉一次无用的缓存查询。
+            if (!filter_var($ip, FILTER_VALIDATE_IP) || !$this->isPublicIp($ip)) {
+                $result[$ip] = $this->decorate($this->unknown($ip));
+                continue;
+            }
+            $pending[$ip] = true;
+        }
+        if (!count($pending)) {
+            return $result;
+        }
+
+        if ($this->cacheAvailable()) {
+            try {
+                foreach (IpLocationCache::whereIn('ip', array_keys($pending))->get() as $cached) {
+                    $ip = (string)$cached->ip;
+                    if (!isset($pending[$ip])) {
+                        continue;
+                    }
+                    unset($pending[$ip]);
+                    $version = strpos($ip, ':') !== false ? 6 : 4;
+                    $result[$ip] = $this->decorate($this->fromCache($cached, $ip, $version));
+                }
+            } catch (\Throwable $e) {
+                // 缓存读失败不能让整页归属地都变成未知：退回逐个解析。
+                Log::warning('Batch IP location cache lookup failed', ['error' => $e->getMessage()]);
+            }
+        }
+
+        foreach (array_keys($pending) as $ip) {
+            $result[$ip] = $this->decorate($this->resolveFresh($ip));
+        }
+        return $result;
+    }
+
+    /**
+     * 绕过缓存查询直接读 mmdb 并回填缓存。只给 lookupMany() 用：那里已经用一条 whereIn
+     * 确认过这些 IP 不在缓存里，再走 resolve() 会为每个未命中的 IP 多打一次 SELECT。
+     * 日志里刻意不带 IP —— 完整 IP 不落日志文件。
+     */
+    private function resolveFresh(string $ip): array
+    {
+        $version = strpos($ip, ':') !== false ? 6 : 4;
+        try {
+            $location = $this->lookupMmdb($ip, $version);
+            $this->cache($location);
+            return $location;
+        } catch (\Throwable $e) {
+            Log::warning('IP location lookup failed', ['error' => $e->getMessage()]);
+            return $this->unknown($ip, $version);
+        }
+    }
+
     // 内置库把 IDC/云厂商单独建库，所以「查到了但不落在 IDC 库里」才是可以确定的「非 IDC」，
     // 必须与「压根没查到」区分开：前者可以写否，后者只能写未知。
     // 在 resolve() 之外附加，避免这个派生字段被 cache() 当成列写进 v2_ip_location_cache。
