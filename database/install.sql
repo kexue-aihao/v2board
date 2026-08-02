@@ -659,6 +659,27 @@ CREATE TABLE `v2_ip_account_link` (
                                   KEY `last_log_id` (`last_log_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+DROP TABLE IF EXISTS `v2_balance_log`;
+CREATE TABLE `v2_balance_log` (
+                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                  `user_id` int(11) NOT NULL,
+                                  `balance_before` int(11) NOT NULL,
+                                  `balance_after` int(11) NOT NULL,
+                                  `amount` int(11) NOT NULL,
+                                  `type` varchar(64) NOT NULL,
+                                  `source_type` varchar(32) DEFAULT NULL,
+                                  `source_id` bigint(20) DEFAULT NULL,
+                                  `unique_key` varchar(128) DEFAULT NULL,
+                                  `remark` varchar(255) DEFAULT NULL,
+                                  `created_at` int(11) NOT NULL,
+                                  `updated_at` int(11) NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `uniq_key` (`unique_key`),
+                                  KEY `user_created` (`user_id`,`created_at`),
+                                  KEY `type_created` (`type`,`created_at`),
+                                  KEY `source` (`source_type`,`source_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 DROP TABLE IF EXISTS `v2_subscription_risk_cycle`;
 CREATE TABLE `v2_subscription_risk_cycle` (
                                   `id` bigint(20) NOT NULL AUTO_INCREMENT,

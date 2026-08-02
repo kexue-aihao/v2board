@@ -82,7 +82,9 @@ class OrderController extends Controller
             abort(500, __('You have an unpaid or pending order, please try again later or cancel it'));
         }
         if ($request->input('plan_id') == 0) {
-            $amount = $request->input('deposit_amount');
+            // OrderSave 已校验 deposit_amount 为 1..9999998 的整数；这里再强制 (int) 兜底，
+            // 杜绝 '0.5'/'1e-3' 等被松散比较放行、再落进 int 列时截断或触发严格模式异常。
+            $amount = (int)$request->input('deposit_amount');
             if ($amount <= 0) {
                 abort(500, __('Failed to create order, deposit amount must be greater than 0'));
             }
@@ -193,14 +195,14 @@ class OrderController extends Controller
             $remainingBalance = $user->balance - $order->total_amount;
             $userService = new UserService();
             if ($remainingBalance > 0) {
-                if (!$userService->addBalance($order->user_id, - $order->total_amount)) {
+                if (!$userService->addBalance($order->user_id, - $order->total_amount, 'order_balance_pay', ['remark' => $order->trade_no])) {
                     DB::rollBack();
                     abort(500, __('Insufficient balance'));
                 }
                 $order->balance_amount = $order->total_amount;
                 $order->total_amount = 0;
             } else {
-                if (!$userService->addBalance($order->user_id, - $user->balance)) {
+                if (!$userService->addBalance($order->user_id, - $user->balance, 'order_balance_pay', ['remark' => $order->trade_no])) {
                     DB::rollBack();
                     abort(500, __('Insufficient balance'));
                 }

@@ -95,12 +95,19 @@ class CheckRenewal extends Command
                     $orderService->setVipDiscount($user);
                     $order->type = 2;
                     
-                    $user->balance = $user->balance - $plan[$latestPeriod];
-                    $user->expired_at = $this->getTime($latestPeriod, $user->expired_at);
-                    if (!$user->save()) {
+                    // 余额扣款走 addBalance（加锁 + 记资金流水），余额不足返回 false；到期时间单独更新。
+                    // （原为无锁绝对值回写：User::all() 快照余额可能已过期数十秒，循环期间用户并发
+                    // 下单/取消会被那次绝对值 save 整列覆盖，把已花掉的余额写回来。）
+                    $renewAmount = (int)$plan[$latestPeriod];
+                    if (!(new \App\Services\UserService())->addBalance($user->id, -$renewAmount, 'renewal_deduct', [
+                        'remark' => $order->trade_no
+                    ])) {
                         DB::rollback();
                         throw new Exception('自动续费失败');
                     }
+                    User::where('id', $user->id)->update([
+                        'expired_at' => $this->getTime($latestPeriod, $user->expired_at)
+                    ]);
                     $order->status = 3;
                     if (!$order->save()) {
                         DB::rollback();
@@ -144,8 +151,13 @@ class CheckRenewal extends Command
             try {
                 DB::transaction(function () use ($service, $subscription, $user, $plan, $period) {
                     $amount = (int)$plan[$period];
-                    $user->balance -= $amount;
-                    $user->save();
+                    // 余额扣款走 addBalance（加锁 + 记资金流水）；余额不足返回 false → 抛出 → 关自动续费。
+                    if (!(new \App\Services\UserService())->addBalance($user->id, -$amount, 'renewal_deduct', [
+                        'source_type' => 'subscription',
+                        'source_id' => $subscription->id
+                    ])) {
+                        throw new Exception('No enough balance');
+                    }
                     $service->renew($subscription, $plan, $period);
                     $order = new Order();
                     $order->user_id = $user->id;

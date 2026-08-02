@@ -241,12 +241,15 @@ class UserController extends Controller
         DB::beginTransaction();
 
         try {
-            $user = User::find($request->user['id']);
+            // 锁用户行 + 卡行：原实现两行都未加锁，limit_use 与 used_user_ids 都是丢失更新，
+            // N 个账号并发可把 limit_use=1 的卡兑换 N 次；余额型(type=1)的绝对值回写还会覆盖
+            // 并发的下单扣款。锁住卡行即串行化同一张卡的所有兑换，锁住用户行即串行化其余额变更。
+            $user = User::lockForUpdate()->find($request->user['id']);
             if (!$user) {
                 abort(500, __('The user does not exist'));
             }
             $giftcard_input = $request->giftcard;
-            $giftcard = Giftcard::where('code', $giftcard_input)->first();
+            $giftcard = Giftcard::where('code', $giftcard_input)->lockForUpdate()->first();
 
             if (!$giftcard) {
                 abort(500, __('The gift card does not exist'));
@@ -279,9 +282,11 @@ class UserController extends Controller
             $usedUserIds[] = $user->id;
             $giftcard->used_user_ids = json_encode($usedUserIds);
 
+            $balanceCredit = 0;
             switch ($giftcard->type) {
                 case 1:
-                    $user->balance += $giftcard->value;
+                    // 余额型：不在这里直接改 balance，改由下方 addBalance 加锁入账并记资金流水。
+                    $balanceCredit = (int)$giftcard->value;
                     break;
                 case 2:
                     if ($user->expired_at !== null) {
@@ -329,6 +334,18 @@ class UserController extends Controller
 
             if (!$user->save() || !$giftcard->save()) {
                 throw new \Exception(__('Save failed'));
+            }
+
+            // 余额型礼品卡入账走 addBalance（加锁 + 记资金流水 + 幂等）。unique_key 限定每卡每用户一次。
+            if ($balanceCredit > 0) {
+                if (!(new \App\Services\UserService())->addBalance($user->id, $balanceCredit, 'giftcard', [
+                    'source_type' => 'giftcard',
+                    'source_id' => $giftcard->id,
+                    'unique_key' => 'giftcard:' . $giftcard->id . ':' . $user->id,
+                    'remark' => $giftcard->code
+                ])) {
+                    throw new \Exception(__('Save failed'));
+                }
             }
 
             DB::commit();
@@ -552,37 +569,48 @@ class UserController extends Controller
 
     public function transfer(UserTransfer $request)
     {
-        $user = User::find($request->user['id']);
-        if (!$user) {
-            abort(500, __('The user does not exist'));
-        }
-        if ($request->input('transfer_amount') > $user->commission_balance) {
-            abort(500, __('Insufficient commission balance'));
-        }
-        DB::beginTransaction();
-        $order = new Order();
-        $orderService = new OrderService($order);
-        $order->user_id = $request->user['id'];
-        $order->plan_id = 0;
-        $order->period = 'deposit';
-        $order->trade_no = Helper::generateOrderNo();
-        $order->total_amount = $request->input('transfer_amount');
-
-        $orderService->setOrderType($user);
-        $orderService->setInvite($user);
-
-        $user->commission_balance = $user->commission_balance - $request->input('transfer_amount');
-        $user->balance = $user->balance + $request->input('transfer_amount');
-        $order->status = 3;
-        $order->total_amount = 0;
-        $order->surplus_amount = $request->input('transfer_amount');
-        $order->callback_no = '佣金划转 Commission transfer';
-        if (!$order->save()||!$user->save()) {
-            DB::rollback();
-            abort(500, __('Transfer failed'));
-        }
-
-        DB::commit();
+        // 原实现全程无锁：事务外读 $user、用陈旧的 commission_balance 判额度，再对
+        // commission_balance/balance 做绝对值回写，会整列覆盖并发的扣款/退款；且在 total_amount
+        // 归零前调用 setInvite，使一次「佣金划转」还给上级凭空生成一份新佣金（一份佣金铸 N 份）。
+        // 改为：锁用户行 + 原子条件扣佣金/加余额；内部划转不再产生佣金（不调 setInvite/setOrderType）。
+        $amount = (int)$request->input('transfer_amount');   // UserTransfer 已校验 integer|min:1
+        DB::transaction(function () use ($request, $amount) {
+            $user = User::lockForUpdate()->find($request->user['id']);
+            if (!$user) {
+                abort(500, __('The user does not exist'));
+            }
+            if ($amount > $user->commission_balance) {
+                abort(500, __('Insufficient commission balance'));
+            }
+            // 原子扣佣金（commission_balance 不在余额流水范围内，用条件更新防超扣）
+            $affected = User::where('id', $user->id)
+                ->where('commission_balance', '>=', $amount)
+                ->update(['commission_balance' => DB::raw('commission_balance - ' . $amount)]);
+            if ($affected !== 1) {
+                abort(500, __('Insufficient commission balance'));
+            }
+            $order = new Order();
+            $order->user_id = $user->id;
+            $order->plan_id = 0;
+            $order->period = 'deposit';
+            $order->type = 9;
+            $order->trade_no = Helper::generateOrderNo();
+            $order->total_amount = 0;
+            $order->surplus_amount = $amount;
+            $order->status = 3;
+            $order->callback_no = '佣金划转 Commission transfer';
+            if (!$order->save()) {
+                abort(500, __('Transfer failed'));
+            }
+            // 加余额走 addBalance（加锁 + 记资金流水），来源指向本次划转订单
+            if (!(new \App\Services\UserService())->addBalance($user->id, $amount, 'commission_transfer', [
+                'source_type' => 'order',
+                'source_id' => $order->id,
+                'remark' => $order->trade_no
+            ])) {
+                abort(500, __('Transfer failed'));
+            }
+        });
 
         return response([
             'data' => true

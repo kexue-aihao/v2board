@@ -133,10 +133,16 @@ class Bepusdt
             return false;
         }
 
+        // 空密钥无法安全验签：缺 token 时直接拒绝，而不是用空串继续算签名（纵深防御，见 PaymentService）。
+        $token = trim((string) ($this->config['bepusdt_token'] ?? ''));
+        if ($token === '') {
+            return false;
+        }
+
         $signature = strtolower((string) $params['signature']);
         unset($params['signature']);
 
-        if (!hash_equals($this->makeSignature($params, trim((string) ($this->config['bepusdt_token'] ?? ''))), $signature)) {
+        if (!hash_equals($this->makeSignature($params, $token), $signature)) {
             return false;
         }
 

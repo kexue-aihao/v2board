@@ -21,7 +21,8 @@ class SchemaUpgradeService
         'reseller_shared_subscription_schema' => 'reseller_shared_subscription_schema_v1',
         'oauth_identity_schema' => 'oauth_identity_schema_v1',
         'telegram_binding_schema' => 'telegram_binding_schema_v1',
-        'ip_account_link_schema' => 'ip_account_link_schema_v1'
+        'ip_account_link_schema' => 'ip_account_link_schema_v1',
+        'balance_log_schema' => 'balance_log_schema_v1'
     ];
 
     public function run(): array
@@ -99,6 +100,9 @@ class SchemaUpgradeService
                 return;
             case 'ip_account_link_schema':
                 $this->applyIpAccountLinkSchema();
+                return;
+            case 'balance_log_schema':
+                $this->applyBalanceLogSchema();
                 return;
         }
 
@@ -1034,6 +1038,53 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_reseller_shared_invitation', 'token_hash', ['token_hash'], true);
         $this->ensureIndex('v2_reseller_shared_invitation', 'shared_status', ['shared_subscription_id', 'revoked_at', 'expires_at']);
         $this->ensureIndex('v2_reseller_shared_invitation', 'reseller_email', ['reseller_id', 'email']);
+    }
+
+    private function applyBalanceLogSchema(): void
+    {
+        // 资金流水表：记录每一次 v2_user.balance 变更（充值到账、下单抵扣、取消退款、佣金划转、
+        // 礼品卡、续费扣款、返佣入账…）的前后值与来源。事件前钱包只有原地 UPDATE、无任何流水，
+        // 损失只能反推 —— 这张表补上审计底座；unique_key 唯一键把「同一笔只入账一次」升级成
+        // 数据库不变式（例如同一订单的 order_cancel_refund / deposit 各只能落一行）。
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_balance_log` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `balance_before` int(11) NOT NULL,
+            `balance_after` int(11) NOT NULL,
+            `amount` int(11) NOT NULL,
+            `type` varchar(64) NOT NULL,
+            `source_type` varchar(32) DEFAULT NULL,
+            `source_id` bigint(20) DEFAULT NULL,
+            `unique_key` varchar(128) DEFAULT NULL,
+            `remark` varchar(255) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'balance_before' => 'int(11) NOT NULL',
+            'balance_after' => 'int(11) NOT NULL',
+            'amount' => 'int(11) NOT NULL',
+            'type' => 'varchar(64) NOT NULL',
+            'source_type' => 'varchar(32) DEFAULT NULL',
+            'source_id' => 'bigint(20) DEFAULT NULL',
+            'unique_key' => 'varchar(128) DEFAULT NULL',
+            'remark' => 'varchar(255) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_balance_log', $column, $definition);
+        }
+
+        // 幂等键：NULL 可重复（MySQL 唯一索引允许多个 NULL），带键的入账全局唯一。
+        $this->ensureIndex('v2_balance_log', 'uniq_key', ['unique_key'], true);
+        // 单用户按时间的流水查询（对账、导出）。
+        $this->ensureIndex('v2_balance_log', 'user_created', ['user_id', 'created_at']);
+        // 按类型筛选（如只看所有取消退款）。
+        $this->ensureIndex('v2_balance_log', 'type_created', ['type', 'created_at']);
+        // 按来源反查（如「这张订单退过几次款」）。
+        $this->ensureIndex('v2_balance_log', 'source', ['source_type', 'source_id']);
     }
 
     private function requireTable(string $table): void

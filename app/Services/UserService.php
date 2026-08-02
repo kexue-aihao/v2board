@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Jobs\StatServerJob;
 use App\Jobs\StatUserJob;
 use App\Jobs\TrafficFetchJob;
+use App\Models\BalanceLog;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
@@ -216,20 +217,62 @@ class UserService
         return User::all();
     }
 
-    public function addBalance(int $userId, int $balance):bool
+    // 唯一的余额变更原语：加锁读用户行 → 基于新鲜值加减 → 拒绝透支 → 落库 → 记资金流水。
+    // 调用方必须已在事务内（lockForUpdate 才有效）；现有调用点均满足。
+    // $type/$meta 供审计：meta 可含 source_type/source_id/unique_key/remark。
+    // 传了 unique_key 时具备幂等性：同键重复入账（并发/重试）直接视为成功、不再改余额。
+    public function addBalance(int $userId, int $balance, ?string $type = null, array $meta = []): bool
     {
         $user = User::lockForUpdate()->find($userId);
         if (!$user) {
             return false;
         }
-        $user->balance = $user->balance + $balance;
-        if ($user->balance < 0) {
+        // 幂等：并发的同键写会在 user 行锁上串行，先提交者的流水对后来者可见 → 后者在此 return。
+        $uniqueKey = $meta['unique_key'] ?? null;
+        if ($uniqueKey !== null && $this->balanceLogAvailable()
+            && BalanceLog::where('unique_key', $uniqueKey)->exists()) {
+            return true;
+        }
+        $before = (int)$user->balance;
+        $after = $before + $balance;
+        if ($after < 0) {
             return false;
         }
+        $user->balance = $after;
         if (!$user->save()) {
             return false;
         }
+        $this->recordBalanceLog($userId, $before, $after, $balance, $type, $meta);
         return true;
+    }
+
+    // 资金流水：每次余额变更写一行 v2_balance_log，供事后对账/审计。表未建（升级窗口）时静默跳过。
+    private function recordBalanceLog(int $userId, int $before, int $after, int $amount, ?string $type, array $meta): void
+    {
+        if (!$this->balanceLogAvailable()) {
+            return;
+        }
+        BalanceLog::create([
+            'user_id' => $userId,
+            'balance_before' => $before,
+            'balance_after' => $after,
+            'amount' => $amount,
+            'type' => $type ?? 'unknown',
+            'source_type' => $meta['source_type'] ?? null,
+            'source_id' => $meta['source_id'] ?? null,
+            'unique_key' => $meta['unique_key'] ?? null,
+            'remark' => $meta['remark'] ?? null
+        ]);
+    }
+
+    // 常驻进程里只探一次表是否存在，避免每次入账都打一条 information_schema 查询。
+    private static $balanceLogTableExists = null;
+    private function balanceLogAvailable(): bool
+    {
+        if (self::$balanceLogTableExists === null) {
+            self::$balanceLogTableExists = Schema::hasTable('v2_balance_log');
+        }
+        return self::$balanceLogTableExists;
     }
 
     public function isNotCompleteOrderByUserId(int $userId): bool

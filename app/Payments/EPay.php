@@ -69,9 +69,16 @@ class EPay {
         }
         if (empty($params['out_trade_no']) || empty($params['trade_no'])) return false;
 
+        // #25：回传实付金额（分）供 handle() 校验欠款。EPay 异步通知回显下单时提交的 money（元），
+        // 且 money 已在验签范围内（sign 覆盖全部非空参数），不可被篡改。
+        $paidAmount = (isset($params['money']) && is_numeric($params['money']))
+            ? (int) round(((float) $params['money']) * 100)
+            : null;
+
         return [
             'trade_no' => $params['out_trade_no'],
-            'callback_no' => $params['trade_no']
+            'callback_no' => $params['trade_no'],
+            'paid_amount' => $paidAmount
         ];
     }
 

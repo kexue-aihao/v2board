@@ -59,13 +59,30 @@ function run()
 
     ob_start();
 
-    $response = $kernel->handle(
-        $request = Illuminate\Http\Request::capture()
-    );
+    try {
+        $response = $kernel->handle(
+            $request = Illuminate\Http\Request::capture()
+        );
 
-    $response->send();
+        $response->send();
 
-    $kernel->terminate($request, $response);
+        $kernel->terminate($request, $response);
 
-    return ob_get_clean();
+        return ob_get_clean();
+    } finally {
+        // Webman/AdapterMan 是常驻进程：PDO 连接跨请求复用。若某请求在开着 DB 事务时抛异常
+        // （例如 abort() 落在 DB::beginTransaction() 与 DB::commit() 之间，Laravel 不会自动回滚
+        // 手动开启的事务），事务会残留到下一个请求 —— 后续 beginTransaction 变成嵌套 savepoint、
+        // commit 不真正提交，资金写入的持久性与隔离性都不再可靠。这里在每个请求收尾兜底回滚所有
+        // 未提交事务；正常请求 transactionLevel 恒为 0，是零成本空操作。整段自带 try/catch，
+        // 兜底逻辑本身绝不影响already-sent的响应。
+        try {
+            foreach (app('db')->getConnections() as $connection) {
+                while ($connection->transactionLevel() > 0) {
+                    $connection->rollBack();
+                }
+            }
+        } catch (\Throwable $e) {
+        }
+    }
 }

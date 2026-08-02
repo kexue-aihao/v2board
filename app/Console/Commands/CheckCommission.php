@@ -62,7 +62,8 @@ class CheckCommission extends Command
     {
         $orders = Order::where('commission_status', 1)
             ->where('invite_user_id', '!=', NULL)
-            ->get();
+            ->whereIn('status', [3, 4])   // 只对已完成/已折抵的订单派佣金：原来不过滤订单状态，
+            ->get();                       // 一张变成 commission_status=1 后又被取消(status=2)的单仍会派佣。
         foreach ($orders as $order) {
             DB::beginTransaction();
             if (!$this->payHandle($order->invite_user_id, $order)) {
@@ -93,19 +94,27 @@ class CheckCommission extends Command
             ];
         }
         for ($l = 0; $l < $level; $l++) {
-            $inviter = User::find($inviteUserId);
+            $inviter = User::lockForUpdate()->find($inviteUserId);
             if (!$inviter) continue;
             if (!isset($commissionShareLevels[$l])) continue;
-            $commissionBalance = $order->commission_balance * ($commissionShareLevels[$l] / 100);
+            $commissionBalance = (int)round($order->commission_balance * ($commissionShareLevels[$l] / 100));
             if (!$commissionBalance) continue;
+            // 上级入账：提现关闭时进 balance（走 addBalance 加锁记流水），否则进 commission_balance（原子加）。
+            // 金额已取整到分。原为无锁读改写：同一上级并发/多笔佣金会丢失更新。
             if ((int)config('v2board.withdraw_close_enable', 0)) {
-                $inviter->balance = $inviter->balance + $commissionBalance;
+                if (!(new \App\Services\UserService())->addBalance($inviter->id, $commissionBalance, 'commission_payout', [
+                    'source_type' => 'order',
+                    'source_id' => $order->id,
+                    'remark' => $order->trade_no
+                ])) {
+                    DB::rollBack();
+                    return false;
+                }
             } else {
-                $inviter->commission_balance = $inviter->commission_balance + $commissionBalance;
-            }
-            if (!$inviter->save()) {
-                DB::rollBack();
-                return false;
+                if (User::where('id', $inviter->id)->update(['commission_balance' => DB::raw('commission_balance + ' . $commissionBalance)]) !== 1) {
+                    DB::rollBack();
+                    return false;
+                }
             }
             if (!CommissionLog::create([
                 'invite_user_id' => $inviteUserId,

@@ -130,10 +130,17 @@ class Epusdt
             return false;
         }
 
+        // 空密钥无法安全验签：缺 token 时直接拒绝，而不是用空串继续算签名（否则任何人都能自签）。
+        // 与 PaymentService 的「驱动名必须匹配配置行」形成纵深防御——即便绑定被绕过，空密钥也签不出。
+        $token = trim((string) ($this->config['epusdt_token'] ?? ''));
+        if ($token === '') {
+            return false;
+        }
+
         $signature = strtolower((string) $params['signature']);
         unset($params['signature']);
 
-        if (!hash_equals($this->makeSignature($params, trim((string) ($this->config['epusdt_token'] ?? ''))), $signature)) {
+        if (!hash_equals($this->makeSignature($params, $token), $signature)) {
             return false;
         }
 

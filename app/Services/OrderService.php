@@ -53,20 +53,25 @@ class OrderService
         $order = $this->order;
         if ((int)$order->status === 3) return true;
         $this->user = User::find($order->user_id);
-        if ($order->type == 9) {
-            DB::beginTransaction();
-            $this->user->balance += $order->total_amount + $this->getbounus($order->total_amount);
-
-            if (!$this->user->save()) {
-                DB::rollBack();
+        if ((int)$order->type === 9) {
+            // 充值入账走加锁的 addBalance（内部 User::lockForUpdate + 基于新鲜值加减）。
+            // 原实现对 $this->user（第 55 行 User::find，未加锁）做 balance += 后整行 save()，
+            // 是无锁的读-改-写：与并发的下单扣款交错时会整列覆盖，把已花掉的余额写回来。
+            // 本方法已在 open() 的 DB::transaction 内（订单行已 lockForUpdate），去掉这里多余的
+            // 嵌套 begin/commit —— 出错时 abort 会让外层事务整体回滚。
+            $delta = (int)($order->total_amount + $this->getbounus($order->total_amount));
+            if (!(new UserService())->addBalance($order->user_id, $delta, 'deposit', [
+                'source_type' => 'order',
+                'source_id' => $order->id,
+                'unique_key' => 'deposit:' . $order->id,
+                'remark' => $order->trade_no
+            ])) {
                 abort(500, '充值失败');
             }
             $order->status = 3;
             if (!$order->save()) {
-                DB::rollBack();
                 abort(500, '充值失败');
             }
-            DB::commit();
             return true;
         }
 
@@ -217,7 +222,14 @@ class OrderService
         if ($user->discount) {
             $order->discount_amount = $order->discount_amount + ($order->total_amount * ($user->discount / 100));
         }
+        // 夹紧折扣与应付金额（修复：券折扣在 CouponService 里只按券自身范围 clamp 过一次，叠加 VIP
+        // 折扣后既不夹上限也不夹下限，可使 total_amount 变负 —— 负数被免支付通道当成「免费」放行，
+        // 还会在 setOrderType 里凭空造出 refund_amount）。折扣额取整并限定在 [0, 原价]，应付随之非负。
+        $order->discount_amount = (int)round($order->discount_amount);
+        if ($order->discount_amount < 0) $order->discount_amount = 0;
+        if ($order->discount_amount > $order->total_amount) $order->discount_amount = $order->total_amount;
         $order->total_amount = $order->total_amount - $order->discount_amount;
+        if ($order->total_amount < 0) $order->total_amount = 0;
     }
 
     public function setInvite(User $user):void
@@ -358,24 +370,52 @@ class OrderService
         return true;
     }
 
-    public function cancel():bool
+    public function cancel(): bool
     {
-        $order = $this->order;
-        DB::beginTransaction();
-        $order->status = 2;
-        if (!$order->save()) {
-            DB::rollBack();
+        // 旧实现无锁、不复核状态、不幂等：status=2 是按主键的无条件 UPDATE（不带 AND status=0），
+        // 且 updated_at 恒 dirty 使重复 save 照样成功，每次都 addBalance(+balance_amount) 退一次款。
+        // 四个入口（用户端/管理端/店面/OrderHandleJob）共用本方法 + Webman 多进程真并发 →
+        // 并发/重试取消同一订单可把同一笔 balance_amount 无限次退回余额（本次线上 1 元变 0 元购的成因）。
+        // 改为与同文件 completeFree()/open() 逐字同构的加锁范式，一处修复覆盖全部入口。
+        if (!$this->order->id) return false;
+        try {
+            return (bool)DB::transaction(function () {
+                $order = Order::where('id', $this->order->id)
+                    ->lockForUpdate()
+                    ->first();
+                if (!$order) return false;
+                // 幂等：已取消视为成功，绝不重复退款（并发、重试、跨入口重复调用都在这里归零）。
+                if ((int)$order->status === 2) {
+                    $this->order = $order;
+                    return true;
+                }
+                // 白名单：只允许「待支付(0) → 已取消(2)」。禁止把已支付(1)/已开通(3)盲写回取消再退款
+                // —— 这与四个调用方控制器里既有的 `status !== 0` 前置检查一致，此处在行锁内强制执行。
+                if ((int)$order->status !== 0) return false;
+                // 原子状态跃迁：并发下只有一个请求能命中 status=0 并把它改成 2，其余影响行数为 0。
+                $affected = Order::where('id', $order->id)
+                    ->where('status', 0)
+                    ->update(['status' => 2]);
+                if ($affected !== 1) return false;
+                $order->status = 2;
+                $this->order = $order;
+                if ($order->balance_amount) {
+                    // 退款与状态跃迁同事务：退款失败则整体回滚，订单不会停在「已取消但没退钱」。
+                    // unique_key 让「一张订单只退一次」成为数据库层不变式（与上面的状态白名单双保险）。
+                    if (!(new UserService())->addBalance($order->user_id, (int)$order->balance_amount, 'order_cancel_refund', [
+                        'source_type' => 'order',
+                        'source_id' => $order->id,
+                        'unique_key' => 'order_cancel_refund:' . $order->id,
+                        'remark' => $order->trade_no
+                    ])) {
+                        throw new \RuntimeException('cancel refund failed');
+                    }
+                }
+                return true;
+            });
+        } catch (\Throwable $e) {
             return false;
         }
-        if ($order->balance_amount) {
-            $userService = new UserService();
-            if (!$userService->addBalance($order->user_id, $order->balance_amount)) {
-                DB::rollBack();
-                return false;
-            }
-        }
-        DB::commit();
-        return true;
     }
 
     private function setSpeedLimit($speedLimit)
