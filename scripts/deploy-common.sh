@@ -430,3 +430,295 @@ deploy_chown() {
         chown -R www .
     fi
 }
+
+# ---- Laravel 计划任务 --------------------------------------------------------
+# app/Console/Kernel.php 里的 schedule 全靠外部每分钟调用一次 artisan schedule:run，
+# 本仓库没有任何常驻载体承担这件事（config/ 下没有 process.php，webman.php 里也没有
+# Timer）。缺这条 cron 时站点表面完全正常，但流量重置、统计、订单/工单检查、订阅风险
+# 与审计聚合/清理全部静默停摆，所以安装和升级都要保证它存在。
+# 选 cron 而不是 webman 自定义进程：cron 不依赖 webman 进程存活（升级期间 webman 会被
+# 停掉几十秒），与上游 v2board 的运维习惯一致，也不会在 supervisor 托管下被重复拉起。
+V2BOARD_CRON_MARKER='# v2board-schedule'
+
+# 可选 CRON_USER：把条目写到指定用户的 crontab（aaPanel 下通常是 www，可让
+# schedule:run 产生的日志属主与 Webman 一致）。默认写当前用户。
+deploy_crontab() {
+    if [ -n "${CRON_USER:-}" ]; then
+        crontab -u "$CRON_USER" "$@"
+    else
+        crontab "$@"
+    fi
+}
+
+deploy_cron_php_bin() {
+    local bin="${PHP_BIN:-php}"
+    case "$bin" in
+        /*) ;;
+        # cron 的 PATH 很短，必须落成绝对路径。
+        *) bin="$(command -v "$bin" 2>/dev/null || echo "$bin")" ;;
+    esac
+    echo "$bin"
+}
+
+deploy_cron_php_ini() {
+    case "${PHP_INI:-cli-php.ini}" in
+        /*) echo "$PHP_INI" ;;
+        *)  echo "$ROOT_DIR/${PHP_INI:-cli-php.ini}" ;;
+    esac
+}
+
+# 可被 deploy_install_cron 改成 /dev/null（日志文件建不出来时的兜底，见 deploy_cron_prepare_log）。
+deploy_cron_log() {
+    echo "${V2BOARD_CRON_LOG:-$ROOT_DIR/storage/logs/schedule-cron.log}"
+}
+
+# artisan 用 PHP_INI（扩展齐全的那套），与 deploy_php 保持一致；不要用 WEBMAN_PHP_INI，
+# 它带 disable_functions。
+#
+# 输出去向是分开的，不是 >> /dev/null 2>&1：
+#   stdout -> /dev/null：Laravel 8 的 schedule:run 在没有到期任务时每分钟都会往 stdout 打一行
+#             "No scheduled commands are ready to run."，落盘就是每年几十 MB 的纯噪音；扔掉它
+#             同时也避免 cron 每分钟发一封邮件。
+#   stderr -> storage/logs/schedule-cron.log：这条 cron 最常见的真实故障（PHP 绝对路径写错、
+#             php.ini 读不到、cron 用户对项目目录没权限）全都发生在 Laravel 启动之前，
+#             storage/logs/laravel.log 里一个字都不会有。全扔 /dev/null 的话，条目看着装好了却
+#             永远不干活，唯一症状只剩后台「系统状态」一颗红灯，没有任何可查的现场。
+# 整段用 { ...; } 包起来再重定向，这样 cd 失败（目录被删、权限不足）的报错也会进日志，
+# 而不是只有 php 的报错进日志。
+deploy_cron_line() {
+    local log redirect
+    log="$(deploy_cron_log)"
+    if [ "$log" = /dev/null ]; then
+        redirect='>> /dev/null 2>&1'
+    else
+        redirect="$(printf ">> /dev/null 2>> '%s'" "$log")"
+    fi
+    printf "* * * * * { cd '%s' && '%s' -c '%s' artisan schedule:run; } %s" \
+        "$ROOT_DIR" "$(deploy_cron_php_bin)" "$(deploy_cron_php_ini)" "$redirect"
+}
+
+# 日志文件必须在写 crontab 之前就存在且对 cron 用户可写：`2>> 文件` 打不开时 shell 会在执行
+# schedule:run 之前就放弃整条命令，那等于调度彻底不跑 —— 比原来的 /dev/null 更糟。
+# 因此这里先建好文件，指定了 CRON_USER 就把属主交给它（未指定时属主就是当前用户，天然可写）。
+deploy_cron_prepare_log() {
+    local log
+    log="$(deploy_cron_log)"
+    [ -d "$(dirname "$log")" ] || return 1
+    if [ ! -f "$log" ]; then
+        : >> "$log" 2>/dev/null || return 1
+    fi
+    if [ -n "${CRON_USER:-}" ] && [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; then
+        chown "$CRON_USER" "$log" 2>/dev/null || true
+    fi
+    [ -w "$log" ] || return 1
+}
+
+deploy_cron_manual_hint() {
+    echo "WARNING: the scheduler cron entry was NOT installed: $1" >&2
+    echo "Laravel's scheduler will not run at all: traffic resets, statistics, order/ticket" >&2
+    echo "checks and the audit aggregation stay silently stopped." >&2
+    echo "Add this line by hand (crontab -e) and re-run the check afterwards:" >&2
+    echo "  $2" >&2
+}
+
+deploy_cron_daemon_hint() {
+    command -v pgrep >/dev/null 2>&1 || return 0
+    if pgrep -x crond >/dev/null 2>&1 || pgrep -x cron >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "WARNING: no cron daemon (cron/crond) process found; the entry will never fire." >&2
+    echo "Enable it, e.g.: systemctl enable --now crond   (Debian/Ubuntu: cron)" >&2
+}
+
+# 只有 ROOT_DIR 后面紧跟 /、引号、空白、命令分隔符或行尾时才算「指向本目录」。裸的子串
+# 匹配会让 /www/wwwroot/v2board 把隔壁 /www/wwwroot/v2board-test 的条目认成自己的，结果
+# 本站的 cron 永远写不进去，调度依旧不跑 —— 那是最难查的一种漏配。
+deploy_cron_text_targets_root() {
+    local rest="$1"
+    while [ -n "$rest" ]; do
+        case "$rest" in
+            *"$ROOT_DIR"*) ;;
+            *) return 1 ;;
+        esac
+        rest="${rest#*"$ROOT_DIR"}"
+        case "$rest" in
+            ''|/*|\'*|\"*|[[:space:]]*|'&'*|';'*|'|'*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# 从 stdin 逐行找「未被注释掉、且指向本目录」的 schedule:run。注释行不算已配置：被 # 掉的
+# 条目本来就不会跑。
+deploy_cron_has_schedule_run() {
+    local line
+    while IFS= read -r line; do
+        case "$line" in
+            ''|\#*) continue ;;
+        esac
+        case "$line" in
+            *schedule:run*) ;;
+            *) continue ;;
+        esac
+        if deploy_cron_text_targets_root "$line"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# 幂等：几种"已配置"都算命中并原样跳过 —— 我们自己的标记行、运维手写的任何指向本目录的
+# schedule:run、/etc/crontab 与 /etc/cron.d 里的系统级条目、其它用户的 crontab（/var/spool/cron）、
+# 以及 aaPanel 面板任务脚本。命中时一个字都不改。
+#
+# 注意这里一律用 here-string 而不是 `printf ... | deploy_cron_has_schedule_run`：读取端一旦匹配
+# 就 return，管道左边的 printf/grep 会吃到 SIGPIPE 退出 141，而 init.sh / update.sh 都是
+# `set -o pipefail`，整条管道于是返回 141 —— 明明已配置却被判成"没配"，再追加一条重复条目。
+# here-string 走临时文件，没有写端，不存在这个洞。
+deploy_cron_already_configured() {
+    local current="$1" conf
+    if grep -Fxq "$V2BOARD_CRON_MARKER $ROOT_DIR" <<< "$current"; then
+        echo "Scheduler cron: marker entry already present; crontab left untouched."
+        return 0
+    fi
+    if deploy_cron_has_schedule_run <<< "$current"; then
+        echo "Scheduler cron: an existing schedule:run entry for this directory was found; crontab left untouched."
+        return 0
+    fi
+    for conf in /etc/crontab /etc/cron.d/*; do
+        [ -f "$conf" ] || continue
+        if deploy_cron_has_schedule_run < "$conf"; then
+            echo "Scheduler cron: an existing schedule:run entry for this directory was found in $conf; crontab left untouched."
+            return 0
+        fi
+    done
+    # 其它用户的 crontab。运维常把调度装在 www 名下（`crontab -u www -e`，好让 storage/logs 里
+    # 新建的文件属主与 Webman 一致），而 update.sh 一般是以 root 跑的：只看 `crontab -l`（= root
+    # 自己那份）就完全看不见 www 的条目，于是给一个本来配好的站点再追加一条 —— 每分钟两次
+    # schedule:run，而 send:remindMail / v2board:statistics / reset:traffic 都没有
+    # withoutOverlapping，会在同一分钟跑两遍（重复发信、重复统计）。
+    # 只有 root 读得到这些目录；非 root 时循环里的 -r 判断会把它们统统跳过，行为与加固前一致。
+    for conf in /var/spool/cron/* /var/spool/cron/crontabs/*; do
+        [ -f "$conf" ] || continue
+        [ -r "$conf" ] || continue
+        if deploy_cron_has_schedule_run < "$conf"; then
+            echo "Scheduler cron: an existing schedule:run entry for this directory was found in $conf (another user's crontab); crontab left untouched."
+            return 0
+        fi
+    done
+    # aaPanel 的面板计划任务把命令正文写进 /www/server/cron/<id>，crontab 里只留一行
+    # `/bin/bash /www/server/cron/<id>`，既没有 schedule:run 也没有本目录。不看这些脚本就会
+    # 把面板里已经配好的调度判成缺失，于是再追加一条 —— 每分钟两次 schedule:run，而
+    # v2board:statistics / reset:traffic / send:remindMail 这些没有 withoutOverlapping 的
+    # 命令就会在同一分钟里跑两遍（重复发信、重复统计）。
+    for conf in /www/server/cron/*; do
+        [ -f "$conf" ] || continue
+        case "$conf" in
+            *.log) continue ;;
+        esac
+        if grep -Fq 'schedule:run' "$conf" 2>/dev/null \
+           && deploy_cron_text_targets_root "$(cat "$conf" 2>/dev/null)"; then
+            echo "Scheduler cron: a panel task for this directory was found in $conf; crontab left untouched."
+            return 0
+        fi
+    done
+    return 1
+}
+
+# systemd timer 托管的站点：schedule:run 写在某个 .service 的 ExecStart 里，crontab 与
+# /etc/cron.d 里一个字都没有，光靠上面那些扫描认不出来。这里只告警不跳过 —— 认成"已配置"却
+# 其实 timer 没启用，会让调度彻底不跑，比多一条 cron 危险得多。真是 timer 在跑的话，用
+# SKIP_CRON=1 跑部署脚本即可整段跳过。
+deploy_cron_systemd_hint() {
+    local unit found=0
+    for unit in /etc/systemd/system/*.service /etc/systemd/system/*.timer; do
+        [ -f "$unit" ] || continue
+        grep -Fq 'schedule:run' "$unit" 2>/dev/null || continue
+        deploy_cron_text_targets_root "$(cat "$unit" 2>/dev/null)" || continue
+        echo "WARNING: a systemd unit for this directory already runs schedule:run: $unit" >&2
+        found=1
+    done
+    [ "$found" = 1 ] || return 0
+    echo "A cron entry is being added anyway (an existing unit file does not prove its timer is" >&2
+    echo "enabled, and skipping on a disabled timer would stop the scheduler entirely)." >&2
+    echo "If that unit really is this site's scheduler, delete the cron entry just added and" >&2
+    echo "re-run deployments with SKIP_CRON=1 to leave the crontab alone." >&2
+}
+
+deploy_install_cron() {
+    # V2BOARD_CRON_LOG 声明成 local，兜底只影响本次调用，不会泄漏到后续调用。
+    local line current tmp owner V2BOARD_CRON_LOG=""
+
+    # 运维已经用别的载体（systemd timer、外部调度器、容器 sidecar）跑 schedule:run 时的显式退路，
+    # 脚本一个字都不改 crontab。
+    if [ "${SKIP_CRON:-0}" = "1" ]; then
+        echo "Scheduler cron: SKIP_CRON=1, crontab left untouched."
+        echo "Make sure something else calls artisan schedule:run every minute for $ROOT_DIR." >&2
+        return 0
+    fi
+
+    owner="${CRON_USER:-$(id -un 2>/dev/null || echo "current user")}"
+
+    if ! command -v crontab >/dev/null 2>&1; then
+        deploy_cron_prepare_log || V2BOARD_CRON_LOG=/dev/null
+        deploy_cron_manual_hint "the crontab command is not available" "$(deploy_cron_line)"
+        return 0
+    fi
+
+    # 没有 crontab 时 crontab -l 会以非 0 退出，这不是错误。
+    current="$(deploy_crontab -l 2>/dev/null || true)"
+
+    # 已配置的站点在这里原样返回：不建日志文件、不动 crontab、不打印任何多余东西。
+    if deploy_cron_already_configured "$current"; then
+        deploy_cron_daemon_hint
+        return 0
+    fi
+
+    # 日志文件建不出来（storage/logs 不可写等）时退回历史写法 >> /dev/null 2>&1：宁可没有现场，
+    # 也不能让 `2>> 文件` 打不开而使整条 cron 在执行 schedule:run 之前就放弃。
+    if ! deploy_cron_prepare_log; then
+        echo "WARNING: cannot prepare $(deploy_cron_log) for the cron entry; stderr will go to" >&2
+        echo "/dev/null instead, so a failing entry will leave no trace. Check permissions on" >&2
+        echo "$ROOT_DIR/storage/logs." >&2
+        V2BOARD_CRON_LOG=/dev/null
+    fi
+    line="$(deploy_cron_line)"
+
+    # 有 schedule:run 但没有一条提到本目录：多半是同机另一个站点（正常，两个站点各需一条），
+    # 但也可能是本站点用了我们认不出的写法（典型是 docroot 为软链，crontab 里的路径与
+    # ROOT_DIR 解析结果不同）。后者会变成每分钟两次 schedule:run，而 v2board:statistics /
+    # reset:traffic / send:remindMail 没有 withoutOverlapping，会在同一分钟跑两遍（重复统计、
+    # 重复发信）。多站点是合法诉求所以照旧追加，但必须把这件事说出来让运维自己核一眼。
+    # 用一条 grep -E 而不是 `grep -v ... | grep -Fq`：管道右边匹配上就退出，左边会吃 SIGPIPE 退出
+    # 141，而 pipefail 会把 141 当成整条管道的结果，于是该告警在大 crontab 上莫名不打印。
+    if grep -Eq '^[[:space:]]*[^#[:space:]].*schedule:run' <<< "$current"; then
+        echo "WARNING: the crontab already has schedule:run entries, none of which targets $ROOT_DIR." >&2
+        echo "Appending one for this directory anyway (another site on the same host needs its own)." >&2
+        echo "If one of the existing entries is in fact this site — a symlinked document root, say —" >&2
+        echo "remove the duplicate by hand: two schedule:run per minute means send:remindMail," >&2
+        echo "reset:traffic and v2board:statistics can each run twice in the same minute." >&2
+    fi
+    deploy_cron_systemd_hint
+
+    tmp="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/v2board-cron.$$")"
+    {
+        # 原有条目逐字保留，只在末尾追加，绝不覆盖运维已有的 crontab。
+        if [ -n "$current" ]; then
+            printf '%s\n' "$current"
+        fi
+        printf '%s %s\n' "$V2BOARD_CRON_MARKER" "$ROOT_DIR"
+        printf '%s\n' "$line"
+    } > "$tmp"
+
+    # 写入失败时不吞 stderr：crontab 自己的报错（权限、语法）才是运维要看的东西。
+    if deploy_crontab "$tmp"; then
+        rm -f "$tmp"
+        echo "Scheduler cron installed for $owner:"
+        echo "  $line"
+        deploy_cron_daemon_hint
+    else
+        rm -f "$tmp"
+        deploy_cron_manual_hint "writing the crontab of $owner failed (permission?)" "$line"
+    fi
+    return 0
+}

@@ -459,6 +459,8 @@ IP 归属字段：
 | php artisan ip:backfill-subscribe-locations | 回填历史 IP 归属 |
 | php artisan subscription:risk | 计算已完成风险周期 |
 | php artisan horizon:terminate | 终止 Horizon Worker |
+| php artisan schedule:run | 执行一次当前到期的计划任务，由 cron 每分钟调用 |
+| php artisan schedule:list | 列出全部计划任务及其执行时间 |
 
 aaPanel 升级示例：
 
@@ -485,6 +487,111 @@ Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorc
 托管情况下必须走 supervisorctl：supervisor 配置通常是 `autorestart=true`，手工 `webman.php stop` 之后 supervisord 会在几秒内把它重新拉起来占住端口，随后部署脚本自己的 start 就会撞上 `Address already in use`，并且起出一套 supervisord 不认、进程属主也不对的实例。
 
 另需注意 supervisor 配置里的 `command=` 用的是哪个 PHP。若写成 `command=php -c cli-php.ini webman.php start`，实际生效的是 PATH 上的 php，可能与 PHP_BIN 指向的版本不同，deploy_check_webman_runtime 校验的则是 PHP_BIN。两者版本不一致时请把 command 改成绝对路径。
+
+### 11.1 计划任务（部署必需）
+
+计划任务没有常驻载体：`config/` 下没有 process.php，webman.php 里也没有 Timer，`app/Console/Kernel.php` 里的全部定时任务都依赖系统 cron 每分钟调用一次 `artisan schedule:run`。**缺这条 cron 时站点表面完全正常**，前台能开、能下单、能订阅，但下面那张表里的任务一个都不会跑。
+
+init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），正常情况下无需手工配置。写入失败时脚本不会静默跳过，会打印 WARNING 并给出可直接粘贴的条目，形如：
+
+    # v2board-schedule /www/wwwroot/v2board
+    * * * * * { cd '/www/wwwroot/v2board' && '/www/server/php/85/bin/php' -c '/www/server/php/85/etc/php.ini' artisan schedule:run; } >> /dev/null 2>> '/www/wwwroot/v2board/storage/logs/schedule-cron.log'
+
+| 项目 | 说明 |
+| --- | --- |
+| 标记行 | `# v2board-schedule <项目目录>`，脚本靠它识别自己写过的条目 |
+| 幂等 | 下列任一命中就整段跳过、一个字都不改：标记行已存在；crontab 里已有指向本目录的 schedule:run（含运维手写的）；`/etc/crontab` 或 `/etc/cron.d/*` 里已有同类条目；**`/var/spool/cron/*` 或 `/var/spool/cron/crontabs/*`（即别的用户的 crontab）里已有同类条目**；`/www/server/cron/*` 里已有提到本目录与 schedule:run 的面板计划任务脚本。追加时已有 crontab 内容逐字保留，只在末尾追加，不覆盖运维其它条目 |
+| 别的用户的 crontab | 运维常把调度装在 www 名下（`crontab -u www -e`，好让 storage/logs 里新建文件的属主与 Webman 一致），而 `bash update.sh` 一般以 root 跑：只看 `crontab -l`（root 自己那份）就看不见 www 的条目。脚本因此在 root 下额外扫 `/var/spool/cron`，否则会给一个本来配好的站点再追加一条。非 root 时这些文件读不到，会自动跳过 |
+| 面板计划任务 | aaPanel 把命令正文写进 `/www/server/cron/<id>`，crontab 里只留一行 `/bin/bash /www/server/cron/<id>`，光看 crontab 会误判成缺失。脚本因此额外扫这批文件 —— 否则会重复追加一条，每分钟两次 schedule:run，`v2board:statistics`、`reset:traffic`、`send:remindMail` 这些没有 withoutOverlapping 的命令会在同一分钟跑两遍 |
+| 重复告警 | crontab 里已有 schedule:run、但没有一条提到本目录时，脚本照旧追加（同机多站点各需一条），同时打印 WARNING。若其中某条其实就是本站点（典型是 docroot 为软链，路径与解析后的目录不一致），请手工删掉重复的那条 |
+| SKIP_CRON | `SKIP_CRON=1 bash update.sh` 让脚本完全不碰 crontab。**用别的载体跑调度时请一直带上它**：典型是 systemd timer、外部调度器、容器 sidecar —— 这些脚本认不出来（systemd 单元只会打印 WARNING 后照旧追加，因为「单元文件存在」并不等于「timer 已启用」，认成已配置反而可能让调度彻底不跑） |
+| PHP 路径 | 沿用 PHP_BIN / PHP_INI 的探测结果并落成绝对路径（cron 的 PATH 很短，写 `php` 容易解析到别的版本）。用的是 artisan 那套 PHP_INI，不是带 disable_functions 的 WEBMAN_PHP_INI |
+| CRON_USER | 可选，把条目写进指定用户的 crontab，例如 `CRON_USER=www bash update.sh`；默认写当前用户 |
+| 日志属主 | 以 root 跑 cron 时 storage/logs 里新建的文件可能属 root，导致 Webman（www）写日志失败。aaPanel 环境建议 `CRON_USER=www`，或部署后由 update.sh 末尾的 `chown -R www .` 收尾 |
+
+条目的输出去向是分开的，不是 `>> /dev/null 2>&1`：
+
+| 流 | 去向 | 原因 |
+| --- | --- | --- |
+| stdout | `/dev/null` | 没有到期任务时 `schedule:run` 每分钟都会往 stdout 打一行 `No scheduled commands are ready to run.`，落盘就是每年几十 MB 纯噪音，也会让 cron 每分钟发一封邮件 |
+| stderr | `storage/logs/schedule-cron.log` | 这条 cron 最常见的真实故障 —— PHP 绝对路径写错、php.ini 读不到、cron 用户对项目目录没权限 —— 全都发生在 Laravel 启动之前，`storage/logs/laravel.log` 里一个字都不会有。全扔 `/dev/null` 的话，条目看着装好了却永远不干活，唯一症状只剩后台「系统状态」一颗红灯，没有任何现场可查 |
+
+要点：
+
+* 整条命令用 `{ ...; }` 包起来再重定向，这样 `cd` 失败（目录被删、权限不足）的报错也会进日志，而不是只有 php 的报错进日志。
+* 写 crontab 之前脚本会先建好 `schedule-cron.log`（指定了 `CRON_USER` 且以 root 运行时把属主交给它）。这一步是必需的：`2>> 文件` 打不开时 shell 会在执行 `schedule:run` 之前就放弃整条命令，等于调度彻底不跑。建不出来（storage/logs 不可写等）时脚本打印 WARNING 并退回历史写法 `>> /dev/null 2>&1`，宁可没有现场也不让调度停摆。
+* 后来改用别的 `CRON_USER` 时，请顺手确认 `schedule-cron.log` 对新用户可写（`ls -l storage/logs/schedule-cron.log`）；属主不对会让整条 cron 静默失效。
+* 这个文件不参与 Laravel 的 daily 轮转。健康站点它长期是空的；一旦有内容说明每分钟都在报错，修好后自行 `: > storage/logs/schedule-cron.log` 清空，或纳入 logrotate。
+* 存量站点的条目不会被改写：幂等检查一命中脚本就整段返回，既不动 crontab 也不建日志文件，所以本次改动之前装好的 `>> /dev/null 2>&1` 条目保持原样。想给它加上日志，手工把那一行改成上面的形式即可（或删掉条目与标记行后重跑 update.sh）。
+
+漏配 cron 的实际后果（下表即 Kernel.php 中的全部条目）：
+
+| 计划任务 | 频率 | 漏配后果 |
+| --- | --- | --- |
+| traffic:update | 每分钟 | 节点上报的流量不入账，用户用量与统计长期为 0 |
+| v2board:statistics | 0:10 | 每日统计（收入、流量排行、节点统计）停更 |
+| subscription:risk | 0:20 | 已完成的固定 30 天风险周期永不评估，风险状态卡在 pending |
+| check:order | 每分钟 | 订单不结算，用户付款后套餐不开通 |
+| check:commission | 每 15 分钟 | 佣金不确认，推广结算停摆 |
+| check:ticket | 每分钟 | 工单提醒不发送 |
+| check:renewal | 22:30 | 续费提醒不发送 |
+| reset:traffic | 每日 | **流量不重置**，用户跨周期后流量不恢复 |
+| reset:log | 每日 | 日志表无限增长 |
+| audit:ip-link | 每小时 | 「IP + 账号 + UA」累积记录停更，v2_ip_account_link 不再累加命中与时间区间 |
+| audit:clean | 0:40 | 订阅审计日志保留期不生效，原始日志表无限增长 |
+| token-history:reconcile | 0:50 | 订阅凭证历史不补齐，缺失记录不会被发现 |
+| send:remindMail | 11:30 | 到期与流量提醒邮件不发送 |
+| horizon:snapshot | 每 5 分钟 | 队列指标图表空白 |
+| telegram:verify-bindings | 按 telegram_binding_check_interval（默认 300 秒） | Telegram 绑定校验停摆 |
+
+其中 audit:ip-link 与 audit:clean 是一对：聚合每小时整点跑，清理在 0:40，正常顺序下当天要被保留期删掉的原始行一定已经进过累积表。若只补了清理却没有聚合（例如手工只配了 audit:clean），被删掉的那段历史无法再恢复。
+
+给长期漏配的站点补上 cron 后，第一次 schedule:run 会把当前时刻到期的任务照常跑一遍（例如当天的提醒邮件、到期的流量重置），这是预期行为，不是重复执行；补配后的第一天建议留意邮件与队列量。
+
+验证计划任务真的在跑：
+
+    # 1. 条目是否写进去了（以 root 跑时别忘了看 www 那份，脚本可能写在别的用户名下）
+    crontab -l | grep -A 1 'v2board-schedule'
+    crontab -u www -l | grep -A 1 'v2board-schedule'
+
+    # 1b. 全机器一共有几条指向本目录的 schedule:run —— 应当只有 1 条。多于 1 条就是重复调度，
+    #     send:remindMail / reset:traffic / v2board:statistics 会在同一分钟跑两遍
+    grep -rl 'schedule:run' /var/spool/cron /etc/crontab /etc/cron.d /www/server/cron 2>/dev/null \
+        | xargs -r grep -H 'schedule:run' | grep -v '^[^:]*: *#' | grep '/www/wwwroot/v2board'
+
+    # 2. cron 守护进程是否在跑（Debian/Ubuntu 是 cron）
+    systemctl status crond || pgrep -x crond || pgrep -x cron
+
+    # 3. 手动跑一次，看到期任务是否逐条执行
+    /www/server/php/85/bin/php -c /www/server/php/85/etc/php.ini artisan schedule:run -v
+
+    # 4. 列出全部条目与执行时间
+    php artisan schedule:list
+
+    # 5. cron 是否真的触发过（CentOS 用 /var/log/cron，Debian 用 journalctl）
+    grep 'schedule:run' /var/log/cron | tail -n 5
+    journalctl -u cron -S -10min | tail -n 20
+
+    # 6. 条目在 Laravel 启动之前就失败了？（PHP 路径、php.ini、目录权限）
+    #    健康站点这个文件长期是空的；有内容就是每分钟都在报错
+    tail -n 20 /www/wwwroot/v2board/storage/logs/schedule-cron.log
+    ls -l /www/wwwroot/v2board/storage/logs/schedule-cron.log
+
+最直接的信号是管理员接口 `GET /api/v1/{secure_path}/system/getSystemStatus`（`secure_path` 读取 `config('v2board.secure_path')`，全部管理员路由都挂在这个前缀下，写成 `/api/v1/admin/...` 会 404）：`Kernel::schedule()` 每次被调用都会写入缓存里的「计划任务最后检查时间」，所以返回里 `schedule` 为 true、`schedule_last_runtime` 是 120 秒内的时间戳，就说明 cron 确实每分钟在调用 schedule:run；后台「系统状态」面板读的就是这个接口。刚配好 cron 后请等满一分钟再看。
+
+### 11.2 全新安装后的必做手工步骤
+
+init.sh 负责的是「代码依赖 + 数据库 + 管理员 + 计划任务」，它刻意不启动任何常驻进程：全新安装时进程托管方式还没定，若脚本先 `webman.php start -d` 起一个裸守护进程，运维随后配好 supervisor 再 start 就会撞上 `Address already in use`，并留下一套 supervisord 不认、属主也不对的实例。脚本结束时会把下面这几步原样打印出来。
+
+| 步骤 | 说明 |
+| --- | --- |
+| Web 服务器 | 站点根目录指向 `public/`，并把动态请求反代到 `http://127.0.0.1:6600`（端口取自 webman.php） |
+| 启动 Webman | supervisor 托管（推荐）或 `PHP_BIN -c cli-php.ini webman.php start -d`；supervisor 的 `command=` 必须用绝对路径的同一个 PHP 与 cli-php.ini |
+| 启动队列 | `PHP_BIN -c PHP_INI artisan horizon`，同样建议交给 supervisor。缺它则邮件、支付回调等队列任务堆积不消费 |
+| 计划任务 | init.sh 已写入，按 11.1 验证一遍 |
+| Redis | `.env.example` 里 CACHE_DRIVER、QUEUE_CONNECTION、SESSION_DRIVER 全是 redis，且安装器不会询问 Redis 参数。Redis 未装或不在 127.0.0.1:6379 时，装完就是 500 —— 需手工改 .env 的 REDIS_* 后 `artisan config:clear` |
+
+init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOST/DB_DATABASE/DB_USERNAME/DB_PASSWORD 四项；DB_PORT、Redis、邮件、APP_URL 都保持模板默认值，需要按站点情况自行修改。`public/theme/` 下 default、ez、signature 三套主题产物随仓库发布，无需构建；`config/theme/*.php` 由前台或后台首次访问主题时自动生成（仓库里只有一个 .gitignore），因此该目录必须对运行用户可写。
 
 ## 十二、安全要求
 

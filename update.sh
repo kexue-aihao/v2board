@@ -69,6 +69,9 @@ deploy_php artisan optimize:clear
 deploy_php artisan ip:clear-location-cache
 deploy_php artisan horizon:terminate || true
 deploy_start_webman
+# 升级也要跑：早于本次改动安装的站点从来没被写过这条 cron，而检查是幂等的 —— 运维手写的
+# 条目（或系统级 /etc/cron.d 条目）会被识别并原样保留，不会重复追加。
+deploy_install_cron
 deploy_chown
 
 echo "Upgrade completed."
