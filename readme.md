@@ -67,16 +67,29 @@
 
 | 方法 | 接口路径 | 鉴权 | 请求参数 | 返回/说明 |
 | --- | --- | --- | --- | --- |
-| POST | /auth/register | 无 | email、password；可选 invite_code、email_code、recaptcha_data、arithmetic_challenge_id、arithmetic_answer | 注册成功返回 auth_data；算术验证开启时服务端强制校验 |
+| POST | /auth/register | 无 | email、password；可选 invite_code、email_code、recaptcha_data、arithmetic_challenge_id、arithmetic_answer | 注册成功返回 auth_data；算术验证开启时服务端强制校验；开启 oauth_register_only 时本接口直接返回 403（仅允许第三方注册）；@telegram.invalid、@github.io 为保留域，拒绝注册 |
 | POST | /auth/login | 无 | email、password | 密码正确时返回 auth_data 或二步验证 challenge |
 | POST | /auth/verify2fa | 无 | challenge、code 或 recovery_code | 完成登录二步验证并返回 auth_data |
-| POST | /auth/2fa/setup | setup_token | setup_token | 管理员强制二步验证初始化 |
-| POST | /auth/2fa/confirm | setup_token | setup_token、code | 确认管理员二步验证 |
+| POST | /auth/2fa/setup | setup_token | setup_token | 管理员/员工（is_admin 或 is_staff）强制二步验证初始化 |
+| POST | /auth/2fa/confirm | setup_token | setup_token、code | 确认管理员/员工二步验证，返回 auth_data 及 recovery_codes |
 | GET | /auth/token2Login | 无 | token 或 verify，可选 redirect | 临时 Token 登录或跳转 |
 | POST | /auth/forget | 无 | email、email_code、password | 重置密码 |
-| POST | /auth/getQuickLoginUrl | 用户 | 可选 redirect | 生成临时快捷登录地址 |
-| POST | /comm/sendEmailVerify | 无 | 以控制器校验为准 | 发送邮箱验证码 |
-| POST | /comm/pv | 无 | 页面访问参数 | 记录页面访问 |
+| POST | /auth/getQuickLoginUrl | 用户（auth_data） | 可选 redirect | 生成临时快捷登录地址 |
+| GET | /oauth/{provider}/redirect | 无 | 路径 provider（google/github/telegram） | 跳转到第三方授权页；provider 未启用/未配置返回 503，未知 provider 返回 404 |
+| GET | /oauth/{provider}/state | 无 | 路径 provider（仅 telegram） | 为 Telegram 登录控件签发一次性 state；非 telegram 返回 404 |
+| GET | /oauth/{provider}/callback | 无 | 路径 provider（google/github）；query code、state | 第三方回调，换取 ticket 后 302 回前端 /#/login（oauth_ticket 或 oauth_error）；telegram 返回 422 |
+| POST | /oauth/complete | 无 | ticket；或 provider=telegram 时传 data、state；可选 email、email_code、recaptcha_data、invite_code | 消费 ticket 完成登录/注册；可能返回 requires_email、link_required、registration_required，或 auth_data / 二步验证 challenge |
+| POST | /comm/sendEmailVerify | 无 | email；可选 isforget（0/1）、recaptcha_data | 发送邮箱验证码；按 IP 限流，isforget=0 校验邮箱未注册、isforget=1 校验已注册 |
+| POST | /comm/pv | 无 | invite_code | 邀请码页面访问计数（pv+1） |
+
+> 管理员登录入口注册在同一路由文件（PassportRoute），但位于密钥路径下，基础路径为 /api/v1/{secure_path}/passport（secure_path 取 config `v2board.secure_path`，缺省回退 `frontend_admin_path` 或 crc32b(app.key)）。这些接口无 admin 中间件，管理员身份在控制器内校验：
+
+| 方法 | 接口路径 | 鉴权 | 请求参数 | 返回/说明 |
+| --- | --- | --- | --- | --- |
+| POST | /auth/login | 无（控制器校验 is_admin） | email、password | 管理员登录，非管理员返回 403 |
+| POST | /auth/verify2fa | 无 | challenge、code 或 recovery_code | 管理员登录二步验证（校验 challenge 归属管理员） |
+| POST | /auth/2fa/setup | setup_token | setup_token | 管理员强制二步验证初始化（校验 setup_token 归属管理员） |
+| POST | /auth/2fa/confirm | setup_token | setup_token、code | 确认管理员二步验证 |
 
 ### 4.2 Guest 接口
 
@@ -84,28 +97,44 @@
 
 | 方法 | 接口路径 | 鉴权 | 请求参数 | 返回/说明 |
 | --- | --- | --- | --- | --- |
-| GET | /comm/config | 无 | 无 | 公开站点配置 |
-| GET | /comm/arithmetic | 无 | 无 | 算术验证开启时获取题目；不返回答案 |
-| POST | /comm/arithmetic/verify | 无 | challenge_id、answer | 返回 correct、verified；不返回正确答案 |
-| GET | /plan/fetch | 无 | 无 | Signature 首页套餐列表 |
-| POST/GET | /telegram/webhook | 无 | Telegram 回调参数 | Telegram Webhook |
-| POST/GET | /payment/notify/{method}/{uuid} | 无 | 支付回调参数 | 支付平台异步通知 |
+| GET | /comm/config | 无 | 无 | 公开站点配置，响应头 `Cache-Control: no-store, no-cache, must-revalidate` |
+| GET | /comm/arithmetic | 无 | 无 | 算术验证开启时获取题目；关闭时返回 `{enabled:false}`；不返回答案 |
+| POST | /comm/arithmetic/verify | 无 | challenge_id、answer | 返回 correct、verified；关闭时直接返回 `{correct:true,verified:true}`；不返回正确答案 |
+| GET | /plan/fetch | 无 | 无 | Signature 首页套餐列表（show=1，按 sort 升序） |
+| POST | /telegram/webhook | access_token | access_token（=md5(telegram_bot_token)）及 Telegram 回调参数 | Telegram Webhook；仅接受 POST；access_token 校验失败返回 401 |
+| POST/GET | /payment/notify/{method}/{uuid} | 无 | 支付回调参数 | 支付平台异步通知，由驱动验签。已取消订单收到真实回调时记日志并通知管理员人工核实；驱动回传 paid_amount 时校验实付金额，欠款则拒绝开通并告警 |
 
 ### 4.3 公共配置扩展字段
 
-`GET /api/v1/guest/comm/config` 返回的 `data` 包含以下功能字段，并带有 `Cache-Control: no-store`：
+`GET /api/v1/guest/comm/config` 返回的 `data` 包含以下字段，并带有 `Cache-Control: no-store, no-cache, must-revalidate`：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
+| tos_url | string/null | 服务条款地址 |
+| is_email_verify | integer | 是否开启邮箱验证，0/1 |
+| is_invite_force | integer | 是否强制邀请码注册，0/1 |
+| email_whitelist_suffix | array/integer | 开启邮箱白名单时为允许的后缀数组，未开启时为 0 |
+| is_recaptcha | integer | 是否开启 reCAPTCHA，0/1 |
+| recaptcha_site_key | string/null | reCAPTCHA 站点 Key |
 | is_arithmetic_verification | integer | 是否开启注册算术验证，0/1 |
+| oauth_register_only | integer | 是否仅允许第三方(OAuth)注册，0/1；开启时主题注册页隐藏邮箱注册表单，只保留 OAuth 区 |
+| oauth.google | boolean | 是否开启 Google 第三方登录 |
+| oauth.github | boolean | 是否开启 GitHub 第三方登录 |
+| oauth.telegram | boolean | 是否开启 Telegram 第三方登录 |
+| oauth.telegram_bot_username | string/null | Telegram 登录使用的 Bot 用户名 |
+| oauth.telegram_login_domain | string/null | Telegram 登录授权域名 |
 | site_status.mode | string | `normal`、`maintenance` 或 `shutdown` |
 | site_status.title | string | 状态页标题，纯文本 |
 | site_status.message | string | 状态页说明，纯文本 |
 | site_status.recovery_at | integer/null | 预计恢复 Unix 时间戳 |
 | site_status.server_time | integer | 服务端当前 Unix 时间戳，用于客户端校准倒计时 |
 | site_status.support_url | string/null | 支持入口地址 |
+| app_description | string/null | 站点描述 |
+| app_url | string/null | 站点地址 |
+| logo | string/null | 站点 Logo 地址 |
+| frontend_theme_color | string | 前端主题色，取自主题配置的 theme_color，缺省 `default` |
 
-`maintenance` 和 `shutdown` 状态由服务端中间件阻断普通注册、登录、下单、支付和订阅业务；公共配置、管理员接口、节点通信和已创建支付回调保持可用。
+`maintenance` 和 `shutdown` 状态由服务端 `site.status` 中间件阻断普通注册、登录、下单、支付和订阅业务；公共配置、管理员接口、节点通信、Telegram Webhook 和已创建支付回调保持可用。
 
 ### 4.4 公开套餐字段
 
@@ -140,17 +169,22 @@
 | --- | --- | --- | --- |
 | GET | /info | 无 | 当前账户信息 |
 | GET | /getSubscribe | 无 | 旧版主订阅兼容信息 |
-| GET | /getStat | 无 | 用户流量统计 |
+| GET | /getStat | 无 | 用户统计（待支付订单、待处理工单、邀请人数） |
 | GET | /checkLogin | 无 | 登录状态 |
-| POST | /update | 以控制器校验为准 | 修改用户资料 |
-| POST | /changePassword | 旧密码、新密码等 | 修改密码 |
-| GET | /resetSecurity | 无 | 重置安全信息 |
+| POST | /update | auto_renewal、remind_expire、remind_traffic（均 0/1） | 修改用户资料 |
+| POST | /changePassword | old_password、new_password（≥8 位） | 修改密码，成功后注销全部会话 |
+| POST | /resetPassword | current_password | 系统生成新密码并返回明文，成功后注销全部会话 |
+| GET | /resetSecurity | 无 | 重置 UUID/Token 并返回新订阅地址 |
 | GET | /unbindTelegram | 无 | 解绑 Telegram |
+| POST | /newPeriod | 无 | 提前开启新的流量周期（需开启 allow_new_period） |
 | GET | /getActiveSession | 无 | 获取当前会话 |
-| POST | /removeActiveSession | 会话参数 | 删除会话 |
-| POST | /transfer | 账户转移参数 | 转移账户流量 |
-| POST | /redeemgiftcard | 礼品卡参数 | 兑换礼品卡 |
+| POST | /removeActiveSession | session_id | 删除指定会话 |
+| POST | /transfer | transfer_amount（整数，≥1） | 将佣金余额划转到可用余额 |
+| POST | /redeemgiftcard | giftcard | 兑换礼品卡 |
 | POST | /getQuickLoginUrl | 可选 redirect | 快捷登录地址 |
+| POST | /oauth/link | ticket | 将第三方登录身份绑定到当前账户 |
+
+transfer 与 redeemgiftcard 已加锁 + 幂等，涉及的余额变更统一走加锁入账并记 v2_balance_log 流水，对外参数保持不变。oauth/link 会校验第三方身份对应邮箱与当前账户一致（或通过邮箱验证码），且该第三方身份未被其他账户绑定。
 
 ### 5.2 用户二步验证
 
@@ -159,8 +193,10 @@
 | GET | /2fa/status | 无 | 二步验证状态 |
 | POST | /2fa/setup | 无 | 生成密钥和二维码数据 |
 | POST | /2fa/confirm | code | 启用二步验证并返回恢复码 |
-| POST | /2fa/disable | code 或 recovery_code | 关闭二步验证 |
-| POST | /2fa/recovery-codes/regenerate | code 或 recovery_code | 重新生成恢复码 |
+| POST | /2fa/disable | current_password，及 code 或 recovery_code | 关闭二步验证 |
+| POST | /2fa/recovery-codes/regenerate | current_password，及 code 或 recovery_code | 重新生成恢复码 |
+
+关闭二步验证与重新生成恢复码都必须同时校验当前登录密码（current_password）。
 
 ### 5.3 多订阅接口
 
@@ -188,21 +224,21 @@
 | is_primary | boolean | 是否主订阅 |
 | auto_renewal | boolean | 是否自动续费 |
 
-设置主订阅和撤销接口都必须由服务端校验 subscription_id 属于当前账户。主订阅不能直接撤销。
+设置主订阅和撤销接口都必须由服务端校验 subscription_id 属于当前账户。主订阅不能直接撤销，需先另设主订阅；已撤销的订阅不能再设为主订阅；共享订阅成员不能撤销共享订阅。
 
 ### 5.4 套餐、订单和支付
 
 | 方法 | 接口路径 | 请求参数 | 返回/说明 |
 | --- | --- | --- | --- |
-| GET | /plan/fetch | 无 | 可购买套餐 |
-| POST | /order/save | plan_id、period；可选 subscription_id、new_subscription | 创建订单 |
+| GET | /plan/fetch | 可选 id | 可购买套餐（传 id 返回单个套餐） |
+| POST | /order/save | plan_id、period；可选 subscription_id、new_subscription、coupon_code；plan_id=0（充值）时必填 deposit_amount | 创建订单 |
 | POST | /order/checkout | trade_no、method；Stripe 可需要 token | 发起支付 |
 | GET | /order/check | trade_no | 返回订单状态 |
 | GET | /order/detail | trade_no | 返回订单详情 |
 | GET | /order/fetch | 可选 status | 订单列表 |
 | GET | /order/getPaymentMethod | 无 | 可用支付方式 |
-| POST | /order/cancel | trade_no | 取消待支付订单 |
-| POST | /coupon/check | 优惠券参数 | 检查优惠券 |
+| POST | /order/cancel | trade_no | 取消待支付订单（仅待支付状态可取消，幂等，自动退还余额抵扣） |
+| POST | /coupon/check | code；可选 plan_id | 检查优惠券 |
 
 订单保存示例：
 
@@ -227,6 +263,8 @@ period 支持值：
 | reset_price | 流量重置 |
 | deposit | 充值 |
 
+充值订单（`plan_id` 为 0、`period` 为 `deposit`）需额外提交 `deposit_amount`（充值金额，单位为分，必须是 1~9999998 的整数）。
+
 ### 5.5 内容、节点和工单
 
 | 方法 | 接口路径 | 说明 |
@@ -239,14 +277,17 @@ period 支持值：
 | GET | /invite/fetch | 邀请信息 |
 | GET | /invite/details | 邀请明细 |
 | GET | /telegram/getBotInfo | Telegram Bot 信息 |
+| GET | /telegram/binding | 查询当前账户 Telegram 绑定状态 |
+| POST | /telegram/binding/prepare | 生成 Telegram 绑定信息（需 subscription_id） |
+| POST | /telegram/binding/revoke | 撤销 Telegram 绑定 |
 | GET | /comm/config | 用户端配置 |
 | POST | /comm/getStripePublicKey | Stripe 公钥 |
 | GET | /stat/getTrafficLog | 流量日志 |
 | POST | /ticket/save | 创建工单 |
-| GET | /ticket/fetch | 工单列表 |
+| GET | /ticket/fetch | 工单列表（传 id 返回工单详情） |
 | POST | /ticket/reply | 回复工单 |
 | POST | /ticket/close | 关闭工单 |
-| POST | /ticket/withdraw | 撤回工单 |
+| POST | /ticket/withdraw | 提交佣金提现申请（创建系统工单） |
 
 ## 六、管理员接口
 
@@ -256,17 +297,17 @@ period 支持值：
 
 | 方法 | 接口路径 | 请求参数 | 返回/说明 |
 | --- | --- | --- | --- |
-| GET | /config/fetch | 可选 key | 系统配置 |
+| GET | /config/fetch | 可选 key | 系统配置（分组返回，命中 key 时只返回该分组） |
 | POST | /config/save | 配置字段 | 保存配置并可能重启 Webman |
 | GET | /config/getEmailTemplate | 无 | 邮件模板 |
 | GET | /config/getThemeTemplate | 无 | 主题模板 |
-| POST | /config/setTelegramWebhook | Webhook 参数 | 设置 Telegram Webhook |
-| POST | /config/testSendMail | 邮件参数 | 测试发信 |
-| GET | /plan/fetch | 无 | 套餐列表 |
-| POST | /plan/save | 套餐字段 | 创建套餐 |
-| POST | /plan/update | 套餐字段 | 修改套餐 |
+| POST | /config/setTelegramWebhook | telegram_bot_token | 设置 Telegram Webhook |
+| POST | /config/testSendMail | 无 | 向当前管理员邮箱发送测试邮件 |
+| GET | /plan/fetch | 无 | 套餐列表（含各套餐在用人数） |
+| POST | /plan/save | 套餐字段 | 创建或编辑套餐（带 id 为编辑，可选 force_update 同步到用户） |
+| POST | /plan/update | id、show、renew | 切换套餐上/下架与续费开关 |
 | POST | /plan/drop | id | 删除套餐 |
-| POST | /plan/sort | 排序参数 | 调整套餐顺序 |
+| POST | /plan/sort | plan_ids | 调整套餐顺序 |
 
 订阅配置字段：
 
@@ -279,25 +320,46 @@ period 支持值：
 | reset_traffic_method | integer | 0 | 流量重置方式 |
 | plan_change_enable | 0/1 | 1 | 是否允许套餐变更 |
 
+安全、注册与 OAuth 配置字段（config/save 支持，fetch 归入 safe / deposit 分组）：
+
+| 字段 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| email_verify | 0/1 | 0 | 注册邮箱验证 |
+| oauth_register_only | 0/1 | 0 | 仅允许第三方 OAuth 注册，关闭邮箱注册入口 |
+| admin_2fa_force_enable | 0/1 | 0 | 强制管理员/员工绑定二步验证；开启前若仍有管理员或员工未绑定，保存返回 422 |
+| subscribe_audit_retention_days | integer | 180 | 订阅审计保留天数，0=不清理，否则须在 35-3650 之间 |
+| deposit_bounus | array | [] | 充值赠送阶梯，每项格式「充值金额:奖励金额」 |
+| reseller_enable | 0/1 | 0 | 启用分销/倒卖商模块 |
+| reseller_allowed_payment_drivers | array | [] | 倒卖商可用支付驱动白名单 |
+| telegram_subscription_binding_enable | 0/1 | 0 | 启用 Telegram 订阅绑定 |
+| telegram_binding_check_interval | integer | 300 | Telegram 绑定校验间隔（秒），60-3600 |
+| oauth_google_enable / oauth_google_client_id / oauth_google_client_secret / oauth_google_redirect_uri | 0/1、string | — | Google OAuth 登录；fetch 仅回传 oauth_google_client_secret_configured 布尔位，save 传空串保留原密钥 |
+| oauth_github_enable / oauth_github_client_id / oauth_github_client_secret / oauth_github_redirect_uri | 0/1、string | — | GitHub OAuth 登录，同上 |
+| oauth_telegram_enable / oauth_telegram_login_domain / oauth_telegram_bot_username | 0/1、string | — | Telegram Widget 登录 |
+
 ### 6.2 用户管理与审计
 
 | 方法 | 接口路径 | 请求参数 | 返回/说明 |
 | --- | --- | --- | --- |
-| GET | /user/fetch | current、pageSize、sort、filter | 用户列表和风险摘要 |
-| POST | /user/update | 用户编辑字段 | 修改用户 |
+| GET | /user/fetch | current、pageSize、sort、sort_type、filter | 用户列表，含在线设备、订阅地址和风险摘要 |
+| POST | /user/update | 用户编辑字段 | 修改用户（改密码会要求重置并同步主订阅） |
 | GET | /user/getUserInfoById | id | 用户详情、订阅和风险 |
-| POST | /user/generate | 用户生成字段 | 创建用户 |
+| POST | /user/generate | 用户生成字段 | 创建用户（单个或批量，最多 500） |
 | POST | /user/dumpCSV | filter | 导出用户 |
-| POST | /user/sendMail | 用户和邮件参数 | 发送邮件 |
-| POST | /user/ban | id、状态参数 | 封禁/解封 |
+| POST | /user/sendMail | subject、content、filter | 按筛选批量发送邮件 |
+| POST | /user/ban | filter、sort | 批量封禁并清会话 |
 | POST | /user/resetSecret | id | 重置主订阅 Token/UUID |
-| POST | /user/delUser | id | 删除用户 |
-| POST | /user/allDel | 用户 ID 列表 | 批量删除 |
-| POST | /user/setInviteUser | 用户关系参数 | 设置邀请关系 |
+| POST | /user/resetPassword | id | 生成新随机密码并一次性返回明文，同时清会话 |
+| POST | /user/delUser | id | 删除用户及其订单/邀请/工单与审计数据 |
+| POST | /user/allDel | filter | 按筛选批量删除 |
+| POST | /user/setInviteUser | 用户关系参数 | 设置邀请关系（注：当前源码未实现 setInviteUser 方法，路由虽已注册但调用会报错，待修复） |
 | POST | /user/subscription/set-primary | user_id、subscription_id | 设置指定用户主订阅 |
 | POST | /user/subscription/revoke | user_id、subscription_id | 撤销指定用户订阅 |
-| GET | /user/subscribe-requests | user_id 等筛选参数 | 历史 UA、IP 和归属地 |
+| GET | /user/subscribe-requests | user_id 等筛选参数 | 历史 UA、IP、归属地与节点连接记录 |
 | GET | /user/risk | user_id、subscription_id、cycle_start | 风险周期和摘要 |
+| POST | /user/subscribe-audit/clear | user_id | 清空该用户的订阅审计记录（会记录操作者） |
+| GET | /user/checkLogin | 无 | 管理端会话校验（编译后台登录后调用） |
+| GET | /user/info | 无 | 当前管理员本人信息（编译后台登录后调用） |
 
 历史订阅请求筛选字段：
 
@@ -320,9 +382,11 @@ period 支持值：
 | request_ip | 应用服务器看到的真实连接 IP |
 | requested_at | 请求时间戳 |
 | subscription_id | 订阅 ID |
+| subscription_name | 该记录所属订阅的套餐名 |
 | ip_count | 当前用户/订阅下该 IP 出现次数 |
 | ip_location | MMDB 查询出的归属信息 |
-| summary | 请求数、UA 数、不同 IP 数 |
+| connections | 节点上报的真实连接 IP 列表（含 node_name、ip_location） |
+| summary | 请求数、UA 数、订阅拉取的不同 IP 数、节点连接的不同 IP 数及 UA 汇总列表 |
 | risk | 用户风险摘要 |
 
 IP 归属字段：
@@ -338,6 +402,7 @@ IP 归属字段：
 | district | 区县 |
 | isp | 运营商 |
 | idc_vendor | IDC 或云厂商 |
+| is_idc | 是否 IDC/云地址：命中为 true，住宅为 false，未解析为 null |
 | status | resolved 或 unknown |
 
 ### 6.3 节点和业务运营
@@ -358,10 +423,17 @@ IP 归属字段：
 | 知识库 | /knowledge/fetch、getCategory、save、show、drop、sort |
 | 系统 | /system/getSystemStatus、getQueueStats、getQueueWorkload、getQueueMasters、getSystemLog |
 | 主题 | /theme/getThemes、saveThemeConfig、getThemeConfig |
+| 风控规则 | /risk/rule/fetch、save、show、sort、drop、recompute |
+| 订阅溯源 | /risk/trace/fetch、history、token/lookup、token/reveal |
+| 多账号同 IP | /risk/shared-ip/fetch、detail |
 | 倒卖商审批 | /reseller/summary、accounts、stores、review-logs、accounts/review、stores/review、accounts/reset-password |
 | 倒卖商销售权限 | /reseller/templates、templates/save、payment-drivers、orders |
 
 协议节点的 save、update、drop、copy 均为 POST 请求。
+
+风控模块中：/risk/rule 的 save、show、sort、drop、recompute 为 POST；/risk/trace/fetch、/risk/trace/history 与 /risk/shared-ip/fetch、detail 为只读 GET；/risk/trace/token/lookup、/risk/trace/token/reveal 刻意使用 POST（而非 GET），以避免订阅 token 被拼进 query string 落入 nginx 访问日志、浏览器历史与 Referer。多账号同 IP 面板只读，数据来自 audit:ip-link 离线聚合出的 v2_ip_account_link 累积表。
+
+倒卖商模块另注册了 /reseller/fetch、/reseller/update，以及旧版单数别名 /reseller/template/fetch、/reseller/template/save（与 templates、templates/save 等价，为兼容旧版前端保留）。
 
 ### 6.4 管理员二步验证
 
@@ -375,7 +447,7 @@ IP 归属字段：
 
 ## 七、员工接口
 
-基础路径：/api/v1/staff，需要员工鉴权。
+基础路径：/api/v1/staff，需要员工鉴权（staff 中间件校验 auth_data/Authorization 且 is_staff=1）。
 
 | 模块 | 接口 |
 | --- | --- |
@@ -385,28 +457,30 @@ IP 归属字段：
 | 套餐 | /plan/fetch |
 | 公告 | /notice/fetch、save、update、drop |
 
-员工权限不能直接调用管理员路径。
+员工权限不能直接调用管理员路径。公告模块复用管理员控制器 Admin\NoticeController，二步验证复用 User\TwoFactorController。
 
 ## 八、客户端订阅接口
 
+基础路径：/api/v1/client，需要 client 鉴权；所有接口还经过全局 api、site.status 中间件（维护/停服模式下同样返回 503）。
+
 | 方法 | 接口路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
-| GET | /api/v1/client/subscribe | client | 默认订阅地址 |
-| GET | 配置中的 subscribe_path | client | 自定义订阅地址 |
-| GET | /api/v1/client/app/getConfig | client | 客户端配置 |
+| GET | /api/v1/client/subscribe | client | 默认订阅地址；仅当未配置 subscribe_path 时注册 |
+| GET | 配置中的 subscribe_path | client | 自定义订阅地址；配置非空时改由 routes/web.php 注册（web、site.status、client 中间件），与默认地址二选一 |
+| GET | /api/v1/client/app/getConfig | client | 客户端配置（返回 Clash YAML） |
 | GET | /api/v1/client/app/getVersion | client | 客户端版本 |
 
-订阅中间件处理流程：
+订阅处理流程（步骤 1–5 由 client 中间件完成，步骤 6–7 在 subscribe 控制器内完成）：
 
 | 步骤 | 处理 |
 | --- | --- |
 | 1 | 读取 token |
-| 2 | 按配置处理普通、一次性或临时 Token |
-| 3 | 查询独立订阅或旧用户 Token |
+| 2 | 按 show_subscribe_method 处理普通(0)、一次性(1)或临时(2)Token |
+| 3 | 查询独立订阅或旧版用户 Token |
 | 4 | 检查 active、过期和 revoked 状态 |
 | 5 | 生成订阅上下文 |
-| 6 | 记录 User-Agent、REMOTE_ADDR 和订阅 ID |
-| 7 | 返回对应节点协议内容 |
+| 6 | 由订阅审计服务记录 user_id、subscription_id、User-Agent、请求 IP 和 requested_at（需存在 v2_subscribe_request_log 表；IP 经可信代理解析而非裸 REMOTE_ADDR） |
+| 7 | 按 flag/User-Agent 匹配并返回对应节点协议内容 |
 
 ## 九、节点接口
 
@@ -416,17 +490,17 @@ IP 归属字段：
 | --- | --- | --- | --- |
 | GET | /api/v2/server/config | token、node_id | 节点监听、协议、TLS、路由和轮询配置 |
 
-支持 If-None-Match；配置未变化时返回 304。
+token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-Match，配置未变化时直接返回 304（response('',304)，不走 abort）。
 
 ### 9.2 V1 动态节点接口
 
 | 路径 | 说明 |
 | --- | --- |
-| /api/v1/server/{class}/{action} | 动态调用节点控制器 |
-| UniProxy | 通用节点和流量相关接口 |
-| Deepbwork | Deepbwork 节点接口 |
-| TrojanTidalab | Trojan 节点接口 |
-| ShadowsocksTidalab | Shadowsocks 节点接口 |
+| /api/v1/server/{class}/{action} | 动态调用节点控制器（any 方法，class 经 ucfirst 拼接控制器名，鉴权在控制器构造函数校验 server_token） |
+| UniProxy | 通用节点接口：user、push、config；另含在线设备 alive、alivelist |
+| Deepbwork | Deepbwork(V2ray) 节点接口：user、submit、config |
+| TrojanTidalab | Trojan 节点接口：user、submit、config |
+| ShadowsocksTidalab | Shadowsocks 节点接口：user、submit（无 config） |
 
 节点流量上报优先按订阅级 node_user_id、subscription_id 处理，同时保留旧用户 ID 兼容。
 
@@ -454,13 +528,22 @@ IP 归属字段：
 | 命令 | 用途 |
 | --- | --- |
 | php artisan v2board:install | 初始化安装 |
-| php artisan v2board:update | 数据库升级 |
+| php artisan v2board:update | 数据库升级（默认幂等 schema 迁移，见下） |
 | php artisan ip:clear-location-cache | 清理 IP 归属缓存 |
 | php artisan ip:backfill-subscribe-locations | 回填历史 IP 归属 |
-| php artisan subscription:risk | 计算已完成风险周期 |
+| php artisan subscription:risk | 计算已完成风险周期（--force 重算已评估周期） |
+| php artisan audit:ip-link | 手动聚合「IP + 账号 + UA」累积记录（选项 --full/--force/--prune-days/--dry-run） |
+| php artisan audit:clean | 手动按保留期清理订阅审计日志（选项 --days/--dry-run） |
+| php artisan token-history:reconcile | 手动补齐订阅凭证历史（选项 --dry-run） |
+| php artisan telegram:verify-bindings | 手动校验 Telegram 绑定 |
+| php artisan order:recover-free | 恢复卡在「待开通」的已付免费订单（可选 trade_no 参数） |
+| php artisan two-factor:disable {user} | 应急关闭指定账号（ID 或邮箱）的两步验证 |
+| php artisan password:require-reset | 标记用户待重置密码（选项 --all / --email=） |
 | php artisan horizon:terminate | 终止 Horizon Worker |
 | php artisan schedule:run | 执行一次当前到期的计划任务，由 cron 每分钟调用 |
 | php artisan schedule:list | 列出全部计划任务及其执行时间 |
+
+`php artisan v2board:update` 默认走幂等 schema 迁移（`SchemaUpgradeService::run`，执行记录落 `v2_schema_migrations`），按需建表且可反复执行。除订阅、风控、IP 归属缓存等历史表外，还会建资金流水审计表 `v2_balance_log`（每次余额变更留痕，`unique_key` 唯一键保证同一笔只入账一次）、订阅凭证历史 `v2_subscription_token_history`、IP+账号累积 `v2_ip_account_link`，以及 OAuth 身份、Telegram 绑定等表。加 `--legacy` 才回退执行 `database/update.sql`。首次升级到含资金流水的版本时，建表窗口内的余额变更会静默跳过写流水，表建好后自动开始记录。
 
 aaPanel 升级示例：
 
@@ -604,6 +687,8 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 | 管理员路径 | 使用不可预测的 secure_path |
 | IP 数据库 | 放在 resources/ipdb，不放入 public |
 | 配置变更 | 修改多订阅开关后清理缓存并重启 Webman |
+| 资金变更 | 余额只经 UserService::addBalance 原语：事务内加锁读用户行、拒绝透支、写 v2_balance_log 流水审计；传 unique_key 时同键幂等，保证并发/重试下同一笔只入账一次 |
+| 支付回调 | 校验支付驱动一致性与实付金额：驱动回传 paid_amount 时欠款（超四舍五入误差）拒绝开通并告警；已取消订单再收到真实回调记日志并通知管理员，不再静默吞掉 |
 
 ## 十三、代码来源
 
@@ -618,6 +703,10 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 | 多订阅服务 | app/Services/SubscriptionService.php |
 | IP 归属服务 | app/Services/IpLocationService.php |
 | 风险服务 | app/Services/SubscriptionRiskService.php |
+| 订单与退款服务 | app/Services/OrderService.php |
+| 支付驱动与回调 | app/Services/PaymentService.php |
+| 余额原语与资金流水 | app/Services/UserService.php、app/Models/BalanceLog.php |
+| 风控规则与共享 IP | app/Services/RiskRuleService.php、app/Http/Controllers/V1/Admin/RiskSharedIpController.php |
 
 ## 十四、倒卖商与店铺 API
 
@@ -657,14 +746,14 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 | POST | /payments | id、driver、name、config、enabled、sort | 保存支付配置 |
 | DELETE | /payments/{id} | id | 删除未被订单使用的支付配置 |
 | POST | /store | store_slug、store_name、store_description | 修改店铺资料 |
-| GET | /customers | page、pageSize | 当前店铺客户列表，仅返回必要客户字段 |
-| GET | /orders | page、pageSize | 当前店铺订单列表和金额快照 |
+| GET | /customers | page | 当前店铺客户列表，仅返回必要客户字段；每页固定 50 条 |
+| GET | /orders | page | 当前店铺订单列表和金额快照；每页固定 50 条 |
 
 套餐和支付规则：
 
 - `base_plan_id` 只能选择管理员发布且启用的基础套餐，倒卖商不能修改节点、流量、速度和设备限制。
 - 周期价格在 API 中必须为大于 0 的整数分；倒卖工作区输入框使用人民币元并在提交时转换为分。周期字段为 `month_price`、`quarter_price`、`half_year_price`、`year_price`、`two_year_price`、`three_year_price`、`onetime_price`。
-- `shared_member_limit` 默认为 1；大于 1 时为共享套餐，人数包含购买者。
+- `shared_member_limit` 默认为 1，最大 100；大于 1 时为共享套餐，人数包含购买者。
 - 支付驱动必须在管理员 `reseller_allowed_payment_drivers` 白名单内，禁止提交任意 PHP 类或代码。
 - 支付密钥使用服务端加密保存，不在列表或日志返回。已经被订单使用的支付配置不能修改密钥或删除，可停用以阻止新订单。
 
@@ -672,7 +761,7 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 
 | 方法 | 接口路径 | 请求参数 | 说明 |
 | --- | --- | --- | --- |
-| GET | /shared-subscriptions | page、pageSize | 当前倒卖商共享群组汇总 |
+| GET | /shared-subscriptions | page | 当前倒卖商共享群组汇总；每页固定 50 条 |
 | GET | /shared-subscriptions/{id}/members | id | 查看群组成员状态，不返回订阅凭据 |
 | POST | /shared-subscriptions/{id}/suspend | id、reason | 停用共享群组，必须填写原因 |
 | POST | /shared-subscriptions/{groupId}/members/{memberId}/remove | groupId、memberId、reason | 强制移除成员，必须填写原因 |
@@ -700,7 +789,7 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 
 ### 14.4 店铺前台接口
 
-店铺地址为 `/store/{slug}`，API 基础路径为 `/api/v1/store/{slug}`。店铺必须存在且账号、店铺均为 `active`；否则公开接口返回 404。`reseller_enable=0` 时公开销售接口返回 503。
+店铺地址为 `/store/{slug}`，API 基础路径为 `/api/v1/store/{slug}`。店铺必须存在且账号、店铺均为 `active`；否则公开接口返回 404。`reseller_enable=0` 时，除支付回调（`payment/notify/{payment_uuid}`）外的所有店铺接口（含登录后接口）返回 503。
 
 公开接口：
 
@@ -714,6 +803,8 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 | POST | /passport/verify2fa | challenge、code 或 recovery_code | 完成店铺用户二步验证 |
 | GET/POST | /payment/notify/{payment_uuid} | 支付平台回调参数 | 校验支付配置、店铺、订单和金额后开通订阅 |
 
+店铺注册复用主站 `passport/register` 逻辑：跳过平台级邮箱验证开关（`email_verify`），但 `oauth_register_only=1` 时店铺邮箱注册同样被 403 拦截（店铺页面不含第三方登录入口，等于关闭全部店铺新客注册），`arithmetic_verification_enable=1` 时仍需提交 `arithmetic_challenge_id`、`arithmetic_answer` 算术验证。
+
 登录后接口使用现有用户 `auth_data`：
 
 | 方法 | 接口路径 | 请求参数 | 说明 |
@@ -722,11 +813,11 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 | POST | /order/checkout | trade_no、method；Stripe 可传 token | 使用店铺支付配置发起支付 |
 | GET | /order/check | trade_no | 查询订单状态 |
 | GET | /order/detail | trade_no | 查询当前店铺订单详情 |
-| GET | /order/fetch | page、pageSize | 当前客户在当前店铺的订单 |
+| GET | /order/fetch | page（每页固定 50 条） | 当前客户在当前店铺的订单 |
 | POST | /order/cancel | trade_no | 取消待支付订单 |
 | GET | /subscription | 无 | 获取当前店铺订阅及流量汇总 |
 
-支付回调是已创建订单的异步入口：店铺停用或倒卖商总开关关闭后，已绑定支付配置的回调仍允许完成验签；普通公开、注册、下单和支付发起接口不会绕过店铺状态。
+支付回调是已创建订单的异步入口：店铺停用或倒卖商总开关关闭后，已绑定支付配置的回调仍允许完成验签；普通公开、注册、下单和支付发起接口不会绕过店铺状态。回调除校验平台订单 `total_amount` 与订单快照 `amount_snapshot` 一致外，若支付驱动回传实付金额（`payment_amount_cents`）还会与快照比对，金额不符即拒绝开通。
 
 ### 14.5 共享套餐接口
 
@@ -750,8 +841,8 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 | 配置 | 默认值 | 影响 |
 | --- | --- | --- |
 | reseller_enable | 0 | 倒卖商注册、登录、管理和店铺公开访问总开关 |
-| arithmetic_verification_enable | 0 | 主站注册算术验证开关，不影响倒卖商注册 |
-| site_status | normal | `maintenance` 或 `shutdown` 时阻断普通公共业务 |
+| arithmetic_verification_enable | 0 | 主站注册算术验证开关，不影响倒卖商账号注册（但店铺顾客注册复用主站 passport/register，开关开启时同样要求算术验证） |
+| site_status | normal | `maintenance` 或 `shutdown` 时阻断普通公共业务（含店铺接口，支付回调除外） |
 | reseller_allowed_payment_drivers | [] | 管理员允许倒卖商使用的支付驱动白名单 |
 
 倒卖商功能关闭不会删除账号、客户、订单、共享群组或已有订阅。站点维护和停运期间，公共配置接口仍用于展示状态页，管理员接口、节点通信和已有支付回调按当前中间件规则处理。
