@@ -116821,7 +116821,7 @@
         var RISK_RECOMPUTE_WARNING = ["重算会用当前规则重新判定所有已完成周期，覆盖此前的判定结果。", "若审计证据已被保留期清理，重算结果可能低于当初的真实值，原本「疑似内鬼」的周期可能被改为「正常」。", "节点连接记录按 last_seen_at 清理，历史周期的连接指标尤其容易失真。", "此操作不可撤销。"];
         // 手动评估与重算是两回事：前者纯计算不落库，后者改写账本。说明文案必须把
         // 「不影响 30 天账本与风险列」讲清，免得管理员误以为按钮之间可以互替。
-        var MANUAL_EVALUATE_NOTES = ["手动评估用当前启用的规则对所选时间窗做一次全站即时体检，结果不写入 30 天周期账本，也不改变用户列表的「风险」列。", "流量使用率按天级统计聚合（覆盖窗口的整天流量除以套餐总量），短窗口下数值含义有限，含流量使用率维度的规则请自行斟酌。", "评估会分批进行，期间请保持本页面打开。"];
+        var MANUAL_EVALUATE_NOTES = ["手动评估用当前启用的规则对所选时间窗做一次全站体检，结果落库并刷新用户列表的「风险」列（整体覆盖上一次手动评估），30 天周期账本不受影响。", "流量使用率按天级统计聚合（覆盖窗口的整天流量除以套餐总量），短窗口下数值含义有限，含流量使用率维度的规则请自行斟酌。", "评估会分批进行，期间请保持本页面打开。"];
         // 手动评估结果表的指标展示顺序：拉取侧 → 流量 → 节点侧，与后端维度注册表分组一致。
         var MANUAL_METRIC_KEYS = ["distinct_ip_count", "user_agent_count", "city_count", "region_count", "country_count", "used_ratio", "node_ip_count", "node_new_ip_count", "node_count", "node_country_count", "node_region_count", "node_city_count"];
         function manualPad(n) {
@@ -116871,7 +116871,10 @@
                 // 关闭时把 token 推进一格，在飞的那一批响应就会被丢弃、循环停下来。
                 this.recomputeToken = 0,
                 // 手动评估的游标循环同一套 token 机制，但独立计数：两个循环互不干扰。
-                this.manualToken = 0
+                this.manualToken = 0,
+                // restart 响应下发的轮次号，后续 step 逐一回带；游标被别的轮次接管后
+                // 服务端据此终止本客户端的迟到请求，绝不跨轮嫁接。
+                this.manualRunId = ""
             }
             componentDidMount() {
                 this.fetch()
@@ -117117,6 +117120,7 @@
                         content: "请输入 1 小时到 92 天之间的评估窗口"
                     });
                 var token = ++this.manualToken;
+                this.manualRunId = "",
                 this.setState({
                     manualStarted: !0,
                     manualRunning: !0,
@@ -117125,12 +117129,15 @@
                 }),
                 this.manualStep(token, hours)
             }
-            // 窗口只随首个 restart 请求发送，后端把它冻结在游标状态里；后续分批不带参数。
+            // 窗口只随首个 restart 请求发送，后端把它冻结在游标状态里；后续分批回带
+            // restart 下发的 run_id，轮次不符会被服务端终止。
             manualStep(token, hours) {
                 riskPost("/risk/rule/manual-evaluate", null !== hours ? {
                     restart: 1,
                     hours: hours
-                } : {}).then(res=>{
+                } : {
+                    run_id: this.manualRunId
+                }).then(res=>{
                     if (token !== this.manualToken)
                         return;
                     if (200 !== res.code)
@@ -117143,6 +117150,7 @@
                             manualStarted: !1
                         });
                     var data = res.data || {};
+                    data.run_id && (this.manualRunId = data.run_id),
                     this.setState({
                         manualProgress: data,
                         manualRunning: !data.done,
@@ -117317,7 +117325,7 @@
                     className: "mb-0"
                 }, "所选窗口内未发现命中规则的订阅。") : p.a.createElement("p", {
                     className: "mb-0 text-muted font-size-sm"
-                }, "评估结果不写入周期账本，关闭本弹窗即丢弃，可随时重新评估。"))
+                }, "评估边跑边落库，完成后「风险」列以本轮结果为准；中途关闭本弹窗只停止后续分批。"))
             }
             render() {
                 var state = this.state
@@ -117441,7 +117449,7 @@
                     className: "mb-1 text-muted font-size-sm"
                 }, "规则改动只影响之后新完成的周期；要让改动应用到历史周期，请点击「重算历史周期」。"), p.a.createElement("p", {
                     className: "mb-0 text-muted font-size-sm"
-                }, "「自定义周期评估」用当前规则对最近一段时间做全站即时体检，不写入周期账本，也不影响用户列表的「风险」列。"), !state.fetchLoading && !state.available && p.a.createElement("div", {
+                }, "「自定义周期评估」用当前规则对最近一段时间做全站体检，结果落库并驱动用户列表的「风险」列与筛选，30 天周期账本不受影响。"), !state.fetchLoading && !state.available && p.a.createElement("div", {
                     className: "alert alert-warning mb-0",
                     role: "alert",
                     style: {

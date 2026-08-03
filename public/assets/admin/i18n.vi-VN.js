@@ -1442,8 +1442,6 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "，重算周期 ": ", số chu kỳ tính lại: ",
         "自定义周期评估": "Đánh giá chu kỳ tùy chỉnh",
         " 自定义周期评估": " Đánh giá chu kỳ tùy chỉnh",
-        "「自定义周期评估」用当前规则对最近一段时间做全站即时体检，不写入周期账本，也不影响用户列表的「风险」列。": "\"Đánh giá chu kỳ tùy chỉnh\" dùng quy tắc hiện tại để kiểm tra tức thì toàn trạm trong khoảng thời gian gần đây; không ghi vào sổ chu kỳ và không ảnh hưởng cột \"Rủi ro\" trong danh sách người dùng.",
-        "手动评估用当前启用的规则对所选时间窗做一次全站即时体检，结果不写入 30 天周期账本，也不改变用户列表的「风险」列。": "Đánh giá thủ công dùng các quy tắc đang bật để kiểm tra tức thì toàn trạm trong khung thời gian đã chọn; kết quả không ghi vào sổ chu kỳ 30 ngày và không thay đổi cột \"Rủi ro\" trong danh sách người dùng.",
         "评估会分批进行，期间请保持本页面打开。": "Quá trình đánh giá chạy theo lô; vui lòng giữ trang này mở trong lúc chạy.",
         "评估窗口": "Khung thời gian đánh giá",
         "近 24 小时": "24 giờ qua",
@@ -1460,7 +1458,6 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "正在分批评估，请保持本页面打开……": "Đang đánh giá theo lô, vui lòng giữ trang này mở...",
         "评估完成。": "Đánh giá hoàn tất.",
         "评估已停止，重新打开本弹窗可再次发起。": "Đánh giá đã dừng; mở lại hộp thoại này để chạy lại.",
-        "评估结果不写入周期账本，关闭本弹窗即丢弃，可随时重新评估。": "Kết quả không ghi vào sổ chu kỳ; đóng hộp thoại này sẽ bỏ kết quả và bạn có thể đánh giá lại bất cứ lúc nào.",
         "所选窗口内未发现命中规则的订阅。": "Không có gói đăng ký nào khớp quy tắc trong khung thời gian đã chọn.",
         "命中理由": "Lý do khớp",
         "关键指标": "Chỉ số chính",
@@ -1494,6 +1491,9 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "使用节点数：": "Số nút đã dùng: ",
         "连接 IP 国家数：": "Số quốc gia của IP kết nối: ",
         "连接 IP 省/州数：": "Số tỉnh/bang của IP kết nối: ",
-        "连接 IP 城市数：": "Số thành phố của IP kết nối: "
+        "连接 IP 城市数：": "Số thành phố của IP kết nối: ",
+        "手动评估用当前启用的规则对所选时间窗做一次全站体检，结果落库并刷新用户列表的「风险」列（整体覆盖上一次手动评估），30 天周期账本不受影响。": "Đánh giá thủ công dùng các quy tắc đang bật để kiểm tra toàn trạm trong khung thời gian đã chọn; kết quả được lưu và làm mới cột \"Rủi ro\" trong danh sách người dùng (thay thế hoàn toàn lần đánh giá thủ công trước). Sổ chu kỳ 30 ngày không bị ảnh hưởng.",
+        "「自定义周期评估」用当前规则对最近一段时间做全站体检，结果落库并驱动用户列表的「风险」列与筛选，30 天周期账本不受影响。": "\"Đánh giá chu kỳ tùy chỉnh\" dùng quy tắc hiện tại để kiểm tra toàn trạm trong khoảng thời gian gần đây; kết quả được lưu và điều khiển cột \"Rủi ro\" cùng bộ lọc trong danh sách người dùng. Sổ chu kỳ 30 ngày không bị ảnh hưởng.",
+        "评估边跑边落库，完成后「风险」列以本轮结果为准；中途关闭本弹窗只停止后续分批。": "Kết quả được lưu theo từng lô; khi hoàn tất, cột \"Rủi ro\" phản ánh lần chạy này. Đóng hộp thoại giữa chừng chỉ dừng các lô tiếp theo."
     }
 });

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\RiskRule;
 use App\Models\Subscription;
+use App\Models\SubscriptionRiskManual;
 use App\Models\User;
 use App\Services\RiskRuleService;
 use App\Services\SubscriptionRiskService;
@@ -297,16 +298,23 @@ class RiskRuleController extends Controller
     }
 
     /**
-     * 手动自定义周期评估：用当前规则对「最近 N 小时」窗口做一次全站即时体检。
-     * 纯计算不落库 —— 30 天账本与「风险」列徽标完全不受影响。与 recomputeAll 同一套
-     * 前端驱动的游标分批（队列不可用的原因见彼处注释），窗口取在 restart 时并冻结在
-     * 游标状态里，整轮各批评估的是同一个时间窗。
+     * 手动自定义周期评估：用当前规则对「最近 N 小时」窗口做一次全站评估，判定三态
+     * 逐批落库 v2_subscription_risk_manual（done 批按 run_id 清残留）——这张表就是
+     * 用户列表「风险」列与筛选的数据源。30 天账本（v2_subscription_risk_cycle）不受
+     * 影响，只服务审计抽屉的历史周期视图。与 recomputeAll 同一套前端驱动的游标分批
+     * （队列不可用的原因见彼处注释），窗口与规则快照取在 restart 时并冻结在游标状态
+     * 里；step 请求必须回带 restart 下发的 run_id，游标被接管后旧轮请求就地终止。
      */
     public function manualEvaluate(Request $request)
     {
         $service = new SubscriptionRiskService();
         if (!$service->available()) {
             abort(500, __('订阅风险表尚未安装，请先执行数据库升级'));
+        }
+        // 评估结果要落库驱动「风险」列，结果表缺席就不能开工——半程发现写不进去
+        // 比直接拒绝糟糕得多。
+        if (!$service->manualAvailable()) {
+            abort(500, __('手动评估结果表尚未安装，请先执行数据库升级'));
         }
 
         $key = CacheKey::get('RISK_MANUAL_CURSOR', 'global');
@@ -330,6 +338,9 @@ class RiskRuleController extends Controller
             $ruleSnapshot = (new RiskRuleService())->enabledRules();
             $endAt = time();
             $state = [
+                // run_id 标记本轮写入的行：完成时按它清掉未被覆盖的残留（已删订阅、
+                // 上一轮中断的遗留），表体量恒等于订阅数。
+                'run_id' => date('YmdHis') . '-' . substr(bin2hex(random_bytes(8)), 0, 8),
                 'start_at' => $endAt - (int)$hours * 3600,
                 'end_at' => $endAt,
                 'rules' => $ruleSnapshot,
@@ -345,7 +356,8 @@ class RiskRuleController extends Controller
                 'touched_at' => time(),
                 'started_by' => $this->actor($request)
             ];
-            $this->audit($request, 'RISK MANUAL EVALUATE start hours=' . (int)$hours
+            $this->audit($request, 'RISK MANUAL EVALUATE start run=' . $state['run_id']
+                . ' hours=' . (int)$hours
                 . ' window=[' . $state['start_at'] . ',' . $state['end_at'] . '] total=' . $state['total']
                 . ' rules=' . json_encode(array_map(function ($rule) {
                     return ($rule['id'] === null ? 'builtin' : $rule['id'])
@@ -354,6 +366,14 @@ class RiskRuleController extends Controller
         }
 
         if (!is_array($state)) {
+            abort(500, __('评估任务不存在或已超时，请重新开始'));
+        }
+
+        // step 必须回带自己那轮的 run_id：done 态短存期间允许别人 restart 接管，旧轮
+        // 客户端的迟到重试若不校验轮次，会被拉去驱动新轮的游标、拿到新轮的计数当成
+        // 自己的结果。轮次不符一律终止，绝不跨轮嫁接。
+        if (!$request->input('restart')
+            && (string)$request->input('run_id', '') !== (string)($state['run_id'] ?? '')) {
             abort(500, __('评估任务不存在或已超时，请重新开始'));
         }
 
@@ -376,6 +396,39 @@ class RiskRuleController extends Controller
         $timedOut = false;
         foreach ($batch as $subscription) {
             $assessment = $service->assessWindow($subscription, (int)$state['start_at'], (int)$state['end_at']);
+            // 三态全落库：这张表是「风险」列与筛选的数据源，不落 normal/no_data 就
+            // 无法把「正常」「窗口没数据」与「从没评估过」区分开。手工 encode 的
+            // 原因同周期表（JSON_UNESCAPED_UNICODE，phpMyAdmin 里可读）。
+            // 用原生 ON DUPLICATE KEY 而不是 updateOrCreate：后者是非原子的
+            // SELECT+INSERT，客户端超时重试与在跑请求并发处理同一批时，输者会撞
+            // subscription_id 唯一键直接 500；原子写入天然收敛。
+            $now = time();
+            DB::statement(
+                'INSERT INTO `v2_subscription_risk_manual`
+                    (`run_id`,`user_id`,`subscription_id`,`status`,`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)
+                 ON DUPLICATE KEY UPDATE
+                    `run_id` = VALUES(`run_id`), `user_id` = VALUES(`user_id`),
+                    `status` = VALUES(`status`), `window_start` = VALUES(`window_start`),
+                    `window_end` = VALUES(`window_end`), `risk_reasons` = VALUES(`risk_reasons`),
+                    `metrics` = VALUES(`metrics`), `updated_at` = VALUES(`updated_at`)',
+                [
+                    (string)$state['run_id'],
+                    (int)$subscription->user_id,
+                    (int)$subscription->id,
+                    (string)$assessment['status'],
+                    (int)$state['start_at'],
+                    (int)$state['end_at'],
+                    json_encode($assessment['reasons'], JSON_UNESCAPED_UNICODE),
+                    json_encode([
+                        'v' => 1,
+                        'metrics' => $assessment['metrics'],
+                        'fired_rules' => $assessment['fired']
+                    ], JSON_UNESCAPED_UNICODE),
+                    $now,
+                    $now
+                ]
+            );
             $state['scanned']++;
             if ($assessment['status'] !== 'no_data') {
                 $state['with_evidence']++;
@@ -411,14 +464,25 @@ class RiskRuleController extends Controller
             }
         }
 
+        // 归属复核：本请求处理期间游标可能已被并发 restart 接管（单订阅评估停滞超过
+        // 60 秒守卫窗口的场景）。易主后旧轮请求就地终止——绝不能拿旧轮的 run_id 写回
+        // 游标，更不能拿它去删新轮已落库的判定行。
+        $current = Cache::get($key);
+        if (!is_array($current) || (string)($current['run_id'] ?? '') !== (string)$state['run_id']) {
+            abort(500, __('评估任务不存在或已超时，请重新开始'));
+        }
+
         $done = !$timedOut && $batch->count() < self::BATCH_LIMIT;
         $state['touched_at'] = time();
         if ($done) {
-            // 不立即清缓存：结果不落库，这个响应体是整轮扫描的唯一副本。标 done 短存
-            // 一段允许幂等重放，下一次 restart 或 TTL 到期自然清掉。
+            // 清掉未被本轮覆盖的残留行：订阅已删除、或上一轮中途放弃的遗留。放在
+            // done 批做而不是 restart：中断的轮次留下的新旧混合，由下一次完整轮收敛。
+            SubscriptionRiskManual::where('run_id', '<>', (string)$state['run_id'])->delete();
+            // 弹窗明细的幂等重放仍走缓存：标 done 短存一段，restart 或 TTL 到期清掉。
             $state['done'] = true;
             Cache::put($key, $state, self::MANUAL_DONE_TTL);
-            $this->audit($request, 'RISK MANUAL EVALUATE done scanned=' . $state['scanned']
+            $this->audit($request, 'RISK MANUAL EVALUATE done run=' . $state['run_id']
+                . ' scanned=' . $state['scanned']
                 . ' flagged=' . $state['flagged']
                 . ' window=[' . $state['start_at'] . ',' . $state['end_at'] . ']');
         } else {
@@ -435,6 +499,8 @@ class RiskRuleController extends Controller
     {
         return [
             'done' => $done,
+            // 前端在后续 step 请求里回带，游标被接管后旧轮客户端会被就地终止。
+            'run_id' => (string)($state['run_id'] ?? ''),
             'scanned' => (int)$state['scanned'],
             'with_evidence' => (int)$state['with_evidence'],
             'flagged' => (int)$state['flagged'],

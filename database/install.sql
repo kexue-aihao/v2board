@@ -775,6 +775,25 @@ INSERT INTO `v2_risk_rule` (`label`,`dimension`,`operator`,`threshold`,`enabled`
 ('跨省/州请求过多','region_count','>=',3,1,2,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
 ('跨市请求过多','city_count','>=',3,1,3,UNIX_TIMESTAMP(),UNIX_TIMESTAMP());
 
+DROP TABLE IF EXISTS `v2_subscription_risk_manual`;
+CREATE TABLE `v2_subscription_risk_manual` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `run_id` varchar(32) NOT NULL,
+    `user_id` int(11) NOT NULL,
+    `subscription_id` bigint(20) NOT NULL,
+    `status` varchar(16) NOT NULL DEFAULT 'no_data',
+    `window_start` bigint(20) NOT NULL DEFAULT 0,
+    `window_end` bigint(20) NOT NULL DEFAULT 0,
+    `risk_reasons` text DEFAULT NULL,
+    `metrics` text DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `subscription_id` (`subscription_id`),
+    KEY `user_id` (`user_id`),
+    KEY `run_id` (`run_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 DROP TABLE IF EXISTS `v2_subscription_token_history`;
 CREATE TABLE `v2_subscription_token_history` (
     `id` bigint(20) NOT NULL AUTO_INCREMENT,

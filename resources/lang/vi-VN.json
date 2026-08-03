@@ -340,6 +340,7 @@
     "订阅计划格式不正确": "Định dạng gói không hợp lệ",
     "订阅路径必须以/开头": "Đường dẫn đăng ký phải bắt đầu bằng /",
     "订阅风险表尚未安装，请先执行数据库升级": "Bảng rủi ro đăng ký chưa được cài đặt, vui lòng nâng cấp cơ sở dữ liệu trước",
+    "手动评估结果表尚未安装，请先执行数据库升级": "Bảng kết quả đánh giá thủ công chưa được cài đặt, vui lòng nâng cấp cơ sở dữ liệu trước",
     "设备数限制格式不正确": "Định dạng giới hạn thiết bị không hợp lệ",
     "设备数限制格式有误": "Giới hạn thiết bị không hợp lệ",
     "该套餐已被倒卖商引用，无法删除": "Gói này đang được đại lý bán lại tham chiếu, không thể xóa",

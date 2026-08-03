@@ -340,6 +340,7 @@
     "订阅计划格式不正确": "Plan format is invalid",
     "订阅路径必须以/开头": "Subscription path must start with /",
     "订阅风险表尚未安装，请先执行数据库升级": "Subscription risk table is not installed, please run the database upgrade first",
+    "手动评估结果表尚未安装，请先执行数据库升级": "Manual assessment result table is not installed, please run the database upgrade first",
     "设备数限制格式不正确": "Device limit format is invalid",
     "设备数限制格式有误": "Device limit is invalid",
     "该套餐已被倒卖商引用，无法删除": "This plan is referenced by a reseller and cannot be deleted",

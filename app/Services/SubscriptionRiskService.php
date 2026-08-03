@@ -7,6 +7,7 @@ use App\Models\StatUser;
 use App\Models\SubscribeRequestLog;
 use App\Models\Subscription;
 use App\Models\SubscriptionRiskCycle;
+use App\Models\SubscriptionRiskManual;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
@@ -14,6 +15,7 @@ class SubscriptionRiskService
 {
     public const CYCLE_SECONDS = 30 * 86400;
     private $availability;
+    private $manualAvailability;
     private $ruleService;
     private $metricsColumn;
     private $nodeLogAvailability;
@@ -271,9 +273,10 @@ class SubscriptionRiskService
     }
 
     /**
-     * 后台手动自定义周期评估：与周期评估用同一套指标采集和规则引擎，但纯计算——
-     * 不读不写 v2_subscription_risk_cycle。30 天账本是冻结判定（summaryForUser 的
-     * 「风险」列、审计留痕都建立在它的网格语义上），手动窗口只做即时体检，绝不入账。
+     * 后台手动自定义周期评估：与周期评估用同一套指标采集和规则引擎。方法本身纯计算
+     * ——不读不写任何判定表；调用方（RiskRuleController::manualEvaluate）把返回的三态
+     * 落进 v2_subscription_risk_manual 驱动「风险」列。30 天账本 v2_subscription_risk_cycle
+     * 是冻结判定，只服务审计抽屉的历史周期视图，本方法与它互不沾染。
      */
     public function assessWindow(Subscription $subscription, int $windowStart, int $windowEnd): array
     {
@@ -298,7 +301,7 @@ class SubscriptionRiskService
             }
         }
 
-        // 窗口内三路证据全空时不进规则引擎：这里没有历史记录可沿用（手动评估不落库），
+        // 窗口内三路证据全空时不进规则引擎：本方法不读历史判定行，无旧值可沿用，
         // 「没有数据」必须与「判定为正常」区分开，否则短窗口会给全站发一遍正常牌。
         if (!$window['has_log_basis'] && !$window['has_node_basis'] && !$window['has_traffic_basis']) {
             return ['status' => 'no_data', 'metrics' => $metrics, 'reasons' => [], 'fired' => []];
@@ -571,7 +574,92 @@ class SubscriptionRiskService
         }
     }
 
+    /**
+     * 「风险」列徽标是否已切到手动评估数据源。表没建（库未升级）时回落旧的周期账本
+     * 口径——与 available() 同理不并进硬闸门，缺表只降级不熄火。
+     */
+    public function manualAvailable(): bool
+    {
+        if ($this->manualAvailability !== null) {
+            return $this->manualAvailability;
+        }
+        try {
+            return $this->manualAvailability = Schema::hasTable('v2_subscription_risk_manual');
+        } catch (\Throwable $e) {
+            return $this->manualAvailability = false;
+        }
+    }
+
+    /**
+     * 用户徽标：手动评估落库数据优先（产品语义：列表「风险」列由手动评估驱动）。
+     *   可疑   = 任一现存订阅的手动判定为 suspicious
+     *   正常   = 有订阅、全部订阅都被本轮覆盖、且无可疑无 no_data
+     *   待观察 = 其余（无订阅 / 有订阅未被评估过 / 窗口内无数据）
+     * 30 天账本退居审计抽屉的历史周期视图，不再驱动徽标。
+     */
     public function summaryForUser(int $userId): array
+    {
+        if ($this->manualAvailable()) {
+            return $this->manualSummaryForUser($userId);
+        }
+        return $this->cycleSummaryForUser($userId);
+    }
+
+    private function manualSummaryForUser(int $userId): array
+    {
+        $subscriptionIds = Subscription::where('user_id', $userId)->pluck('id');
+        // 按订阅清单取行而不是按行上的 user_id：行里的 user_id 是评估时刻的快照，
+        // 订阅换绑后会过时；过滤（applyManualRiskFilter）走的是「现存订阅 join 判定行」，
+        // 摘要必须用同一锚点，否则筛出来的行和列上的牌子对不上。
+        $rows = $subscriptionIds->isEmpty()
+            ? collect()
+            : SubscriptionRiskManual::whereIn('subscription_id', $subscriptionIds)
+                ->get(['subscription_id', 'status', 'risk_reasons', 'metrics'])
+                ->keyBy('subscription_id');
+
+        $reasons = [];
+        $suspiciousCount = 0;
+        $distinctIpCount = 0;
+        $cityCount = 0;
+        $regionCount = 0;
+        $countryCount = 0;
+        // 无订阅的用户没有可评估对象，与「未评估」同牌：待观察。
+        $hasPending = $subscriptionIds->isEmpty();
+        foreach ($subscriptionIds as $subscriptionId) {
+            $row = $rows->get((int)$subscriptionId);
+            if (!$row) {
+                // 新订阅还没赶上任何一轮手动评估。
+                $hasPending = true;
+                continue;
+            }
+            if ($row->status === 'suspicious') {
+                $suspiciousCount++;
+                $rowReasons = json_decode((string)$row->risk_reasons, true);
+                $reasons = array_merge($reasons, is_array($rowReasons) ? $rowReasons : []);
+            } elseif ($row->status !== 'normal') {
+                $hasPending = true;
+            }
+            $decoded = json_decode((string)$row->metrics, true);
+            $metrics = is_array($decoded) && isset($decoded['metrics']) && is_array($decoded['metrics'])
+                ? $decoded['metrics'] : [];
+            $distinctIpCount += (int)($metrics['distinct_ip_count'] ?? 0);
+            $cityCount += (int)($metrics['city_count'] ?? 0);
+            $regionCount += (int)($metrics['region_count'] ?? 0);
+            $countryCount += (int)($metrics['country_count'] ?? 0);
+        }
+
+        return [
+            'status' => $suspiciousCount > 0 ? 'suspicious' : ($hasPending ? 'pending' : 'normal'),
+            'suspicious_count' => $suspiciousCount,
+            'reasons' => array_values(array_unique($reasons)),
+            'distinct_ip_count' => $distinctIpCount,
+            'city_count' => $cityCount,
+            'region_count' => $regionCount,
+            'country_count' => $countryCount
+        ];
+    }
+
+    private function cycleSummaryForUser(int $userId): array
     {
         if (!$this->available()) {
             return [

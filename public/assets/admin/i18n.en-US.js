@@ -1442,8 +1442,6 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "，重算周期 ": ", periods recalculated: ",
         "自定义周期评估": "Custom Period Assessment",
         " 自定义周期评估": " Custom Period Assessment",
-        "「自定义周期评估」用当前规则对最近一段时间做全站即时体检，不写入周期账本，也不影响用户列表的「风险」列。": "\"Custom Period Assessment\" runs an instant site-wide check of a recent time window with the current rules; it does not write to the period ledger or affect the Risk column in the user list.",
-        "手动评估用当前启用的规则对所选时间窗做一次全站即时体检，结果不写入 30 天周期账本，也不改变用户列表的「风险」列。": "Manual assessment runs an instant site-wide check of the selected time window with the currently enabled rules; results are not written to the 30-day period ledger and do not change the Risk column in the user list.",
         "评估会分批进行，期间请保持本页面打开。": "The assessment runs in batches; please keep this page open while it runs.",
         "评估窗口": "Assessment Window",
         "近 24 小时": "Last 24 Hours",
@@ -1460,7 +1458,6 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "正在分批评估，请保持本页面打开……": "Assessing in batches, please keep this page open...",
         "评估完成。": "Assessment complete.",
         "评估已停止，重新打开本弹窗可再次发起。": "Assessment stopped; reopen this dialog to start again.",
-        "评估结果不写入周期账本，关闭本弹窗即丢弃，可随时重新评估。": "Results are not written to the period ledger; closing this dialog discards them, and you can re-assess at any time.",
         "所选窗口内未发现命中规则的订阅。": "No subscriptions matched any rule in the selected window.",
         "命中理由": "Matched Reasons",
         "关键指标": "Key Metrics",
@@ -1494,6 +1491,9 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "使用节点数：": "Nodes Used: ",
         "连接 IP 国家数：": "Connection IP Countries: ",
         "连接 IP 省/州数：": "Connection IP Provinces/States: ",
-        "连接 IP 城市数：": "Connection IP Cities: "
+        "连接 IP 城市数：": "Connection IP Cities: ",
+        "手动评估用当前启用的规则对所选时间窗做一次全站体检，结果落库并刷新用户列表的「风险」列（整体覆盖上一次手动评估），30 天周期账本不受影响。": "Manual assessment runs a site-wide check of the selected time window with the currently enabled rules; results are persisted and refresh the Risk column in the user list (fully replacing the previous manual assessment). The 30-day period ledger is unaffected.",
+        "「自定义周期评估」用当前规则对最近一段时间做全站体检，结果落库并驱动用户列表的「风险」列与筛选，30 天周期账本不受影响。": "\"Custom Period Assessment\" runs a site-wide check of a recent time window with the current rules; results are persisted and drive the Risk column and its filter in the user list. The 30-day period ledger is unaffected.",
+        "评估边跑边落库，完成后「风险」列以本轮结果为准；中途关闭本弹窗只停止后续分批。": "Results are persisted batch by batch; once complete, the Risk column reflects this run. Closing this dialog mid-run only stops subsequent batches."
     }
 });

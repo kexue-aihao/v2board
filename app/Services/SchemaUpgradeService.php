@@ -14,6 +14,7 @@ class SchemaUpgradeService
         'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
         'risk_rule_schema' => 'risk_rule_schema_v1',
+        'risk_manual_schema' => 'risk_manual_schema_v1',
         'token_history_schema' => 'token_history_schema_v1',
         'password_policy_schema' => 'password_policy_schema_v1',
         'reseller_schema' => 'reseller_schema_v1',
@@ -76,6 +77,9 @@ class SchemaUpgradeService
                 return;
             case 'risk_rule_schema':
                 $this->applyRiskRuleSchema();
+                return;
+            case 'risk_manual_schema':
+                $this->applyRiskManualSchema();
                 return;
             case 'token_history_schema':
                 $this->applyTokenHistorySchema();
@@ -532,6 +536,60 @@ class SchemaUpgradeService
                 [$label, $dimension, $operator, $threshold, $sort, $now, $now, $dimension, $operator, $threshold]
             );
         }
+    }
+
+    /**
+     * 手动自定义周期评估的判定表——用户列表「风险」列与筛选的数据源。刻意与
+     * v2_subscription_risk_cycle 分开：账本是 30 天网格上的冻结判定（审计抽屉的历史
+     * 周期视图继续用它），手动评估是任意窗口的即时体检，两者的周期语义不兼容。
+     *
+     * 一个订阅一行（subscription_id 唯一），每轮评估逐批 UPSERT、完成时按 run_id 清掉
+     * 未被本轮覆盖的残留行（订阅已删除或上一轮中断的遗留）——表的体量恒等于订阅数。
+     * 三态全落库：suspicious/normal/no_data，徽标据此三态渲染，不落「正常」就无法把
+     * 正常与「从未评估过」区分开。
+     */
+    private function applyRiskManualSchema(): void
+    {
+        $this->requireTable('v2_subscription_risk_cycle');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_manual` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `run_id` varchar(32) NOT NULL,
+            `user_id` int(11) NOT NULL,
+            `subscription_id` bigint(20) NOT NULL,
+            `status` varchar(16) NOT NULL DEFAULT 'no_data',
+            `window_start` bigint(20) NOT NULL DEFAULT 0,
+            `window_end` bigint(20) NOT NULL DEFAULT 0,
+            `risk_reasons` text DEFAULT NULL,
+            `metrics` text DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `subscription_id` (`subscription_id`),
+            KEY `user_id` (`user_id`),
+            KEY `run_id` (`run_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+        foreach ([
+            'run_id' => "varchar(32) NOT NULL DEFAULT ''",
+            'user_id' => 'int(11) NOT NULL',
+            'subscription_id' => 'bigint(20) NOT NULL',
+            'status' => "varchar(16) NOT NULL DEFAULT 'no_data'",
+            'window_start' => 'bigint(20) NOT NULL DEFAULT 0',
+            'window_end' => 'bigint(20) NOT NULL DEFAULT 0',
+            'risk_reasons' => 'text DEFAULT NULL',
+            'metrics' => 'text DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL DEFAULT 0',
+            'updated_at' => 'int(11) NOT NULL DEFAULT 0'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscription_risk_manual', $column, $definition);
+        }
+        // UPSERT 语义靠 subscription_id 唯一键；徽标与过滤都以「现存订阅清单」为锚
+        // （行上的 user_id 是评估时刻快照，只作展示与运维检索用途）；完成批的残留
+        // 清理按 run_id。
+        $this->ensureUniqueIndex('v2_subscription_risk_manual', 'subscription_id', ['subscription_id']);
+        $this->ensureIndex('v2_subscription_risk_manual', 'user_id', ['user_id']);
+        $this->ensureIndex('v2_subscription_risk_manual', 'run_id', ['run_id']);
     }
 
     private function applyTokenHistorySchema(): void

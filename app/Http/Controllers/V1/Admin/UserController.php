@@ -142,9 +142,15 @@ class UserController extends Controller
             return;
         }
 
-        // fetch() 会把自己那份服务实例传进来：available() 的 9 次 schema 探测是实例级
-        // memo，共享实例让过滤与徽标循环只探一次。其余共用 filter() 的端点各建各的。
+        // fetch() 会把自己那份服务实例传进来：schema 探测是实例级 memo，共享实例让
+        // 过滤与徽标循环只探一次。其余共用 filter() 的端点各建各的。
         $riskService = $riskService ?: new SubscriptionRiskService();
+        // 手动评估结果表就位后，「风险」列由它驱动，过滤必须走同一数据源。
+        if ($riskService->manualAvailable()) {
+            $this->applyManualRiskFilter($builder, $value);
+            return;
+        }
+        // —— 以下是结果表尚未安装时的回落口径（旧周期账本），与彼时徽标语义一致 ——
         // 风险表未安装时徽标对全员显示「待观察」，过滤语义保持一致：pending 全命中，其余空集。
         if (!$riskService->available()) {
             if ($value !== 'pending') {
@@ -198,6 +204,65 @@ class UserController extends Controller
             ->whereExists($anyCycle)
             ->whereNotExists($firstCycleIncomplete)
             ->whereNotExists($latestCycleWithStatus('pending'));
+    }
+
+    /**
+     * 手动评估落库口径，与 SubscriptionRiskService::manualSummaryForUser 逐条一致：
+     *   可疑   = 任一现存订阅的手动判定为 suspicious
+     *   待观察 = 非可疑，且（无订阅 ∨ 有订阅未被任何一轮评估覆盖 ∨ 有订阅判定非 suspicious/normal）
+     *   正常   = 非可疑、有订阅、全部订阅已覆盖且判定均为 normal
+     * 判定行只对「现存订阅」计数（join v2_subscription），与摘要按订阅清单遍历同义——
+     * 订阅删除后的残留行两边都不作数。
+     */
+    private function applyManualRiskFilter($builder, string $value): void
+    {
+        $judgedRow = function (string $mode) {
+            return function ($query) use ($mode) {
+                $query->select(DB::raw(1))
+                    ->from('v2_subscription as risk_ms')
+                    ->join('v2_subscription_risk_manual as risk_mm', 'risk_mm.subscription_id', '=', 'risk_ms.id')
+                    ->whereColumn('risk_ms.user_id', 'v2_user.id');
+                if ($mode === 'suspicious') {
+                    $query->where('risk_mm.status', 'suspicious');
+                } else {
+                    // 待观察来源之一：已覆盖但既非可疑也非正常（no_data 及任何异常值）。
+                    $query->whereNotIn('risk_mm.status', ['suspicious', 'normal']);
+                }
+            };
+        };
+        $hasSubscription = function ($query) {
+            $query->select(DB::raw(1))
+                ->from('v2_subscription as risk_hs')
+                ->whereColumn('risk_hs.user_id', 'v2_user.id');
+        };
+        $uncoveredSubscription = function ($query) {
+            $query->select(DB::raw(1))
+                ->from('v2_subscription as risk_us')
+                ->whereColumn('risk_us.user_id', 'v2_user.id')
+                ->whereNotExists(function ($inner) {
+                    $inner->select(DB::raw(1))
+                        ->from('v2_subscription_risk_manual as risk_um')
+                        ->whereColumn('risk_um.subscription_id', 'risk_us.id');
+                });
+        };
+
+        if ($value === 'suspicious') {
+            $builder->whereExists($judgedRow('suspicious'));
+            return;
+        }
+        if ($value === 'pending') {
+            $builder->whereNotExists($judgedRow('suspicious'))
+                ->where(function ($query) use ($hasSubscription, $uncoveredSubscription, $judgedRow) {
+                    $query->whereNotExists($hasSubscription)
+                        ->orWhereExists($uncoveredSubscription)
+                        ->orWhereExists($judgedRow('odd'));
+                });
+            return;
+        }
+        $builder->whereNotExists($judgedRow('suspicious'))
+            ->whereExists($hasSubscription)
+            ->whereNotExists($uncoveredSubscription)
+            ->whereNotExists($judgedRow('odd'));
     }
 
     public function fetch(UserFetch $request)
