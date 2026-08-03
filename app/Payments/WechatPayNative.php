@@ -16,12 +16,12 @@ class WechatPayNative {
         return [
             'app_id' => [
                 'label' => 'APPID',
-                'description' => '绑定微信支付商户的APPID',
+                'description' => __('绑定微信支付商户的APPID'),
                 'type' => 'input',
             ],
             'mch_id' => [
-                'label' => '商户号',
-                'description' => '微信支付商户号',
+                'label' => __('商户号'),
+                'description' => __('微信支付商户号'),
                 'type' => 'input',
             ],
             'api_key' => [

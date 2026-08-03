@@ -31,21 +31,21 @@ class CouponGenerate extends FormRequest
     public function messages()
     {
         return [
-            'generate_count.integer' => '生成数量必须为数字',
-            'generate_count.max' => '生成数量最大为500个',
-            'name.required' => '名称不能为空',
-            'type.required' => '类型不能为空',
-            'type.in' => '类型格式有误',
-            'value.required' => '金额或比例不能为空',
-            'value.integer' => '金额或比例格式有误',
-            'started_at.required' => '开始时间不能为空',
-            'started_at.integer' => '开始时间格式有误',
-            'ended_at.required' => '结束时间不能为空',
-            'ended_at.integer' => '结束时间格式有误',
-            'limit_use.integer' => '最大使用次数格式有误',
-            'limit_use_with_user.integer' => '限制用户使用次数格式有误',
-            'limit_plan_ids.array' => '指定订阅格式有误',
-            'limit_period.array' => '指定周期格式有误'
+            'generate_count.integer' => __('生成数量必须为数字'),
+            'generate_count.max' => __('生成数量最大为500个'),
+            'name.required' => __('名称不能为空'),
+            'type.required' => __('类型不能为空'),
+            'type.in' => __('类型格式有误'),
+            'value.required' => __('金额或比例不能为空'),
+            'value.integer' => __('金额或比例格式有误'),
+            'started_at.required' => __('开始时间不能为空'),
+            'started_at.integer' => __('开始时间格式有误'),
+            'ended_at.required' => __('结束时间不能为空'),
+            'ended_at.integer' => __('结束时间格式有误'),
+            'limit_use.integer' => __('最大使用次数格式有误'),
+            'limit_use_with_user.integer' => __('限制用户使用次数格式有误'),
+            'limit_plan_ids.array' => __('指定订阅格式有误'),
+            'limit_period.array' => __('指定周期格式有误')
         ];
     }
 }

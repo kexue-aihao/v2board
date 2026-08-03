@@ -82,12 +82,12 @@ class RiskRuleController extends Controller
         if ($request->input('id')) {
             $rule = RiskRule::find((int)$request->input('id'));
             if (!$rule) {
-                abort(500, '规则不存在');
+                abort(500, __('规则不存在'));
             }
             try {
                 $rule->update($params);
             } catch (\Exception $e) {
-                abort(500, '保存失败');
+                abort(500, __('保存失败'));
             }
             $this->audit($request, 'RISK RULE UPDATE id=' . $rule->id . ' ' . json_encode($params, JSON_UNESCAPED_UNICODE));
             return response(['data' => true]);
@@ -101,7 +101,7 @@ class RiskRuleController extends Controller
         }
         $rule = RiskRule::create($params);
         if (!$rule) {
-            abort(500, '创建失败');
+            abort(500, __('创建失败'));
         }
         $this->audit($request, 'RISK RULE CREATE id=' . $rule->id . ' ' . json_encode($params, JSON_UNESCAPED_UNICODE));
         return response(['data' => true]);
@@ -120,12 +120,12 @@ class RiskRuleController extends Controller
             // 不能用 (bool) 强转原始输入："false"、"off"、"0.0" 都会变成 true。
             $parsed = filter_var($explicit, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
             if ($parsed === null) {
-                abort(500, '参数有误');
+                abort(500, __('参数有误'));
             }
             $rule->enabled = $parsed ? 1 : 0;
         }
         if (!$rule->save()) {
-            abort(500, '保存失败');
+            abort(500, __('保存失败'));
         }
         $this->audit($request, 'RISK RULE TOGGLE id=' . $rule->id . ' enabled=' . $rule->enabled);
         return response(['data' => true]);
@@ -139,7 +139,7 @@ class RiskRuleController extends Controller
     {
         $ids = $request->input('ids');
         if (!is_array($ids) || !count($ids)) {
-            abort(500, '参数有误');
+            abort(500, __('参数有误'));
         }
         $this->requireRuleTable();
 
@@ -155,7 +155,7 @@ class RiskRuleController extends Controller
             }
         } catch (\Exception $e) {
             DB::rollBack();
-            abort(500, '保存失败');
+            abort(500, __('保存失败'));
         }
         DB::commit();
         return response(['data' => true]);
@@ -166,7 +166,7 @@ class RiskRuleController extends Controller
         $rule = $this->findRule($request);
         $snapshot = $rule->only(['id', 'label', 'dimension', 'operator', 'threshold']);
         if (!$rule->delete()) {
-            abort(500, '删除失败');
+            abort(500, __('删除失败'));
         }
         $this->audit($request, 'RISK RULE DELETE ' . json_encode($snapshot, JSON_UNESCAPED_UNICODE));
         return response(['data' => true]);
@@ -180,7 +180,7 @@ class RiskRuleController extends Controller
     {
         $service = new SubscriptionRiskService();
         if (!$service->available()) {
-            abort(500, '订阅风险表尚未安装，请先执行数据库升级');
+            abort(500, __('订阅风险表尚未安装，请先执行数据库升级'));
         }
 
         $userId = (int)$request->input('user_id');
@@ -193,7 +193,7 @@ class RiskRuleController extends Controller
     private function recomputeUser(Request $request, SubscriptionRiskService $service, int $userId)
     {
         if (!User::where('id', $userId)->exists()) {
-            abort(404, '用户不存在');
+            abort(404, __('用户不存在'));
         }
 
         $subscriptions = 0;
@@ -230,7 +230,7 @@ class RiskRuleController extends Controller
             // touched_at 每批都续期，所以长任务运行期间的重启会一直被拒；真的卡死超过
             // 60 秒才允许接管。用 started_at 判断会让跑了一分钟以上的任务被人为打断。
             if (is_array($state) && (time() - (int)($state['touched_at'] ?? 0)) < self::RESTART_GUARD_SECONDS) {
-                abort(500, '已有重算任务正在进行，请稍后再试');
+                abort(500, __('已有重算任务正在进行，请稍后再试'));
             }
             $state = [
                 'last_id' => 0,
@@ -245,7 +245,7 @@ class RiskRuleController extends Controller
         }
 
         if (!is_array($state)) {
-            abort(500, '重算任务不存在或已超时，请重新开始');
+            abort(500, __('重算任务不存在或已超时，请重新开始'));
         }
 
         // 两个界限都必要：200 个重度订阅可能跑超 4 秒，而 4 秒内也可能跑完远超 200 个
@@ -293,19 +293,19 @@ class RiskRuleController extends Controller
     private function requireRuleTable(): void
     {
         if (!(new RiskRuleService())->available()) {
-            abort(500, '风控规则表尚未安装，请先执行数据库升级');
+            abort(500, __('风控规则表尚未安装，请先执行数据库升级'));
         }
     }
 
     private function findRule(Request $request): RiskRule
     {
         if (empty($request->input('id'))) {
-            abort(500, '参数有误');
+            abort(500, __('参数有误'));
         }
         $this->requireRuleTable();
         $rule = RiskRule::find((int)$request->input('id'));
         if (!$rule) {
-            abort(500, '规则不存在');
+            abort(500, __('规则不存在'));
         }
         return $rule;
     }

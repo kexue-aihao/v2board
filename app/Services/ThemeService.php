@@ -26,9 +26,9 @@ class ThemeService
     public function init()
     {
         $themeConfigFile = $this->path . "{$this->theme}/config.json";
-        if (!File::exists($themeConfigFile)) abort(500, "{$this->theme}主题不存在");
+        if (!File::exists($themeConfigFile)) abort(500, __(':theme主题不存在', ['theme' => $this->theme]));
         $themeConfig = json_decode(File::get($themeConfigFile), true);
-        if (!isset($themeConfig['configs']) || !is_array($themeConfig)) abort(500, "{$this->theme}主题配置文件有误");
+        if (!isset($themeConfig['configs']) || !is_array($themeConfig)) abort(500, __(':theme主题配置文件有误', ['theme' => $this->theme]));
         $configs = $themeConfig['configs'];
         $data = [];
         foreach ($configs as $config) {
@@ -39,10 +39,10 @@ class ThemeService
         try {
             File::ensureDirectoryExists(base_path() . '/config/theme/');
             if (!File::put(base_path() . "/config/theme/{$this->theme}.php", "<?php\n return $export ;")) {
-                abort(500, "{$this->theme}初始化失败");
+                abort(500, __(':theme初始化失败', ['theme' => $this->theme]));
             }
         } catch (\Exception $e) {
-            abort(500, '请检查V2Board目录权限');
+            abort(500, __('请检查V2Board目录权限'));
         }
 
         try {
@@ -71,10 +71,10 @@ class ThemeService
                 // 数组使该键恒为假值）。宁可 500 也不再等下去，日志留足可诊断信息。
                 Log::error("主题 [{$this->theme}] 初始化后等待配置生效超时（config/theme/{$this->theme}.php 已写入，"
                     . '请检查 bootstrap/cache 与 config/theme 目录权限，并重启 webman/AdapterMan 服务后重试）。');
-                abort(500, "{$this->theme}初始化失败");
+                abort(500, __(':theme初始化失败', ['theme' => $this->theme]));
             }
         } catch (\Exception $e) {
-            abort(500, "{$this->theme}初始化失败");
+            abort(500, __(':theme初始化失败', ['theme' => $this->theme]));
         }
     }
 }

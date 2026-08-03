@@ -14,18 +14,18 @@ class BEasyPaymentUSDT {
     {
         return [
             'bepusdt_url' => [
-                'label' => 'API 地址',
-                'description' => '您的 BEPUSDT API 接口地址(例如: https://xxx.com)',
+                'label' => __('API 地址'),
+                'description' => __('您的 BEPUSDT API 接口地址(例如: https://xxx.com)'),
                 'type' => 'input',
             ],
             'bepusdt_apitoken' => [
                 'label' => 'API Token',
-                'description' => '您的 BEPUSDT API Token',
+                'description' => __('您的 BEPUSDT API Token'),
                 'type' => 'input',
             ],
             'bepusdt_trade_type' => [
-                'label' => '交易类型',
-                'description' => '您的 BEPUSDT 交易类型',
+                'label' => __('交易类型'),
+                'description' => __('您的 BEPUSDT 交易类型'),
                 'type' => 'input',
             ]
         ];

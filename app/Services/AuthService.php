@@ -22,7 +22,7 @@ class AuthService
     public function generateAuthData(Request $request, $twoFactorVerified = false)
     {
         if (!$twoFactorVerified && (new TwoFactorService())->isEnabled($this->user->id)) {
-            abort(403, '需要完成二步验证后才能建立登录会话');
+            abort(403, __('需要完成二步验证后才能建立登录会话'));
         }
         $guid = Helper::guid();
         $authData = JWT::encode([

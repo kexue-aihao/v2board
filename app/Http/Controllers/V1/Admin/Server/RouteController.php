@@ -48,10 +48,10 @@ class RouteController extends Controller
                     'data' => true
                 ];
             } catch (\Exception $e) {
-                abort(500, '保存失败');
+                abort(500, __('保存失败'));
             }
         }
-        if (!ServerRoute::create($params)) abort(500, '创建失败');
+        if (!ServerRoute::create($params)) abort(500, __('创建失败'));
         return [
             'data' => true
         ];
@@ -60,8 +60,8 @@ class RouteController extends Controller
     public function drop(Request $request)
     {
         $route = ServerRoute::find($request->input('id'));
-        if (!$route) abort(500, '路由不存在');
-        if (!$route->delete()) abort(500, '删除失败');
+        if (!$route) abort(500, __('路由不存在'));
+        if (!$route->delete()) abort(500, __('删除失败'));
         return [
             'data' => true
         ];

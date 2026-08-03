@@ -235,7 +235,7 @@ class ConfigController extends Controller
                 $query->where('is_admin', 1)->orWhere('is_staff', 1);
             })->whereNotIn('id', UserTwoFactor::where('enabled', 1)->pluck('user_id'))->exists();
             if ($hasUnprotectedStaff) {
-                abort(422, '请先为全部管理员和员工绑定二步验证');
+                abort(422, __('请先为全部管理员和员工绑定二步验证'));
             }
         }
         $config = config('v2board');
@@ -256,7 +256,7 @@ class ConfigController extends Controller
             : $previousTelegramDiscussId;
         $data = var_export($config, 1);
         if (!File::put(base_path() . '/config/v2board.php', "<?php\n return $data ;")) {
-            abort(500, '修改失败');
+            abort(500, __('修改失败'));
         }
         if ($previousTelegramBindingEnabled === 1
             && ($telegramBindingEnabled === 0 || $telegramDiscussId !== $previousTelegramDiscussId)) {
@@ -266,7 +266,7 @@ class ConfigController extends Controller
         }
         if (function_exists('opcache_reset')) {
             if (opcache_reset() === false) {
-                abort(500, '缓存清除失败，请卸载或检查opcache配置状态');
+                abort(500, __('缓存清除失败，请卸载或检查opcache配置状态'));
             }
         }
         Artisan::call('config:cache');

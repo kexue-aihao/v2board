@@ -41,17 +41,17 @@ class GiftcardController extends Controller
                 $params['code'] = Helper::randomChar(16);
             }
             if (!Giftcard::create($params)) {
-                abort(500, '礼品卡创建失败');
+                abort(500, __('礼品卡创建失败'));
             }
         } else {
             $giftcard = Giftcard::find($request->input('id'));
             if (!$giftcard) {
-                abort(404, '礼品卡不存在');
+                abort(404, __('礼品卡不存在'));
             }
             try {
                 $giftcard->update($params);
             } catch (\Exception $e) {
-                abort(500, '礼品卡保存失败');
+                abort(500, __('礼品卡保存失败'));
             }
         }
 
@@ -103,16 +103,16 @@ class GiftcardController extends Controller
     {
         $giftcardId = $request->input('id');
         if (empty($giftcardId)) {
-            abort(400, '未找到礼品卡');
+            abort(400, __('未找到礼品卡'));
         }
 
         $giftcard = Giftcard::find($giftcardId);
         if (!$giftcard) {
-            abort(404, '礼品卡不存在');
+            abort(404, __('礼品卡不存在'));
         }
 
         if (!$giftcard->delete()) {
-            abort(500, '删除失败');
+            abort(500, __('删除失败'));
         }
 
         return response([

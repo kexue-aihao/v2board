@@ -14,8 +14,8 @@ class StripeALL {
     {
         return [
             'currency' => [
-                'label' => '货币单位',
-                'description' => '请使用符合ISO 4217标准的三位字母，例如GBP',
+                'label' => __('货币单位'),
+                'description' => __('请使用符合ISO 4217标准的三位字母，例如GBP'),
                 'type' => 'input',
             ],
             'stripe_sk_live' => [
@@ -24,13 +24,13 @@ class StripeALL {
                 'type' => 'input',
             ],
             'stripe_webhook_key' => [
-                'label' => 'WebHook密钥签名',
+                'label' => __('WebHook密钥签名'),
                 'description' => 'whsec_....',
                 'type' => 'input',
             ],
             'payment_method' => [
-                'label' => '支付方式',
-                'description' => '请输入alipay, wechat_pay, cards',
+                'label' => __('支付方式'),
+                'description' => __('请输入alipay, wechat_pay, cards'),
                 'type' => 'input',
             ]
         ];

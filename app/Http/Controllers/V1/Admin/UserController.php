@@ -38,7 +38,7 @@ class UserController extends Controller
     public function resetSecret(Request $request)
     {
         $user = User::find($request->input('id'));
-        if (!$user) abort(500, '用户不存在');
+        if (!$user) abort(500, __('用户不存在'));
         // 包 using() 只为给 token 历史标注原因与操作者；捕获本身由 Eloquent 观察者完成，
         // 漏包只会让 issued_reason 退化成 unknown，不会丢记录。
         return TokenRotationContext::using('admin_reset', function () use ($user) {
@@ -66,11 +66,11 @@ class UserController extends Controller
     public function resetPassword(Request $request)
     {
         $user = User::find($request->input('id'));
-        if (!$user) abort(500, '用户不存在');
+        if (!$user) abort(500, __('用户不存在'));
 
         $password = PasswordPolicyService::generate();
         PasswordPolicyService::apply($user, $password);
-        if (!$user->save()) abort(500, '重置失败');
+        if (!$user->save()) abort(500, __('重置失败'));
         // 排在 save() 之后：save 失败时旗标不能先翻。
         PasswordPolicyService::markSatisfied($user);
         // 密码变了，旧会话必须死。
@@ -156,7 +156,7 @@ class UserController extends Controller
     public function getUserInfoById(Request $request)
     {
         if (empty($request->input('id'))) {
-            abort(500, '参数错误');
+            abort(500, __('参数错误'));
         }
         $user = User::find($request->input('id'));
         if ($user->invite_user_id) {
@@ -179,10 +179,10 @@ class UserController extends Controller
         $params = $request->validated();
         $user = User::find($request->input('id'));
         if (!$user) {
-            abort(500, '用户不存在');
+            abort(500, __('用户不存在'));
         }
         if (User::where('email', $params['email'])->first() && $user->email !== $params['email']) {
-            abort(500, '邮箱已被使用');
+            abort(500, __('邮箱已被使用'));
         }
         if (isset($params['password'])) {
             $params['password'] = password_hash($params['password'], PASSWORD_DEFAULT);
@@ -198,7 +198,7 @@ class UserController extends Controller
         if (isset($params['plan_id'])) {
             $plan = Plan::find($params['plan_id']);
             if (!$plan) {
-                abort(500, '订阅计划不存在');
+                abort(500, __('订阅计划不存在'));
             }
             $params['group_id'] = $plan->group_id;
         } else {
@@ -233,7 +233,7 @@ class UserController extends Controller
                 $primary->save();
             }
         } catch (\Exception $e) {
-            abort(500, '保存失败');
+            abort(500, __('保存失败'));
         }
         return response([
             'data' => true
@@ -245,7 +245,7 @@ class UserController extends Controller
         $user = User::findOrFail($request->input('user_id'));
         $subscription = Subscription::where('id', $request->input('subscription_id'))
             ->where('user_id', $user->id)->first();
-        if (!$subscription) abort(404, '订阅不存在');
+        if (!$subscription) abort(404, __('订阅不存在'));
         (new SubscriptionService())->setPrimary($user, $subscription);
         return response(['data' => true]);
     }
@@ -255,7 +255,7 @@ class UserController extends Controller
         $user = User::findOrFail($request->input('user_id'));
         $subscription = Subscription::where('id', $request->input('subscription_id'))
             ->where('user_id', $user->id)->first();
-        if (!$subscription) abort(404, '订阅不存在');
+        if (!$subscription) abort(404, __('订阅不存在'));
         (new SubscriptionService())->revoke($user, $subscription);
         return response(['data' => true]);
     }
@@ -264,14 +264,14 @@ class UserController extends Controller
     {
         $userId = (int)$request->input('user_id');
         if (!$userId || !User::where('id', $userId)->exists()) {
-            abort(404, '用户不存在');
+            abort(404, __('用户不存在'));
         }
         $subscriptionId = $request->input('subscription_id') ? (int)$request->input('subscription_id') : null;
         if ($subscriptionId && !Schema::hasTable('v2_subscription')) {
-            abort(404, '订阅不存在');
+            abort(404, __('订阅不存在'));
         }
         if ($subscriptionId && !Subscription::where('id', $subscriptionId)->where('user_id', $userId)->exists()) {
-            abort(404, '订阅不存在');
+            abort(404, __('订阅不存在'));
         }
         if (!Schema::hasTable('v2_subscribe_request_log')) {
             return response(['data' => [], 'total' => 0]);
@@ -369,12 +369,12 @@ class UserController extends Controller
     {
         $userId = (int)$request->input('user_id');
         $user = User::find($userId);
-        if (!$user) abort(404, '用户不存在');
+        if (!$user) abort(404, __('用户不存在'));
         $subscriptionId = $request->input('subscription_id') ? (int)$request->input('subscription_id') : null;
         if ($subscriptionId) {
-            if (!Schema::hasTable('v2_subscription')) abort(404, '订阅不存在');
+            if (!Schema::hasTable('v2_subscription')) abort(404, __('订阅不存在'));
             $subscription = Subscription::where('id', $subscriptionId)->where('user_id', $userId)->first();
-            if (!$subscription) abort(404, '订阅不存在');
+            if (!$subscription) abort(404, __('订阅不存在'));
             (new SubscriptionRiskService())->evaluateCompletedCycles($subscription);
         } else {
             $service = new SubscriptionService();
@@ -398,13 +398,13 @@ class UserController extends Controller
     {
         $userId = (int)$request->input('user_id');
         if (!$userId || !User::where('id', $userId)->exists()) {
-            abort(404, '用户不存在');
+            abort(404, __('用户不存在'));
         }
 
         try {
             $counts = (new SubscribeAuditRetentionService())->purgeUser($userId);
         } catch (\Throwable $e) {
-            abort(500, '清空审计记录失败');
+            abort(500, __('清空审计记录失败'));
         }
 
         // 这是面板里唯一一个删除滥用证据的端点，而 RequestLog 中间件只记路径，
@@ -454,7 +454,7 @@ class UserController extends Controller
             if ($request->input('plan_id')) {
                 $plan = Plan::find($request->input('plan_id'));
                 if (!$plan) {
-                    abort(500, '订阅计划不存在');
+                    abort(500, __('订阅计划不存在'));
                 }
             }
             $user = [
@@ -468,7 +468,7 @@ class UserController extends Controller
                 'token' => Helper::guid()
             ];
             if (User::where('email', $user['email'])->first()) {
-                abort(500, '邮箱已存在于系统中');
+                abort(500, __('邮箱已存在于系统中'));
             }
             $user['password'] = password_hash($request->input('password') ?? $user['email'], PASSWORD_DEFAULT);
             // 默认密码就是邮箱地址，是全站最弱的口令；管理员指定的也是人选的。都要提醒。
@@ -479,7 +479,7 @@ class UserController extends Controller
                 return User::create($user);
             });
             if (!$created) {
-                abort(500, '生成失败');
+                abort(500, __('生成失败'));
             }
             return response([
                 'data' => true
@@ -495,7 +495,7 @@ class UserController extends Controller
         if ($request->input('plan_id')) {
             $plan = Plan::find($request->input('plan_id'));
             if (!$plan) {
-                abort(500, '订阅计划不存在');
+                abort(500, __('订阅计划不存在'));
             }
         }
         $users = [];
@@ -522,7 +522,7 @@ class UserController extends Controller
         DB::beginTransaction();
         if (!User::insert($users)) {
             DB::rollBack();
-            abort(500, '生成失败');
+            abort(500, __('生成失败'));
         }
         // User::insert() 绕过全部 Eloquent 事件，是整个项目里唯一需要显式记录 token 历史的
         // 写入点。insert 不回填 id，按 token 反查（该列有唯一索引）拿 id。放在事务内：
@@ -586,7 +586,7 @@ class UserController extends Controller
                 'banned' => 1
             ]);
         } catch (\Exception $e) {
-            abort(500, '处理失败');
+            abort(500, __('处理失败'));
         }
 
         return response([
@@ -625,7 +625,7 @@ class UserController extends Controller
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
-            abort(500, '批量删除用户信息失败');
+            abort(500, __('批量删除用户信息失败'));
         }  
 
         return response([
@@ -637,7 +637,7 @@ class UserController extends Controller
     {
         $user = User::find($request->input('id'));
         if (!$user) {
-            abort(500, '用户不存在');
+            abort(500, __('用户不存在'));
         }
         DB::beginTransaction();
         try {
@@ -660,7 +660,7 @@ class UserController extends Controller
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
-            abort(500, '删除用户失败');
+            abort(500, __('删除用户失败'));
         }
 
         return response([

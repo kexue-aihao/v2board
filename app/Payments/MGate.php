@@ -19,7 +19,7 @@ class MGate {
     {
         return [
             'mgate_url' => [
-                'label' => 'API地址',
+                'label' => __('API地址'),
                 'description' => '',
                 'type' => 'input',
             ],
@@ -34,8 +34,8 @@ class MGate {
                 'type' => 'input',
             ],
             'mgate_source_currency' => [
-                'label' => '源货币',
-                'description' => '默认CNY',
+                'label' => __('源货币'),
+                'description' => __('默认CNY'),
                 'type' => 'input'
             ]
         ];
@@ -62,7 +62,7 @@ class MGate {
         $curl->post($this->config['mgate_url'] . '/v1/gateway/fetch', http_build_query($params));
         $result = $curl->response;
         if (!$result) {
-            abort(500, '网络异常');
+            abort(500, __('网络异常'));
         }
         if ($curl->error) {
             if (isset($result->errors)) {
@@ -72,11 +72,11 @@ class MGate {
             if (isset($result->message)) {
                 abort(500, $result->message);
             }
-            abort(500, '未知错误');
+            abort(500, __('未知错误'));
         }
         $curl->close();
         if (!isset($result->data->trade_no)) {
-            abort(500, '接口请求失败');
+            abort(500, __('接口请求失败'));
         }
         return [
             'type' => 1, // 0:qrcode 1:url

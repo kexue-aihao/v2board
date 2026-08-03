@@ -36,24 +36,24 @@ class PlanSave extends FormRequest
     public function messages()
     {
         return [
-            'name.required' => '套餐名称不能为空',
-            'type.required' => '套餐类型不能为空',
-            'type.in' => '套餐类型格式有误',
-            'group_id.required' => '权限组不能为空',
-            'transfer_enable.required' => '流量不能为空',
-            'device_limit.integer' => '设备数限制格式有误',
-            'month_price.integer' => '月付金额格式有误',
-            'quarter_price.integer' => '季付金额格式有误',
-            'half_year_price.integer' => '半年付金额格式有误',
-            'year_price.integer' => '年付金额格式有误',
-            'two_year_price.integer' => '两年付金额格式有误',
-            'three_year_price.integer' => '三年付金额格式有误',
-            'onetime_price.integer' => '一次性金额有误',
-            'reset_price.integer' => '流量重置包金额有误',
-            'reset_traffic_method.integer' => '流量重置方式格式有误',
-            'reset_traffic_method.in' => '流量重置方式格式有误',
-            'capacity_limit.integer' => '容纳用户量限制格式有误',
-            'speed_limit.integer' => '限速格式有误'
+            'name.required' => __('套餐名称不能为空'),
+            'type.required' => __('套餐类型不能为空'),
+            'type.in' => __('套餐类型格式有误'),
+            'group_id.required' => __('权限组不能为空'),
+            'transfer_enable.required' => __('流量不能为空'),
+            'device_limit.integer' => __('设备数限制格式有误'),
+            'month_price.integer' => __('月付金额格式有误'),
+            'quarter_price.integer' => __('季付金额格式有误'),
+            'half_year_price.integer' => __('半年付金额格式有误'),
+            'year_price.integer' => __('年付金额格式有误'),
+            'two_year_price.integer' => __('两年付金额格式有误'),
+            'three_year_price.integer' => __('三年付金额格式有误'),
+            'onetime_price.integer' => __('一次性金额有误'),
+            'reset_price.integer' => __('流量重置包金额有误'),
+            'reset_traffic_method.integer' => __('流量重置方式格式有误'),
+            'reset_traffic_method.in' => __('流量重置方式格式有误'),
+            'capacity_limit.integer' => __('容纳用户量限制格式有误'),
+            'speed_limit.integer' => __('限速格式有误')
         ];
     }
 }

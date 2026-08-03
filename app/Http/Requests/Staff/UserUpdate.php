@@ -33,26 +33,26 @@ class UserUpdate extends FormRequest
     public function messages()
     {
         return [
-            'email.required' => '邮箱不能为空',
-            'email.email' => '邮箱格式不正确',
-            'transfer_enable.numeric' => '流量格式不正确',
-            'device_limit.integer' => '设备数限制格式不正确',
-            'expired_at.integer' => '到期时间格式不正确',
-            'banned.required' => '是否封禁不能为空',
-            'banned.in' => '是否封禁格式不正确',
-            'plan_id.integer' => '订阅计划格式不正确',
-            'commission_rate.integer' => '推荐返利比例格式不正确',
-            'commission_rate.nullable' => '推荐返利比例格式不正确',
-            'commission_rate.min' => '推荐返利比例最小为0',
-            'commission_rate.max' => '推荐返利比例最大为100',
-            'discount.integer' => '专属折扣比例格式不正确',
-            'discount.nullable' => '专属折扣比例格式不正确',
-            'discount.min' => '专属折扣比例最小为0',
-            'discount.max' => '专属折扣比例最大为100',
-            'u.integer' => '上行流量格式不正确',
-            'd.integer' => '下行流量格式不正确',
-            'balance.integer' => '余额格式不正确',
-            'commission_balance.integer' => '佣金格式不正确'
+            'email.required' => __('邮箱不能为空'),
+            'email.email' => __('邮箱格式不正确'),
+            'transfer_enable.numeric' => __('流量格式不正确'),
+            'device_limit.integer' => __('设备数限制格式不正确'),
+            'expired_at.integer' => __('到期时间格式不正确'),
+            'banned.required' => __('是否封禁不能为空'),
+            'banned.in' => __('是否封禁格式不正确'),
+            'plan_id.integer' => __('订阅计划格式不正确'),
+            'commission_rate.integer' => __('推荐返利比例格式不正确'),
+            'commission_rate.nullable' => __('推荐返利比例格式不正确'),
+            'commission_rate.min' => __('推荐返利比例最小为0'),
+            'commission_rate.max' => __('推荐返利比例最大为100'),
+            'discount.integer' => __('专属折扣比例格式不正确'),
+            'discount.nullable' => __('专属折扣比例格式不正确'),
+            'discount.min' => __('专属折扣比例最小为0'),
+            'discount.max' => __('专属折扣比例最大为100'),
+            'u.integer' => __('上行流量格式不正确'),
+            'd.integer' => __('下行流量格式不正确'),
+            'balance.integer' => __('余额格式不正确'),
+            'commission_balance.integer' => __('佣金格式不正确')
         ];
     }
 }

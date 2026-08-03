@@ -15,28 +15,28 @@ class StripeCheckout {
     {
         return [
             'currency' => [
-                'label' => '货币单位',
+                'label' => __('货币单位'),
                 'description' => '',
                 'type' => 'input',
             ],
             'stripe_sk_live' => [
                 'label' => 'SK_LIVE',
-                'description' => 'API 密钥',
+                'description' => __('API 密钥'),
                 'type' => 'input',
             ],
             'stripe_pk_live' => [
                 'label' => 'PK_LIVE',
-                'description' => 'API 公钥',
+                'description' => __('API 公钥'),
                 'type' => 'input',
             ],
             'stripe_webhook_key' => [
-                'label' => 'WebHook 密钥签名',
+                'label' => __('WebHook 密钥签名'),
                 'description' => '',
                 'type' => 'input',
             ],
             'stripe_custom_field_name' => [
-                'label' => '自定义字段名称',
-                'description' => '例如可设置为“联系方式”，以便及时与客户取得联系',
+                'label' => __('自定义字段名称'),
+                'description' => __('例如可设置为“联系方式”，以便及时与客户取得联系'),
                 'type' => 'input',
             ]
         ];

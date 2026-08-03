@@ -151,7 +151,7 @@ class RiskSharedIpController extends Controller
         $ip = trim((string)$request->input('ip'));
         // SubscribeAuditService 在解析不出地址时会写字面量 'unknown'，那也是一条合法记录。
         if ($ip === '' || (!filter_var($ip, FILTER_VALIDATE_IP) && $ip !== 'unknown')) {
-            abort(500, 'IP 有误');
+            abort(500, __('IP 有误'));
         }
 
         $service = new IpAccountLinkService();
@@ -539,7 +539,7 @@ class RiskSharedIpController extends Controller
             return null;
         }
         if (!preg_match('/^[0-9a-fA-F:.]{1,45}$/', $value)) {
-            abort(500, 'IP 关键词只能包含数字、字母 a-f、点与冒号');
+            abort(500, __('IP 关键词只能包含数字、字母 a-f、点与冒号'));
         }
         return $value;
     }

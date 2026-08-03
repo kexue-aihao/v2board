@@ -17,37 +17,37 @@ class Bepusdt
     {
         return [
             'bepusdt_url' => [
-                'label' => 'API 地址',
-                'description' => 'BEpusdt 服务地址(例如: https://pay.example.com)，只填到域名，不要带路径',
+                'label' => __('API 地址'),
+                'description' => __('BEpusdt 服务地址(例如: https://pay.example.com)，只填到域名，不要带路径'),
                 'type' => 'input',
             ],
             'bepusdt_token' => [
                 'label' => 'API Token',
-                'description' => 'BEpusdt 配置文件里的 auth_token',
+                'description' => __('BEpusdt 配置文件里的 auth_token'),
                 'type' => 'input',
             ],
             'bepusdt_trade_type' => [
-                'label' => '交易类型',
-                'description' => '留空时进入 BEpusdt 收银台由用户自选币种，填写时按该类型直接发起订单。'
-                    . '可选: usdt.trc20 / usdc.trc20 / tron.trx / usdt.erc20 / usdc.erc20 / ethereum.eth / '
+                'label' => __('交易类型'),
+                'description' => __('留空时进入 BEpusdt 收银台由用户自选币种，填写时按该类型直接发起订单。可选: :options', ['options'
+                    => 'usdt.trc20 / usdc.trc20 / tron.trx / usdt.erc20 / usdc.erc20 / ethereum.eth / '
                     . 'usdt.polygon / usdc.polygon / usdt.bep20 / usdc.bep20 / bsc.bnb / usdt.aptos / usdc.aptos / '
                     . 'usdt.solana / usdc.solana / usdt.xlayer / usdc.xlayer / usdt.arbitrum / usdc.arbitrum / '
-                    . 'usdc.base / usdt.plasma / usdt.ton / ton.gram',
+                    . 'usdc.base / usdt.plasma / usdt.ton / ton.gram']),
                 'type' => 'input',
             ],
             'bepusdt_fiat' => [
-                'label' => '法币',
-                'description' => '默认 CNY，可选 CNY / USD / EUR / GBP / JPY',
+                'label' => __('法币'),
+                'description' => __('默认 CNY，可选 CNY / USD / EUR / GBP / JPY'),
                 'type' => 'input',
             ],
             'bepusdt_timeout' => [
-                'label' => '超时秒数',
-                'description' => '留空默认 600。指定交易类型时最小 120，走收银台时最小 180',
+                'label' => __('超时秒数'),
+                'description' => __('留空默认 600。指定交易类型时最小 120，走收银台时最小 180'),
                 'type' => 'input',
             ],
             'bepusdt_rate' => [
-                'label' => '汇率',
-                'description' => '可选。7.4 固定汇率 / ~1.02 上浮百分比 / +0.3 固定加价',
+                'label' => __('汇率'),
+                'description' => __('可选。7.4 固定汇率 / ~1.02 上浮百分比 / +0.3 固定加价'),
                 'type' => 'input',
             ],
         ];

@@ -40,7 +40,7 @@ class OrderController extends Controller
     public function detail(Request $request)
     {
         $order = Order::find($request->input('id'));
-        if (!$order) abort(500, '订单不存在');
+        if (!$order) abort(500, __('订单不存在'));
         $order['commission_log'] = CommissionLog::where('trade_no', $order->trade_no)->get();
         if ($order->surplus_order_ids) {
             $order['surplus_orders'] = Order::whereIn('id', $order->surplus_order_ids)->get();
@@ -83,9 +83,9 @@ class OrderController extends Controller
         $order = Order::where('trade_no', $request->input('trade_no'))
             ->first();
         if (!$order) {
-            abort(500, '订单不存在');
+            abort(500, __('订单不存在'));
         }
-        if ($order->status !== 0) abort(500, '只能对待支付的订单进行操作');
+        if ($order->status !== 0) abort(500, __('只能对待支付的订单进行操作'));
 
         $orderService = new OrderService($order);
         if (!$orderService->paid('manual_operation')) {
@@ -101,13 +101,13 @@ class OrderController extends Controller
         $order = Order::where('trade_no', $request->input('trade_no'))
             ->first();
         if (!$order) {
-            abort(500, '订单不存在');
+            abort(500, __('订单不存在'));
         }
-        if ($order->status !== 0) abort(500, '只能对待支付的订单进行操作');
+        if ($order->status !== 0) abort(500, __('只能对待支付的订单进行操作'));
 
         $orderService = new OrderService($order);
         if (!$orderService->cancel()) {
-            abort(500, '更新失败');
+            abort(500, __('更新失败'));
         }
         return response([
             'data' => true
@@ -123,13 +123,13 @@ class OrderController extends Controller
         $order = Order::where('trade_no', $request->input('trade_no'))
             ->first();
         if (!$order) {
-            abort(500, '订单不存在');
+            abort(500, __('订单不存在'));
         }
 
         try {
             $order->update($params);
         } catch (\Exception $e) {
-            abort(500, '更新失败');
+            abort(500, __('更新失败'));
         }
 
         return response([
@@ -143,16 +143,16 @@ class OrderController extends Controller
         $user = User::where('email', $request->input('email'))->first();
 
         if (!$user) {
-            abort(500, '该用户不存在');
+            abort(500, __('该用户不存在'));
         }
 
         if (!$plan) {
-            abort(500, '该订阅不存在');
+            abort(500, __('该订阅不存在'));
         }
 
         $userService = new UserService();
         if ($userService->isNotCompleteOrderByUserId($user->id)) {
-            abort(500, '该用户还有待支付的订单，无法分配');
+            abort(500, __('该用户还有待支付的订单，无法分配'));
         }
 
         DB::beginTransaction();
@@ -178,7 +178,7 @@ class OrderController extends Controller
 
         if (!$order->save()) {
             DB::rollback();
-            abort(500, '订单创建失败');
+            abort(500, __('订单创建失败'));
         }
 
         DB::commit();

@@ -101,12 +101,12 @@ class VlessController extends Controller
         if ($request->input('id')) {
             $server = ServerVless::find($request->input('id'));
             if (!$server) {
-                abort(500, '服务器不存在');
+                abort(500, __('服务器不存在'));
             }
             try {
                 $server->update($params);
             } catch (\Exception $e) {
-                abort(500, '保存失败');
+                abort(500, __('保存失败'));
             }
             return response([
                 'data' => true
@@ -114,7 +114,7 @@ class VlessController extends Controller
         }
 
         if (!ServerVless::create($params)) {
-            abort(500, '创建失败');
+            abort(500, __('创建失败'));
         }
 
         return response([
@@ -127,7 +127,7 @@ class VlessController extends Controller
         if ($request->input('id')) {
             $server = ServerVless::find($request->input('id'));
             if (!$server) {
-                abort(500, '节点ID不存在');
+                abort(500, __('节点ID不存在'));
             }
         }
         return response([
@@ -144,12 +144,12 @@ class VlessController extends Controller
         $server = ServerVless::find($request->input('id'));
 
         if (!$server) {
-            abort(500, '该服务器不存在');
+            abort(500, __('该服务器不存在'));
         }
         try {
             $server->update($params);
         } catch (\Exception $e) {
-            abort(500, '保存失败');
+            abort(500, __('保存失败'));
         }
 
         return response([
@@ -162,10 +162,10 @@ class VlessController extends Controller
         $server = ServerVless::find($request->input('id'));
         $server->show = 0;
         if (!$server) {
-            abort(500, '服务器不存在');
+            abort(500, __('服务器不存在'));
         }
         if (!ServerVless::create($server->toArray())) {
-            abort(500, '复制失败');
+            abort(500, __('复制失败'));
         }
 
         return response([

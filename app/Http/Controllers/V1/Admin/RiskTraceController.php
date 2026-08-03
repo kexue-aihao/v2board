@@ -164,7 +164,7 @@ class RiskTraceController extends Controller
     {
         $userId = (int)$request->input('user_id');
         if (!$userId || !User::where('id', $userId)->exists()) {
-            abort(404, '用户不存在');
+            abort(404, __('用户不存在'));
         }
 
         $historyService = new SubscriptionTokenHistoryService();
@@ -237,7 +237,7 @@ class RiskTraceController extends Controller
     {
         $id = (int)$request->input('id');
         if (!$id) {
-            abort(500, '参数有误');
+            abort(500, __('参数有误'));
         }
         $result = (new SubscriptionTokenHistoryService())->reveal($id);
         if ($result['token'] === null) {
@@ -371,7 +371,7 @@ class RiskTraceController extends Controller
 
         $value = trim($value);
         if ($value === '' || !preg_match('/^[A-Za-z0-9_\-=]{1,512}$/', $value)) {
-            abort(500, '无法从输入中解析出 token');
+            abort(500, __('无法从输入中解析出 token'));
         }
         if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-/i', $value)) {
             $kind = 'uuid';

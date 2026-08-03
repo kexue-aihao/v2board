@@ -15,23 +15,23 @@ class AlipayF2F {
     {
         return [
             'app_id' => [
-                'label' => '支付宝APPID',
+                'label' => __('支付宝APPID'),
                 'description' => '',
                 'type' => 'input',
             ],
             'private_key' => [
-                'label' => '支付宝私钥',
+                'label' => __('支付宝私钥'),
                 'description' => '',
                 'type' => 'input',
             ],
             'public_key' => [
-                'label' => '支付宝公钥',
+                'label' => __('支付宝公钥'),
                 'description' => '',
                 'type' => 'input',
             ],
             'product_name' => [
-                'label' => '自定义商品名称',
-                'description' => '将会体现在支付宝账单中',
+                'label' => __('自定义商品名称'),
+                'description' => __('将会体现在支付宝账单中'),
                 'type' => 'input'
             ]
         ];

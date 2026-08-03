@@ -105,9 +105,9 @@ class TwoFactorService
     public function verifyLogin($token, $code, $recoveryCode, $request)
     {
         $challenge = $this->getChallenge($token, 'login');
-        if (!$challenge || empty($challenge['user_id'])) abort(500, '二步验证请求已过期，请重新登录');
+        if (!$challenge || empty($challenge['user_id'])) abort(500, __('二步验证请求已过期，请重新登录'));
         $user = User::find($challenge['user_id']);
-        if (!$user || $user->banned || !$this->isEnabled($user->id)) abort(500, '二步验证不可用');
+        if (!$user || $user->banned || !$this->isEnabled($user->id)) abort(500, __('二步验证不可用'));
 
         $valid = DB::transaction(function () use ($user, $code, $recoveryCode, $request) {
             $record = UserTwoFactor::where('user_id', $user->id)->lockForUpdate()->first();
@@ -118,7 +118,7 @@ class TwoFactorService
         });
         if (!$valid) {
             $this->registerFailure($token, 'login');
-            abort(500, '二步验证码不正确');
+            abort(500, __('二步验证码不正确'));
         }
         $this->forgetChallenge($token, 'login');
         return $user;
@@ -127,7 +127,7 @@ class TwoFactorService
     public function beginSetup(User $user)
     {
         $record = $this->record($user);
-        if ($record->enabled) abort(500, '二步验证已经启用');
+        if ($record->enabled) abort(500, __('二步验证已经启用'));
         $secret = $this->google2fa->generateSecretKey();
         $record->pending_secret_encrypted = Crypt::encryptString($secret);
         $record->save();
@@ -168,13 +168,13 @@ class TwoFactorService
         foreach ($recoveryCodes as $recoveryCode) $hashes[] = password_hash($recoveryCode, PASSWORD_DEFAULT);
         DB::transaction(function () use ($user, $code, $request, $hashes) {
             $record = UserTwoFactor::where('user_id', $user->id)->lockForUpdate()->first();
-            if (!$record || $record->enabled || empty($record->pending_secret_encrypted)) abort(500, '请先获取新的绑定二维码');
+            if (!$record || $record->enabled || empty($record->pending_secret_encrypted)) abort(500, __('请先获取新的绑定二维码'));
             $secret = Crypt::decryptString($record->pending_secret_encrypted);
             $matchedStep = $this->matchedStep($secret, $this->normalizeCode($code));
             if ($matchedStep === false) {
                 $failureToken = $setupToken ?: 'setup-user-' . $user->id . '-' . (string)$request->ip();
                 $this->registerFailure($failureToken, 'setup');
-                abort(500, '二步验证码不正确');
+                abort(500, __('二步验证码不正确'));
             }
             $record->secret_encrypted = Crypt::encryptString($secret);
             $record->pending_secret_encrypted = null;
@@ -193,8 +193,8 @@ class TwoFactorService
     {
         DB::transaction(function () use ($user, $code, $recoveryCode, $request) {
             $record = UserTwoFactor::where('user_id', $user->id)->lockForUpdate()->first();
-            if (!$record || !$record->enabled) abort(500, '二步验证尚未启用');
-            if (!$this->validCode($record, $code) && !$this->consumeRecoveryCode($record, $recoveryCode)) abort(500, '二步验证码不正确');
+            if (!$record || !$record->enabled) abort(500, __('二步验证尚未启用'));
+            if (!$this->validCode($record, $code) && !$this->consumeRecoveryCode($record, $recoveryCode)) abort(500, __('二步验证码不正确'));
             $record->enabled = false;
             $record->secret_encrypted = null;
             $record->pending_secret_encrypted = null;
@@ -213,8 +213,8 @@ class TwoFactorService
         foreach ($recoveryCodes as $recoveryCode) $hashes[] = password_hash($recoveryCode, PASSWORD_DEFAULT);
         DB::transaction(function () use ($user, $code, $recoveryCode, $request, $hashes) {
             $record = UserTwoFactor::where('user_id', $user->id)->lockForUpdate()->first();
-            if (!$record || !$record->enabled) abort(500, '二步验证尚未启用');
-            if (!$this->validCode($record, $code) && !$this->consumeRecoveryCode($record, $recoveryCode)) abort(500, '二步验证码不正确');
+            if (!$record || !$record->enabled) abort(500, __('二步验证尚未启用'));
+            if (!$this->validCode($record, $code) && !$this->consumeRecoveryCode($record, $recoveryCode)) abort(500, __('二步验证码不正确'));
             $record->recovery_codes = json_encode($hashes);
             $record->save();
             $this->audit($user, 'recovery_codes_regenerated', $request);
@@ -253,7 +253,7 @@ class TwoFactorService
                 'metadata' => null,
                 'created_at' => time()
             ]);
-            if (!$ok) abort(500, '安全审计记录写入失败，操作未执行');
+            if (!$ok) abort(500, __('安全审计记录写入失败，操作未执行'));
         });
         (new AuthService($user))->removeAllSession();
     }
@@ -351,7 +351,7 @@ class TwoFactorService
         if ($count >= 5) {
             $this->forgetChallenge($token, $type);
             Cache::forget($key);
-            abort(429, '验证失败次数过多，请重新登录');
+            abort(429, __('验证失败次数过多，请重新登录'));
         }
         Cache::put($key, $count, self::CHALLENGE_TTL);
     }
@@ -367,6 +367,6 @@ class TwoFactorService
             'metadata' => null,
             'created_at' => time()
         ]);
-        if (!$ok) abort(500, '安全审计记录写入失败，操作未执行');
+        if (!$ok) abort(500, __('安全审计记录写入失败，操作未执行'));
     }
 }

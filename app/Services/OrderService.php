@@ -66,11 +66,11 @@ class OrderService
                 'unique_key' => 'deposit:' . $order->id,
                 'remark' => $order->trade_no
             ])) {
-                abort(500, '充值失败');
+                abort(500, __('充值失败'));
             }
             $order->status = 3;
             if (!$order->save()) {
-                abort(500, '充值失败');
+                abort(500, __('充值失败'));
             }
             return true;
         }
@@ -111,7 +111,7 @@ class OrderService
                 ]);
             } catch (\Exception $e) {
                 DB::rollback();
-                abort(500, '开通失败');
+                abort(500, __('开通失败'));
             }
         }
         switch ((string)$order->period) {
@@ -141,12 +141,12 @@ class OrderService
 
         if (!$this->user->save()) {
             DB::rollBack();
-            abort(500, '开通失败');
+            abort(500, __('开通失败'));
         }
         $order->status = 3;
         if (!$order->save()) {
             DB::rollBack();
-            abort(500, '开通失败');
+            abort(500, __('开通失败'));
         }
 
         DB::commit();
@@ -200,7 +200,7 @@ class OrderService
         } else if ($order->subscription_id) {
             $order->type = 2;
         } else if ($user->plan_id !== NULL && $order->plan_id !== $user->plan_id && ($user->expired_at > time() || $user->expired_at === NULL)) {
-            if (!(int)config('v2board.plan_change_enable', 1)) abort(500, '目前不允许更改订阅，请联系客服或提交工单操作');
+            if (!(int)config('v2board.plan_change_enable', 1)) abort(500, __('目前不允许更改订阅，请联系客服或提交工单操作'));
             $order->type = 3;
             if ((int)config('v2board.surplus_enable', 1)) $this->getSurplusValue($user, $order);
             if ($order->surplus_amount >= $order->total_amount) {

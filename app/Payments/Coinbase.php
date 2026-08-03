@@ -11,7 +11,7 @@ class Coinbase {
     {
         return [
             'coinbase_url' => [
-                'label' => '接口地址',
+                'label' => __('接口地址'),
                 'description' => '',
                 'type' => 'input',
             ],

@@ -28,7 +28,7 @@ class EPay {
             ],
             'type' => [
                 'label' => 'TYPE',
-                'description' => '支付类型，如: alipay, wxpay, qqpay',
+                'description' => __('支付类型，如: alipay, wxpay, qqpay'),
                 'type' => 'input',
             ]
         ];
