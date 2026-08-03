@@ -5,6 +5,44 @@
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
     <meta name="theme-color" content="#355cc2">
     <title>{{ $title }}</title>
+    <script>
+        /* 明暗盖章必须先于首帧：按「localStorage 显式选择 → 系统偏好」把 data-theme 写到
+           根元素上，暗色令牌全部挂在 :root[data-theme="dark"] 下（见样式表 §2）。右上角
+           #theme-toggle 的点击也在这里用事件委托处理——刻意不进 app.js：那份文件保持零改动
+           （缓存指纹只跟它的 mtime 变，HTML 与本内联脚本同文件、天然同批到达，无错配窗口）。 */
+        (function () {
+            'use strict';
+            var KEY = 'reseller_theme';
+            var CHROME = { dark: '#171A1D', light: '#355cc2' };   // 移动端浏览器 chrome：暗色跟页底，亮色保持品牌色（与 EZ dashboard.blade.php 一致）
+            var media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+            var manual = false;   // 本次会话内点过切换。localStorage 不可用时（隐私模式 setItem 抛错）
+                                  // stored() 恒为 null，仅靠它守卫会让随后的系统偏好变化推翻用户的显式选择。
+            function stored() {
+                try {
+                    var value = localStorage.getItem(KEY);
+                    return value === 'light' || value === 'dark' ? value : null;
+                } catch (error) { return null; }
+            }
+            function apply(theme) {
+                document.documentElement.dataset.theme = theme;
+                var meta = document.querySelector('meta[name="theme-color"]');
+                if (meta) meta.setAttribute('content', CHROME[theme]);
+            }
+            apply(stored() || (media && media.matches ? 'dark' : 'light'));
+            function followSystem(event) {
+                if (!manual && !stored()) apply(event.matches ? 'dark' : 'light');
+            }
+            if (media && media.addEventListener) media.addEventListener('change', followSystem);
+            else if (media && media.addListener) media.addListener(followSystem);
+            document.addEventListener('click', function (event) {
+                if (!event.target.closest || !event.target.closest('#theme-toggle')) return;
+                var next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+                manual = true;
+                try { localStorage.setItem(KEY, next); } catch (error) {}
+                apply(next);
+            });
+        }());
+    </script>
     <style>
         /* ═══════════════════════════════════════════════════════════════════════════
            倒卖商工作区样式表 —— 采用 EZ 主题的设计语言（令牌值 / split 分栏 / 卡片基型）。
@@ -18,7 +56,10 @@
         :root {
             /* 1.1 EZ 基础令牌：逐字取自 theme-src/ez/src/assets/styles/base/variables.scss:6-37。勿改数值。 */
             --background-color: #f5f7fa;
-            --card-background: #ffffff;                     /* 仅毛玻璃不支持时的兜底（见 @supports） */
+            /* --card-background 本页无消费点，保留声明纯为 EZ 片段可移植性（移过来的 EZ 代码用
+               var(--card-background) 应得到 EZ 的原本行为，含暗色下的半透明）。本页自己的毛玻璃
+               走 --card-background-rgb + .7，不透明兜底走 --surface。 */
+            --card-background: #ffffff;
             --card-background-rgb: 255, 255, 255;           /* 毛玻璃配方：.site-logo / .auth-tabs / .slide-tabs-wrapper */
             --text-color: #333333;
             --text-color-rgb: 51, 51, 51;                   /* ⚠ 暗色下翻转为 255,255,255：下面 4 个「明暗通用」令牌全靠这个反转，勿改 */
@@ -82,43 +123,52 @@
                 "Helvetica Neue", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif;
         }
 
-        /* ── 2. 令牌 · 暗色（只用 media query 一套机制；EZ 的 body.dark-theme + 组件裸 media 双轨会打架）── */
-        @media (prefers-color-scheme: dark) {
-            :root {
-                color-scheme: dark;
+        /* ── 2. 令牌 · 暗色 ─────────────────────────────────────────────────────────
+           挂在 :root[data-theme="dark"] 上而非裸 media query：<head> 顶部的内联脚本在首帧
+           渲染前按「localStorage('reseller_theme') 显式选择 → 系统偏好」次序给 <html> 盖章，
+           右上角 #theme-toggle 负责切换并持久化；未显式选择时监听系统偏好变化实时跟随。
+           整页只有这一套明暗机制——EZ 是 body.dark-theme 与组件内裸 prefers-color-scheme
+           双轨打架（手动选亮色时部分组件仍跟系统变暗），这里的暗色规则只认属性不认系统，
+           不存在那个问题。不给无 JS 场景留 media 兜底是刻意的：本页离开 JS 本就不可用
+           （app.js 渲染一切）。 */
+        :root[data-theme="dark"] {
+            color-scheme: dark;
 
-                /* EZ variables.scss:40-49 逐字（EZ 只覆盖这 8 个，功能色四组不覆盖） */
-                --background-color: #171A1D;
-                --card-background: rgba(30, 30, 30, 0.8);
-                --card-background-rgb: 30, 30, 30;
-                --text-color: rgba(255, 255, 255, .9);
-                --text-color-rgb: 255, 255, 255;
-                --secondary-text-color: rgba(255, 255, 255, .6);
-                --border-color: rgba(255, 255, 255, .1);
-                --shadow-color: rgba(0, 0, 0, .3);
+            /* EZ variables.scss:40-49 逐字（EZ 只覆盖这 8 个，功能色四组不覆盖） */
+            --background-color: #171A1D;
+            --card-background: rgba(30, 30, 30, 0.8);
+            --card-background-rgb: 30, 30, 30;
+            --text-color: rgba(255, 255, 255, .9);
+            --text-color-rgb: 255, 255, 255;
+            --secondary-text-color: rgba(255, 255, 255, .6);
+            --border-color: rgba(255, 255, 255, .1);
+            --shadow-color: rgba(0, 0, 0, .3);
 
-                /* 面元：不透明。#1e1e1e = EZ 自己 --card-background-rgb 去 alpha（Invite.vue 的 fallback 写的就是它） */
-                --surface: #1e1e1e;
-                --control-bg: #262626;                      /* = rgba(255,255,255,.04) over #1e1e1e，输入框比面板亮一档 */
+            /* 面元：不透明。#1e1e1e = EZ 自己 --card-background-rgb 去 alpha（Invite.vue 的 fallback 写的就是它） */
+            --surface: #1e1e1e;
+            --control-bg: #262626;                          /* = rgba(255,255,255,.04) over #1e1e1e，输入框比面板亮一档 */
 
-                --theme-ink: #90a5dd;                       /* #355cc2 在 #1e1e1e 上只有 2.75:1；这个是 6.84:1。EZ 自己没处理 */
-                --theme-hover: #4a70d4;                     /* 暗色下 hover 提亮而非压暗 */
-                --theme-soft: rgba(var(--theme-color-rgb), .16);
-                --theme-focus: rgba(var(--theme-color-rgb), .35);
+            --theme-ink: #90a5dd;                           /* #355cc2 在 #1e1e1e 上只有 2.75:1；这个是 6.84:1。EZ 自己没处理 */
+            --theme-hover: #4a70d4;                         /* 暗色下 hover 提亮而非压暗 */
+            --theme-soft: rgba(var(--theme-color-rgb), .16);
+            --theme-focus: rgba(var(--theme-color-rgb), .35);
 
-                /* 语义底：不透明 hex，值 = rgba(<X-color-rgb>, .15) 合成到 #1e1e1e 的算术结果 */
-                --success-background: #1a3520;  --success-ink: #00B42A;   /* 4.81:1 */
-                --warning-background: #402c1a;  --warning-ink: #FF7D00;   /* 5.13:1 */
-                --error-background:   #3e2323;  --error-ink:   #f87979;   /* 5.44:1 */
+            /* 语义底：不透明 hex，值 = rgba(<X-color-rgb>, .15) 合成到 #1e1e1e 的算术结果 */
+            --success-background: #1a3520;  --success-ink: #00B42A;   /* 4.81:1 */
+            --warning-background: #402c1a;  --warning-ink: #FF7D00;   /* 5.13:1 */
+            --error-background:   #3e2323;  --error-ink:   #f87979;   /* 5.44:1 */
 
-                --shadow-card:  0 2px 10px rgba(0, 0, 0, .15);
-                --shadow-float: 0 4px 15px rgba(0, 0, 0, .30);
+            --shadow-card:  0 2px 10px rgba(0, 0, 0, .15);
+            --shadow-float: 0 4px 15px rgba(0, 0, 0, .30);
 
-                --disabled-opacity: .65;                    /* .58 会把 rgba(255,255,255,.6) 压到 3.4:1 */
-            }
+            --disabled-opacity: .65;                        /* .58 会把 rgba(255,255,255,.6) 压到 3.4:1 */
         }
+        /* 无毛玻璃时的兜底走 --surface（明暗都不透明），刻意不用 --card-background：这 4 个都是
+           position:fixed 的悬浮件，滚动内容从它们下方穿过——不属于 §1.3 里「已知父级上的叠加层」
+           那种可以用 alpha 的情形，而 --card-background 在暗色是 EZ 原值 rgba(30,30,30,.8)，
+           20% 的透出会让 13-14px 导航文字出现鬼影。 */
         @supports not ((backdrop-filter: blur(4px)) or (-webkit-backdrop-filter: blur(4px))) {
-            .site-logo, .auth-tabs, .slide-tabs-wrapper { background: var(--card-background); }
+            .site-logo, .auth-tabs, .slide-tabs-wrapper, .theme-toggle { background: var(--surface); }
         }
 
         /* ── 3. reset 与元素基线 ───────────────────────────────────────────────── */
@@ -143,6 +193,17 @@
         .toast { position: fixed; z-index: var(--z-toast); top: 20px; right: 20px; max-width: min(420px, calc(100vw - 40px)); padding: 12px 15px; border: 1px solid; border-radius: var(--radius-sm); box-shadow: var(--shadow-float); font-size: 13px; line-height: 1.6; }
         .toast-success { color: var(--success-ink); border-color: var(--success-line); background: var(--success-background); }
         .toast-error { color: var(--error-ink); border-color: var(--error-line); background: var(--error-background); }
+
+        /* 明暗切换按钮（页面级 chrome，常驻两个视图之外）。点击由 <head> 内联脚本委托处理，
+           app.js 对它零感知；不在 setButtonLoading 名单里，所以允许包含 SVG 子节点。
+           z 用 --z-brand：被 toast(120) 短暂压住可接受（toast 会自动消失）。 */
+        .theme-toggle { position: fixed; z-index: var(--z-brand); top: 20px; right: 20px; display: grid; width: 42px; height: 42px; place-items: center; padding: 0; border: 1px solid var(--border-color); border-radius: 50%; color: var(--secondary-text-color); background: rgba(var(--card-background-rgb), .7); box-shadow: var(--shadow-float); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); transition: color var(--ease-fast), border-color var(--ease-fast); }
+        .theme-toggle:hover { color: var(--theme-ink); border-color: var(--theme-color); }
+        .theme-toggle svg { width: 20px; height: 20px; }
+        /* 亮色态显示月亮（点击进入暗色），暗色态显示太阳 */
+        .theme-toggle .icon-sun { display: none; }
+        :root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+        :root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
 
         /* ── 5. 登录壳 · EZ split 分栏 ─────────────────────────────────────────── */
         /* 用 fixed+inset 而非 EZ 的 html,body{height:100%} 链：本页三个视图（服务未开放页 /
@@ -329,6 +390,7 @@
             .container { max-width: 100%; padding: 0 10px; }
             .content-wrapper { flex-direction: column; gap: 20px; }
             .site-logo { top: 14px; left: 14px; }
+            .theme-toggle { top: 14px; right: 14px; }
             /* EZ 的移动端做法：胶囊从顶部居中改为底部固定，动作落进拇指区 */
             .slide-tabs-container { top: auto; bottom: 20px; width: 92%; max-width: 450px; }
             .slide-tabs-wrapper { display: block; width: 100%; padding: 3px; border-radius: 20px; }
@@ -359,6 +421,12 @@
      读不到就在 :17 提前 return，整页 JS 全死。 --}}
 <body data-reseller-enabled="{{ $reseller_enabled ? '1' : '0' }}">
 <div id="message" class="toast" hidden role="status" aria-live="polite"></div>
+{{-- 明暗切换：页面级按钮，三个视图（登录壳 / 工作台 / 服务未开放页）都可用。点击由
+     <head> 内联脚本委托处理并写入 localStorage('reseller_theme')；app.js 不感知此按钮。 --}}
+<button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换深浅色模式">
+    <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+</button>
 @if (!$reseller_enabled)
 <main class="service-closed" role="status">
     <div>
@@ -598,6 +666,11 @@
       · data-reseller-enabled 留在 <body> 上                          → app.js:10, 17
       · 全部 name 属性不变（FormData / form.elements）
       · [hidden]{display:none!important} 与 .list-row span 的后代选择器不能动
+
+    页面级明暗机制（与 app.js 无关）：
+      · <head> 内联脚本盖章 data-theme + 委托 #theme-toggle 点击 + localStorage('reseller_theme')
+      · 暗色令牌只挂 :root[data-theme="dark"]，全表不得出现裸 prefers-color-scheme 色彩规则
+        （prefers-reduced-motion 不在此列）
 --}}
 @php ($resellerAssetVersion = is_file(public_path('assets/reseller/app.js')) ? filemtime(public_path('assets/reseller/app.js')) : config('app.version'))
 <script src="/assets/reseller/app.js?v={{ $resellerAssetVersion }}"></script>
