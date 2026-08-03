@@ -51,6 +51,25 @@ class OAuthService
     public function begin(string $provider, Request $request): string
     {
         $provider = $this->assertProvider($provider);
+
+        // Google rejects OAuth from embedded engines (WebView shells such as
+        // Via, and in-app browsers) with an opaque "this app's request is
+        // invalid" page (Error 403: disallowed_useragent) that the user
+        // cannot act on. Catch the well-known signatures up front and bounce
+        // back to the login page with a message the theme can display.
+        // Google-only: GitHub and Telegram do not enforce this policy.
+        // Theme-scoped: only signature consumes oauth_error -- on any other
+        // theme the bounce would be a silent reload, which is strictly worse
+        // than Google's visible (if cryptic) error page.
+        // Current-host bounce: unlike the callback legs, this one runs on
+        // whatever domain the user is browsing (mirror domains included), so
+        // it must not cross over to app_url.
+        if ($provider === 'google'
+            && config('v2board.frontend_theme', 'v2board') === 'signature'
+            && $this->isEmbeddedBrowser((string)$request->userAgent())) {
+            return $this->frontendLoginUrl(['oauth_error' => 'embedded_browser'], true);
+        }
+
         [$state, $payload] = $this->issueState($provider, $request);
 
         if ($provider === 'telegram') {
@@ -293,6 +312,39 @@ class OAuthService
         return substr($combined, 0, 54) . '@github.io';
     }
 
+    /**
+     * Embedded-browser detection for the Google gate in begin().
+     *
+     * - "; wv)" is the explicit Android System WebView token.
+     * - "Version/X.Y ... Chrome/" on Android is the WebView UA shape. This
+     *   catches true shells (Via) AND standalone browsers built on a WebView
+     *   or WebView-shaped kernel -- UC, Quark, MQQBrowser, MiuiBrowser,
+     *   HeyTapBrowser all carry it. That is deliberate: Google's own
+     *   disallowed_useragent heuristic keys on the same UA shape, so these
+     *   browsers hit Google's opaque error page anyway; "open this site in
+     *   Chrome/Safari" is the correct advice for their users too. Browsers
+     *   Google accepts (Chrome/Firefox/Edge/Samsung/Opera/Brave/Huawei on
+     *   Android) never combine Version/ with Chrome/.
+     * - On iOS every real browser (Safari, CriOS, FxiOS, EdgiOS) carries a
+     *   "Safari/xxx" token; in-app WKWebViews do not.
+     * - The token list covers major in-app browsers that do carry a Safari
+     *   token anyway.
+     */
+    private function isEmbeddedBrowser(string $ua): bool
+    {
+        if ($ua === '') return false;
+        if (preg_match('/;\s*wv\)/i', $ua)) return true;
+        if (stripos($ua, 'Android') !== false
+            && stripos($ua, 'Chrome/') !== false
+            && preg_match('/\bVersion\/\d+\.\d+/i', $ua)) {
+            return true;
+        }
+        if (preg_match('/iPhone|iPad|iPod/i', $ua) && stripos($ua, 'Safari/') === false) {
+            return true;
+        }
+        return (bool)preg_match('/MicroMessenger|DingTalk|\bQQ\/|\bWeibo|FBAN|FBAV|Instagram|\bLine\//i', $ua);
+    }
+
     private function authorizationUrl(string $provider, array $state): string
     {
         $redirect = $this->redirectUri($provider);
@@ -500,9 +552,16 @@ class OAuthService
         return $configured ?: url('/api/v1/passport/oauth/' . $provider . '/callback');
     }
 
-    private function frontendLoginUrl(array $query): string
+    /**
+     * $onCurrentHost: the OAuth callback legs must land on app_url (that is
+     * the domain registered as redirect_uri), but the embedded-browser bounce
+     * in begin() happens on whichever domain the user is actually visiting --
+     * on a mirror-domain deployment sending them to app_url could send them
+     * to an unreachable host.
+     */
+    private function frontendLoginUrl(array $query, bool $onCurrentHost = false): string
     {
-        $base = rtrim((string)config('v2board.app_url', ''), '/');
+        $base = $onCurrentHost ? '' : rtrim((string)config('v2board.app_url', ''), '/');
         if ($base === '') $base = rtrim(url('/'), '/');
         return $base . '/#/login?' . http_build_query($query);
     }
