@@ -5,8 +5,10 @@
  * 扫 public/assets/admin/{umi.js,components.async.js,vendors.async.js} 的
  * 引号字符串字面量（上游 \uXXXX 转义与 fork 补丁的裸 UTF-8 一并覆盖），
  * 解码后凡含 CJK 的去重输出，附出现次数。用途：
- *   1) 首次生成 i18n.js 字典骨架；
- *   2) 日后 bundle 打补丁/换版后重跑 diff，找出新增待翻串。
+ *   1) 生成各语种字典文件 public/assets/admin/i18n.<code>.js 的键骨架
+ *      （文件格式与装载协议见 i18n.js 头注释）；
+ *   2) 日后 bundle 打补丁/换版后重跑 diff，找出新增待翻串，翻译后
+ *      往各语种字典文件的 dict 段增补同一批键。
  *
  * 用法：php scripts/extract-admin-i18n.php [输出.json]
  *   不带参数输出到 stdout；带参数写 JSON 文件（键=中文原文，值=""，占位待翻，
