@@ -53,7 +53,7 @@ class TelegramController extends Controller
         $user = User::findOrFail($request->user['id']);
         $subscription = Subscription::where('id', (int)$request->input('subscription_id'))
             ->where('user_id', $user->id)->first();
-        if (!$subscription) abort(404, 'Subscription does not exist');
+        if (!$subscription) abort(404, __('Subscription does not exist'));
         return response(['data' => (new TelegramBindingService())->prepare($user, $subscription)]);
     }
 

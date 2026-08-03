@@ -36,7 +36,7 @@ class TicketService {
         $ticket = Ticket::where('id', $ticketId)
             ->first();
         if (!$ticket) {
-            abort(500, '工单不存在');
+            abort(500, __('工单不存在'));
         }
         
         DB::beginTransaction();
@@ -54,7 +54,7 @@ class TicketService {
         $ticket->touch();
         if (!$ticketMessage || !$ticket->save()) {
             DB::rollback();
-            abort(500, '工单回复失败');
+            abort(500, __('工单回复失败'));
         }
         DB::commit();
         $this->sendEmailNotify($ticket, $ticketMessage);
@@ -67,14 +67,18 @@ class TicketService {
         $cacheKey = 'ticket_sendEmailNotify_' . $ticket->user_id;
         if (!Cache::get($cacheKey)) {
             Cache::put($cacheKey, 1, 1800);
+            // 收件人是用户、触发者通常是管理员——邮件语言绝不能跟随触发请求的
+            // locale（英文浏览器的管理员回中文用户的工单会发出英文邮件）。
+            // 固定用站点默认语言；真·按收件人语言要等 v2_user 加 language 列（暂缓项）。
+            $mailLocale = \App\Http\Middleware\Language::defaultLocale();
             SendEmailJob::dispatch([
                 'email' => $user->email,
-                'subject' => '您在' . config('v2board.app_name', 'V2Board') . '的工单得到了回复',
+                'subject' => __('Your ticket in :app_name has been replied', ['app_name' => config('v2board.app_name', 'V2Board')], $mailLocale),
                 'template_name' => 'notify',
                 'template_value' => [
                     'name' => config('v2board.app_name', 'V2Board'),
                     'url' => config('v2board.app_url'),
-                    'content' => "主题：{$ticket->subject}\r\n回复内容：{$ticketMessage->message}"
+                    'content' => __('Subject: :subject', ['subject' => $ticket->subject], $mailLocale) . "\r\n" . __('Reply: :reply', ['reply' => $ticketMessage->message], $mailLocale)
                 ]
             ]);
         }

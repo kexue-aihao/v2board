@@ -59,8 +59,8 @@ class CommController extends Controller
                 ],
                 'site_status' => [
                     'mode' => $siteStatus,
-                    'title' => $siteStatusTitle ?: ($siteStatus === 'shutdown' ? '服务暂时停止' : '服务正在维护'),
-                    'message' => $siteStatusMessage ?: '系统正在进行例行处理，请稍后再试。',
+                    'title' => $siteStatusTitle ?: ($siteStatus === 'shutdown' ? __('Service temporarily suspended') : __('Service under maintenance')),
+                    'message' => $siteStatusMessage ?: __('The system is undergoing routine processing, please try again later.'),
                     'recovery_at' => $siteStatusRecoveryAt,
                     'server_time' => time(),
                     'support_url' => config('v2board.telegram_discuss_link')
@@ -85,7 +85,7 @@ class CommController extends Controller
             ]);
         } catch (\Throwable $e) {
             report($e);
-            abort(503, 'Arithmetic verification is temporarily unavailable');
+            abort(503, __('Arithmetic verification is temporarily unavailable'));
         }
     }
 
@@ -105,7 +105,7 @@ class CommController extends Controller
             ]);
         } catch (\Throwable $e) {
             report($e);
-            abort(503, 'Arithmetic verification is temporarily unavailable');
+            abort(503, __('Arithmetic verification is temporarily unavailable'));
         }
     }
 

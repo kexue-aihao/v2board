@@ -16,9 +16,11 @@ class SiteStatus
         }
 
         $code = $mode === 'shutdown' ? 'SITE_SHUTDOWN' : 'SITE_MAINTENANCE';
+        // Language 中间件在 api 与 web 两个组里都有（组中间件先于路由中间件），
+        // 本路由中间件到达时 locale 已按当前请求就位，可安全走 __()。
         $message = $mode === 'shutdown'
-            ? '站点当前已停止服务，请稍后再试。'
-            : '站点当前正在维护，请稍后再试。';
+            ? __('The site is currently out of service, please try again later')
+            : __('The site is currently under maintenance, please try again later');
 
         return response()->json([
             'message' => $message,
