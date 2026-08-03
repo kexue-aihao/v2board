@@ -8,7 +8,7 @@
         $adminAssetVersions = array_filter(array_map(function ($file) {
             $path = public_path("assets/admin/{$file}");
             return is_file($path) ? filemtime($path) : null;
-        }, ['umi.js', 'umi.css', 'custom.css', 'vendors.async.js', 'components.async.js']));
+        }, ['umi.js', 'umi.css', 'custom.css', 'vendors.async.js', 'components.async.js', 'i18n.js']));
         $adminAssetVersion = $adminAssetVersions ? max($adminAssetVersions) : $version;
     @endphp
     <link rel="stylesheet" href="/assets/admin/components.chunk.css?v={{$adminAssetVersion}}">
@@ -43,6 +43,9 @@
 
 <body>
 <div id="root"></div>
+{{-- 覆盖翻译层必须是 body 内第一个脚本：fetch/XHR 的 Content-Language 补丁
+     要抢在应用（含 2FA 覆盖层的裸 fetch）发出首个请求之前装好。 --}}
+<script src="/assets/admin/i18n.js?v={{$adminAssetVersion}}"></script>
 <script src="/assets/admin/vendors.async.js?v={{$adminAssetVersion}}"></script>
 <script src="/assets/admin/components.async.js?v={{$adminAssetVersion}}"></script>
 <script src="/assets/admin/umi.js?v={{$adminAssetVersion}}"></script>
