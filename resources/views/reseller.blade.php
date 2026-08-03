@@ -674,5 +674,24 @@
 --}}
 @php ($resellerAssetVersion = is_file(public_path('assets/reseller/app.js')) ? filemtime(public_path('assets/reseller/app.js')) : config('app.version'))
 <script src="/assets/reseller/app.js?v={{ $resellerAssetVersion }}"></script>
+{{-- 落地页「入驻申请」深链：/reseller#register 直达申请 tab。上面的 app.js 是同步加载，
+     执行到这里 tab 点击监听（app.js:405-407）已绑定（服务开启时），合成一次点击即可复用
+     showAuthTab 全套切换逻辑。app.js 全文不读 location.hash，锚点不撞任何既有通道。
+     两个守卫（对抗核查修正）：
+     · auth-shell hidden 时跳过点击 —— 覆盖两种情形：关服分支（[data-auth-tab] 其实仍在
+       DOM，:438 只是给 #auth-shell 加 hidden；此时 app.js:17 因 serviceEnabled=false 提前
+       return、监听未绑，点了也无效，但跳过更干净）；已存 token 时 boot() 同步隐藏 auth-shell
+       直入工作区（若 token 随后失效弹回，用户看到的是默认登录 tab，与「请重新登录」提示一致）。
+     · replaceState 一次性消费锚点 —— 否则 hash 在本标签页所有后续整页加载中重放合成点击：
+       登出（app.js:646 用 location.reload()）本应回登录 tab 却被拽回申请 tab；用户手动切回
+       登录 tab 后按 F5 也会被拽回。 --}}
+<script>
+if (location.hash === '#register') {
+    var resellerRegisterTab = document.querySelector('[data-auth-tab="register"]');
+    var resellerAuthShell = document.getElementById('auth-shell');
+    if (resellerRegisterTab && resellerAuthShell && !resellerAuthShell.hidden) resellerRegisterTab.click();
+    if (window.history && history.replaceState) history.replaceState(null, '', location.pathname + location.search);
+}
+</script>
 </body>
 </html>

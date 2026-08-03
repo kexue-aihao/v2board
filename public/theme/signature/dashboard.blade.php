@@ -111,6 +111,10 @@
             assets_path: @json('/theme/' . $theme . '/assets'),
             version: @json($version),
             theme: { color: @json($signatureThemeColor), imgbb_api_key: @json($signatureImgbbApiKey) },
+            {{-- 落地页「入驻申请」按钮显隐跟随后台倒卖开关（baseConfig.js SITE_CONFIG 跳板消费）。
+                 webman 下 config() 是启动快照：后台切 reseller_enable 后需重启 webman 才反映到这里，
+                 与 routes/web.php 给三个倒卖 blade 传参的口径一致。 --}}
+            reseller_enabled: @json((int) config('v2board.reseller_enable', 0)),
             i18n: ['zh-CN', 'en-US', 'ja-JP', 'vi-VN', 'ko-KR', 'zh-TW', 'fa-IR']
         };
     </script>
