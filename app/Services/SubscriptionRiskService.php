@@ -79,11 +79,28 @@ class SubscriptionRiskService
         return $results;
     }
 
-    public function evaluateCycle(Subscription $subscription, int $cycleStart, int $cycleEnd): SubscriptionRiskCycle
+    /**
+     * 采集任意时间窗内的原始指标。30 天周期评估与后台手动自定义周期评估共用这一段，
+     * 「怎么判、判完写不写库」的语义差异留在各自的调用方里。
+     *
+     * $dayOverlapTraffic：v2_stat_user 是按天分桶的 UPSERT 表（record_at 固定为当天 0 点，
+     * 见 StatUserJob），点判定 record_at ∈ [start, end) 只取「0 点时间戳落在窗口内」的整桶——
+     * 不足 24 小时且不跨午夜的窗口一个桶都取不到，跨午夜的窗口丢起点侧整天。手动评估的
+     * 短窗口传 true 改按天重叠取桶（桶区间 [record_at, record_at+86400) 与窗口相交即计入，
+     * 粒度为整天）。30 天周期路径保持原点判定不动：边缘桶误差约 1/30，且是已冻结判定的
+     * 既有口径，改了等于让历史与新周期不可比。
+     */
+    public function collectWindow(Subscription $subscription, int $windowStart, int $windowEnd, bool $dayOverlapTraffic = false): array
     {
-        $traffic = StatUser::where('subscription_id', $subscription->id)
-            ->where('record_at', '>=', $cycleStart)
-            ->where('record_at', '<', $cycleEnd)
+        $trafficQuery = StatUser::where('subscription_id', $subscription->id);
+        if ($dayOverlapTraffic) {
+            $trafficQuery->where('record_at', '>', $windowStart - 86400)
+                ->where('record_at', '<', $windowEnd);
+        } else {
+            $trafficQuery->where('record_at', '>=', $windowStart)
+                ->where('record_at', '<', $windowEnd);
+        }
+        $traffic = $trafficQuery
             ->selectRaw('COALESCE(SUM(u + d), 0) AS used_traffic, COUNT(*) AS sample_count')
             ->first();
 
@@ -91,38 +108,65 @@ class SubscriptionRiskService
         $sampleCount = (int)($traffic->sample_count ?? 0);
         $transferEnable = max(0, (int)$subscription->transfer_enable);
         $userAgentCount = (int)SubscribeRequestLog::where('subscription_id', $subscription->id)
-            ->where('requested_at', '>=', $cycleStart)
-            ->where('requested_at', '<', $cycleEnd)
+            ->where('requested_at', '>=', $windowStart)
+            ->where('requested_at', '<', $windowEnd)
             ->selectRaw('COUNT(DISTINCT ua_hash) AS count')
             ->value('count');
 
         $ipRows = SubscribeRequestLog::where('subscription_id', $subscription->id)
-            ->where('requested_at', '>=', $cycleStart)
-            ->where('requested_at', '<', $cycleEnd)
+            ->where('requested_at', '>=', $windowStart)
+            ->where('requested_at', '<', $windowEnd)
             ->where('request_ip', '<>', '')
             ->select('request_ip')
             ->selectRaw('COUNT(*) AS request_count')
             ->groupBy('request_ip')
             ->orderByDesc('request_count')
             ->get();
-        $distinctIpCount = $ipRows->count();
 
         // IpLocationService::lookup() 每次都重新查一遍 v2_ip_location_cache，没有请求内缓存。
         // 拉取 IP 与连接 IP 两组里的重复项会让查询数翻倍，所以两次归约共享 $this->locationMemo。
         $pullGeo = $this->reduceLocations($ipRows->pluck('request_ip')->all());
-        $cityCount = $pullGeo['city_count'];
-        $regionCount = $pullGeo['region_count'];
-        $countryCount = $pullGeo['country_count'];
-
-        $nodeMetrics = $this->nodeMetrics($subscription, $cycleStart, $cycleEnd);
-
+        $nodeMetrics = $this->nodeMetrics($subscription, $windowStart, $windowEnd);
         $hasTrafficBasis = $transferEnable > 0 && $sampleCount > 0;
-        $hasLogBasis = ($userAgentCount + $distinctIpCount) > 0;
-        $hasNodeBasis = $nodeMetrics !== null;
+
+        return [
+            'used_traffic' => $usedTraffic,
+            'sample_count' => $sampleCount,
+            'transfer_enable' => $transferEnable,
+            'used_ratio' => $hasTrafficBasis ? round($usedTraffic / $transferEnable, 8) : null,
+            'user_agent_count' => $userAgentCount,
+            'distinct_ip_count' => $ipRows->count(),
+            'city_count' => $pullGeo['city_count'],
+            'region_count' => $pullGeo['region_count'],
+            'country_count' => $pullGeo['country_count'],
+            'ip_rows' => $ipRows,
+            'node_metrics' => $nodeMetrics,
+            'has_traffic_basis' => $hasTrafficBasis,
+            'has_log_basis' => ($userAgentCount + $ipRows->count()) > 0,
+            'has_node_basis' => $nodeMetrics !== null
+        ];
+    }
+
+    public function evaluateCycle(Subscription $subscription, int $cycleStart, int $cycleEnd): SubscriptionRiskCycle
+    {
+        $window = $this->collectWindow($subscription, $cycleStart, $cycleEnd);
+        $usedTraffic = $window['used_traffic'];
+        $transferEnable = $window['transfer_enable'];
+        $userAgentCount = $window['user_agent_count'];
+        $ipRows = $window['ip_rows'];
+        $distinctIpCount = $window['distinct_ip_count'];
+        $cityCount = $window['city_count'];
+        $regionCount = $window['region_count'];
+        $countryCount = $window['country_count'];
+        $nodeMetrics = $window['node_metrics'];
+
+        $hasTrafficBasis = $window['has_traffic_basis'];
+        $hasLogBasis = $window['has_log_basis'];
+        $hasNodeBasis = $window['has_node_basis'];
         // 有节点证据但没有拉取证据的周期现在也可以判定：节点上报的是实际使用者，
         // 「拉一次订阅分发给多地使用」这种场景只在这一侧留下痕迹。
         $hasAnyEvidence = $hasLogBasis || $hasNodeBasis;
-        $ratio = $hasTrafficBasis ? round($usedTraffic / $transferEnable, 8) : null;
+        $ratio = $window['used_ratio'];
 
         $record = SubscriptionRiskCycle::firstOrNew([
             'subscription_id' => (int)$subscription->id,
@@ -224,6 +268,68 @@ class SubscriptionRiskService
         $record->evaluated_at = time();
         $record->save();
         return $record;
+    }
+
+    /**
+     * 后台手动自定义周期评估：与周期评估用同一套指标采集和规则引擎，但纯计算——
+     * 不读不写 v2_subscription_risk_cycle。30 天账本是冻结判定（summaryForUser 的
+     * 「风险」列、审计留痕都建立在它的网格语义上），手动窗口只做即时体检，绝不入账。
+     */
+    public function assessWindow(Subscription $subscription, int $windowStart, int $windowEnd): array
+    {
+        // 与 evaluateCompletedCycles 同理按订阅重置 memo：手动评估在一个服务实例上
+        // 连续扫几百个订阅，memo 不重置会随批次无界增长。
+        $this->locationMemo = [];
+        // 流量按天重叠取桶（粒度整天），原因见 collectWindow 注释。
+        $window = $this->collectWindow($subscription, $windowStart, $windowEnd, true);
+
+        $metrics = [
+            'user_agent_count' => $window['user_agent_count'],
+            'distinct_ip_count' => $window['distinct_ip_count'],
+            'city_count' => $window['city_count'],
+            'region_count' => $window['region_count'],
+            'country_count' => $window['country_count'],
+            'used_ratio' => $window['used_ratio']
+        ];
+        // 节点无依据 ⇒ 节点键缺失 ⇒ 规则不命中。与周期评估同一约定：缺失不等于 0。
+        if ($window['has_node_basis']) {
+            foreach ($this->nodeMetricKeys() as $key) {
+                $metrics[$key] = $window['node_metrics'][$key];
+            }
+        }
+
+        // 窗口内三路证据全空时不进规则引擎：这里没有历史记录可沿用（手动评估不落库），
+        // 「没有数据」必须与「判定为正常」区分开，否则短窗口会给全站发一遍正常牌。
+        if (!$window['has_log_basis'] && !$window['has_node_basis'] && !$window['has_traffic_basis']) {
+            return ['status' => 'no_data', 'metrics' => $metrics, 'reasons' => [], 'fired' => []];
+        }
+
+        $ruleResult = $this->ruleService()->evaluate($metrics);
+        $reasons = $ruleResult['reasons'];
+        // 复用周期评估的重复 IP 证据标注。同一文案模板，翻译层对二者的处理保持一致——
+        // 当前理由串属库存中文数据，各语种均原样展示（漏翻不坏的既有边界），并无覆盖规则。
+        foreach ($window['ip_rows']->filter(function ($row) {
+            return (int)$row->request_count > 1;
+        })->take(10) as $ipRow) {
+            $reasons[] = '重复 IP：' . $ipRow->request_ip . ' 出现 ' . $ipRow->request_count . ' 次';
+        }
+
+        return [
+            'status' => $ruleResult['has_risk'] ? 'suspicious' : 'normal',
+            'metrics' => $metrics,
+            'reasons' => array_values(array_unique($reasons)),
+            'fired' => $ruleResult['fired']
+        ];
+    }
+
+    /**
+     * 用外部快照顶替规则表读取：手动评估整轮跨几十个 step 请求，每请求都现读规则表会让
+     * 「评估中途有人改规则」把同一轮结果切成两套判定标准。restart 时把 enabledRules()
+     * 快照冻进游标状态，后续每批注入同一份。
+     */
+    public function useRuleSnapshot(array $rules): void
+    {
+        $this->ruleService()->useRules($rules);
     }
 
     private function ruleService(): RiskRuleService

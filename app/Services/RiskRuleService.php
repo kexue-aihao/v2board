@@ -109,6 +109,32 @@ class RiskRuleService
     }
 
     /**
+     * 注入固定规则集，顶替 enabledRules() 的规则表读取。调用方（手动评估）把一份快照
+     * 冻结在游标状态里逐批复用，保证整轮判定标准一致。快照来自缓存，可能跨部署残留，
+     * 所以按 enabledRules() 同一口径重新过一遍注册表校验，不合法的行静默丢弃。
+     */
+    public function useRules(array $rules): void
+    {
+        $clean = [];
+        foreach ($rules as $rule) {
+            if (!is_array($rule)
+                || !isset($rule['dimension'], $rule['operator'], $rule['threshold'])
+                || !isset(self::DIMENSIONS[$rule['dimension']])
+                || !isset(self::OPERATORS[$rule['operator']])) {
+                continue;
+            }
+            $clean[] = [
+                'id' => isset($rule['id']) ? (int)$rule['id'] : null,
+                'label' => (string)($rule['label'] ?? ''),
+                'dimension' => (string)$rule['dimension'],
+                'operator' => (string)$rule['operator'],
+                'threshold' => (float)$rule['threshold']
+            ];
+        }
+        $this->rules = $clean;
+    }
+
+    /**
      * @param array $metrics 维度 => 值。缺键或 null 代表本周期拿不到该依据。
      * @return array{has_risk: bool, reasons: string[], fired: array[]}
      */

@@ -139,6 +139,7 @@ class AdminRoute
             $router->post('/risk/rule/sort', 'V1\\Admin\\RiskRuleController@sort');
             $router->post('/risk/rule/drop', 'V1\\Admin\\RiskRuleController@drop');
             $router->post('/risk/rule/recompute', 'V1\\Admin\\RiskRuleController@recompute');
+            $router->post('/risk/rule/manual-evaluate', 'V1\\Admin\\RiskRuleController@manualEvaluate');
             $router->get ('/risk/trace/fetch', 'V1\\Admin\\RiskTraceController@fetch');
             $router->get ('/risk/trace/history', 'V1\\Admin\\RiskTraceController@history');
             // lookup 与 reveal 用 POST 而非 GET：GET 会把 token 拼进 query string，落进

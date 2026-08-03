@@ -20,6 +20,15 @@ class RiskRuleController extends Controller
     private const BATCH_SECONDS = 4.0;
     private const CURSOR_TTL = 3600;
     private const RESTART_GUARD_SECONDS = 60;
+    // 手动评估结果明细的累计上限：明细跟着游标状态存缓存，无界会把缓存值撑到 MB 级；
+    // 超限后只累计数不存明细，前端提示收窄窗口或调高阈值。
+    private const MANUAL_RESULT_LIMIT = 200;
+    private const MANUAL_WINDOW_MIN_HOURS = 1;
+    // 92 天 ≈ 三个完整计费月，够覆盖任何回看诉求；再长的窗口该看的是 30 天账本。
+    private const MANUAL_WINDOW_MAX_HOURS = 2208;
+    // done 态留存时长：结果不落库，最终响应是整轮扫描的唯一副本，传输失败时前端
+    // 在这个窗口内重试 step 还能幂等取回，不至于整轮重跑。
+    private const MANUAL_DONE_TTL = 300;
 
     /**
      * 维度与运算符随规则一起返回，管理端不复制第二份列表 —— 唯一事实源是
@@ -285,6 +294,158 @@ class RiskRuleController extends Controller
                 'total' => (int)$state['total']
             ]
         ]);
+    }
+
+    /**
+     * 手动自定义周期评估：用当前规则对「最近 N 小时」窗口做一次全站即时体检。
+     * 纯计算不落库 —— 30 天账本与「风险」列徽标完全不受影响。与 recomputeAll 同一套
+     * 前端驱动的游标分批（队列不可用的原因见彼处注释），窗口取在 restart 时并冻结在
+     * 游标状态里，整轮各批评估的是同一个时间窗。
+     */
+    public function manualEvaluate(Request $request)
+    {
+        $service = new SubscriptionRiskService();
+        if (!$service->available()) {
+            abort(500, __('订阅风险表尚未安装，请先执行数据库升级'));
+        }
+
+        $key = CacheKey::get('RISK_MANUAL_CURSOR', 'global');
+        $state = Cache::get($key);
+
+        if ($request->input('restart')) {
+            // done 态是等待重放的成品而非在跑的任务，不参与并发守卫，直接接管。
+            if (is_array($state) && empty($state['done'])
+                && (time() - (int)($state['touched_at'] ?? 0)) < self::RESTART_GUARD_SECONDS) {
+                abort(500, __('已有手动评估任务正在进行，请稍后再试'));
+            }
+            $hours = $request->input('hours');
+            if (!is_numeric($hours)
+                || (int)$hours != (float)$hours
+                || (int)$hours < self::MANUAL_WINDOW_MIN_HOURS
+                || (int)$hours > self::MANUAL_WINDOW_MAX_HOURS) {
+                abort(500, __('评估窗口需为 1 小时到 92 天之间的整数小时'));
+            }
+            // 整轮冻结同一份规则快照：跨批现读规则表会让评估中途的规则改动把一轮结果
+            // 切成两套判定标准。快照摘要一并写进审计日志，事后能解释这轮按什么判的。
+            $ruleSnapshot = (new RiskRuleService())->enabledRules();
+            $endAt = time();
+            $state = [
+                'start_at' => $endAt - (int)$hours * 3600,
+                'end_at' => $endAt,
+                'rules' => $ruleSnapshot,
+                'done' => false,
+                'last_id' => 0,
+                'scanned' => 0,
+                'with_evidence' => 0,
+                'flagged' => 0,
+                'overflow' => 0,
+                'results' => [],
+                'total' => (int)Subscription::count(),
+                'started_at' => time(),
+                'touched_at' => time(),
+                'started_by' => $this->actor($request)
+            ];
+            $this->audit($request, 'RISK MANUAL EVALUATE start hours=' . (int)$hours
+                . ' window=[' . $state['start_at'] . ',' . $state['end_at'] . '] total=' . $state['total']
+                . ' rules=' . json_encode(array_map(function ($rule) {
+                    return ($rule['id'] === null ? 'builtin' : $rule['id'])
+                        . ':' . $rule['dimension'] . $rule['operator'] . $rule['threshold'];
+                }, $ruleSnapshot)));
+        }
+
+        if (!is_array($state)) {
+            abort(500, __('评估任务不存在或已超时，请重新开始'));
+        }
+
+        // 幂等重放：最终响应在传输中丢了，前端重试 step 仍能取回成品（见 MANUAL_DONE_TTL）。
+        if (!empty($state['done'])) {
+            return response(['data' => $this->manualPayload($state, true)]);
+        }
+
+        if (is_array($state['rules'] ?? null)) {
+            $service->useRuleSnapshot($state['rules']);
+        }
+
+        $deadline = microtime(true) + self::BATCH_SECONDS;
+        $batch = Subscription::where('id', '>', (int)$state['last_id'])
+            ->orderBy('id')
+            ->limit(self::BATCH_LIMIT)
+            ->get();
+
+        $flaggedRows = [];
+        $timedOut = false;
+        foreach ($batch as $subscription) {
+            $assessment = $service->assessWindow($subscription, (int)$state['start_at'], (int)$state['end_at']);
+            $state['scanned']++;
+            if ($assessment['status'] !== 'no_data') {
+                $state['with_evidence']++;
+            }
+            if ($assessment['status'] === 'suspicious') {
+                $state['flagged']++;
+                if (count($state['results']) + count($flaggedRows) < self::MANUAL_RESULT_LIMIT) {
+                    $flaggedRows[] = [
+                        'user_id' => (int)$subscription->user_id,
+                        'email' => null,
+                        'subscription_id' => (int)$subscription->id,
+                        'reasons' => $assessment['reasons'],
+                        'metrics' => $assessment['metrics']
+                    ];
+                } else {
+                    $state['overflow']++;
+                }
+            }
+            $state['last_id'] = (int)$subscription->id;
+            if (microtime(true) >= $deadline) {
+                $timedOut = true;
+                break;
+            }
+        }
+
+        if (count($flaggedRows)) {
+            // 邮箱按批一次点查补齐，不在循环里逐个查。用户已被删除时保留 user_id、邮箱置空。
+            $emails = User::whereIn('id', array_column($flaggedRows, 'user_id'))
+                ->pluck('email', 'id');
+            foreach ($flaggedRows as $row) {
+                $row['email'] = $emails[$row['user_id']] ?? null;
+                $state['results'][] = $row;
+            }
+        }
+
+        $done = !$timedOut && $batch->count() < self::BATCH_LIMIT;
+        $state['touched_at'] = time();
+        if ($done) {
+            // 不立即清缓存：结果不落库，这个响应体是整轮扫描的唯一副本。标 done 短存
+            // 一段允许幂等重放，下一次 restart 或 TTL 到期自然清掉。
+            $state['done'] = true;
+            Cache::put($key, $state, self::MANUAL_DONE_TTL);
+            $this->audit($request, 'RISK MANUAL EVALUATE done scanned=' . $state['scanned']
+                . ' flagged=' . $state['flagged']
+                . ' window=[' . $state['start_at'] . ',' . $state['end_at'] . ']');
+        } else {
+            Cache::put($key, $state, self::CURSOR_TTL);
+        }
+
+        return response(['data' => $this->manualPayload($state, $done)]);
+    }
+
+    /**
+     * done 态的响应体既在完成批返回、也可被幂等重放，收口成一个构造点。
+     */
+    private function manualPayload(array $state, bool $done): array
+    {
+        return [
+            'done' => $done,
+            'scanned' => (int)$state['scanned'],
+            'with_evidence' => (int)$state['with_evidence'],
+            'flagged' => (int)$state['flagged'],
+            'overflow' => (int)$state['overflow'],
+            'total' => (int)$state['total'],
+            'start_at' => (int)$state['start_at'],
+            'end_at' => (int)$state['end_at'],
+            // 明细只在完成时返回：中途每批都回传整个列表纯属带宽浪费，进度阶段
+            // 前端只需要计数。
+            'results' => $done ? array_values((array)($state['results'] ?? [])) : []
+        ];
     }
 
     /**
