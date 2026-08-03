@@ -116802,6 +116802,21 @@
         }
         // 重算会改写被冻结的判定结果，确认文案必须带全部四行保真度警告。
         var RISK_RECOMPUTE_WARNING = ["重算会用当前规则重新判定所有已完成周期，覆盖此前的判定结果。", "若审计证据已被保留期清理，重算结果可能低于当初的真实值，原本「疑似内鬼」的周期可能被改为「正常」。", "节点连接记录按 last_seen_at 清理，历史周期的连接指标尤其容易失真。", "此操作不可撤销。"];
+        // 手动评估与重算是两回事：前者纯计算不落库，后者改写账本。说明文案必须把
+        // 「不影响 30 天账本与风险列」讲清，免得管理员误以为按钮之间可以互替。
+        var MANUAL_EVALUATE_NOTES = ["手动评估用当前启用的规则对所选时间窗做一次全站即时体检，结果不写入 30 天周期账本，也不改变用户列表的「风险」列。", "流量使用率按天级统计聚合（覆盖窗口的整天流量除以套餐总量），短窗口下数值含义有限，含流量使用率维度的规则请自行斟酌。", "评估会分批进行，期间请保持本页面打开。"];
+        // 手动评估结果表的指标展示顺序：拉取侧 → 流量 → 节点侧，与后端维度注册表分组一致。
+        var MANUAL_METRIC_KEYS = ["distinct_ip_count", "user_agent_count", "city_count", "region_count", "country_count", "used_ratio", "node_ip_count", "node_new_ip_count", "node_count", "node_country_count", "node_region_count", "node_city_count"];
+        function manualPad(n) {
+            return (n < 10 ? "0" : "") + n
+        }
+        // 刻意用 YYYY-MM-DD HH:mm 的语言中立格式：不含汉字，覆盖翻译层不会碰它。
+        function manualTimeText(ts) {
+            if (!ts)
+                return "-";
+            var d = new Date(1e3 * ts);
+            return d.getFullYear() + "-" + manualPad(d.getMonth() + 1) + "-" + manualPad(d.getDate()) + " " + manualPad(d.getHours()) + ":" + manualPad(d.getMinutes())
+        }
         class RiskRulePage extends p.a.Component {
             constructor(props) {
                 super(props),
@@ -116825,17 +116840,28 @@
                     submit: i()({}, this.defaultSubmit),
                     recomputeVisible: !1,
                     recomputeRunning: !1,
-                    recomputeProgress: null
+                    recomputeProgress: null,
+                    manualVisible: !1,
+                    manualStarted: !1,
+                    manualRunning: !1,
+                    manualProgress: null,
+                    manualResults: [],
+                    manualPreset: "168",
+                    manualCustomValue: "",
+                    manualCustomUnit: "days"
                 },
                 // 全站重算是前端驱动的游标循环。每次启动领一个 token，组件卸载或弹窗
                 // 关闭时把 token 推进一格，在飞的那一批响应就会被丢弃、循环停下来。
-                this.recomputeToken = 0
+                this.recomputeToken = 0,
+                // 手动评估的游标循环同一套 token 机制，但独立计数：两个循环互不干扰。
+                this.manualToken = 0
             }
             componentDidMount() {
                 this.fetch()
             }
             componentWillUnmount() {
-                this.recomputeToken++
+                this.recomputeToken++,
+                this.manualToken++
             }
             fetch() {
                 this.setState({
@@ -117037,6 +117063,216 @@
                     className: "mb-0 text-muted font-size-sm"
                 }, "关闭本弹窗只会停止后续分批，已重算的周期不会回滚。"))
             }
+            openManual() {
+                // 每次打开都回到配置视图并清掉上一轮结果：结果本来就是即时体检的快照，
+                // 不落库、不跨弹窗保留。
+                this.setState({
+                    manualVisible: !0,
+                    manualStarted: !1,
+                    manualRunning: !1,
+                    manualProgress: null,
+                    manualResults: []
+                })
+            }
+            closeManual() {
+                this.manualToken++,
+                this.setState({
+                    manualVisible: !1,
+                    manualRunning: !1
+                })
+            }
+            // 返回整数小时数；非法输入返回 null。上限 2208 小时（92 天）与后端校验一致。
+            manualHours() {
+                var state = this.state;
+                if ("custom" !== state.manualPreset)
+                    return parseInt(state.manualPreset, 10);
+                var value = Number(state.manualCustomValue);
+                if ("" === String(state.manualCustomValue).trim() || isNaN(value) || value <= 0)
+                    return null;
+                var hours = "days" === state.manualCustomUnit ? Math.round(24 * value) : Math.round(value);
+                return hours >= 1 && hours <= 2208 ? hours : null
+            }
+            startManual() {
+                var hours = this.manualHours();
+                if (null === hours)
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "请输入 1 小时到 92 天之间的评估窗口"
+                    });
+                var token = ++this.manualToken;
+                this.setState({
+                    manualStarted: !0,
+                    manualRunning: !0,
+                    manualProgress: null,
+                    manualResults: []
+                }),
+                this.manualStep(token, hours)
+            }
+            // 窗口只随首个 restart 请求发送，后端把它冻结在游标状态里；后续分批不带参数。
+            manualStep(token, hours) {
+                riskPost("/risk/rule/manual-evaluate", null !== hours ? {
+                    restart: 1,
+                    hours: hours
+                } : {}).then(res=>{
+                    if (token !== this.manualToken)
+                        return;
+                    if (200 !== res.code)
+                        // 一批都没跑成（典型：60 秒并发守卫拒了 restart）就退回配置视图，
+                        // 别把人困在 0/0 的进度页上；服务端消息已由请求助手弹出。
+                        return void this.setState(this.state.manualProgress ? {
+                            manualRunning: !1
+                        } : {
+                            manualRunning: !1,
+                            manualStarted: !1
+                        });
+                    var data = res.data || {};
+                    this.setState({
+                        manualProgress: data,
+                        manualRunning: !data.done,
+                        manualResults: data.done ? data.results || [] : this.state.manualResults
+                    }),
+                    data.done || this.manualStep(token, null)
+                }
+                ).catch(()=>{
+                    token === this.manualToken && this.setState({
+                        manualRunning: !1
+                    })
+                }
+                )
+            }
+            renderManualConfig() {
+                var state = this.state;
+                return p.a.createElement("div", null, p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "评估窗口"), p.a.createElement(u["a"], {
+                    style: {
+                        width: "100%"
+                    },
+                    value: state.manualPreset,
+                    onChange: value=>this.setState({
+                        manualPreset: value
+                    })
+                }, p.a.createElement(u["a"].Option, {
+                    value: "24"
+                }, "近 24 小时"), p.a.createElement(u["a"].Option, {
+                    value: "72"
+                }, "近 3 天"), p.a.createElement(u["a"].Option, {
+                    value: "168"
+                }, "近 7 天"), p.a.createElement(u["a"].Option, {
+                    value: "336"
+                }, "近 14 天"), p.a.createElement(u["a"].Option, {
+                    value: "720"
+                }, "近 30 天"), p.a.createElement(u["a"].Option, {
+                    value: "custom"
+                }, "自定义"))), "custom" === state.manualPreset && p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "自定义窗口长度"), p.a.createElement("div", {
+                    className: "d-flex"
+                }, p.a.createElement(s["a"], {
+                    type: "number",
+                    min: 1,
+                    style: {
+                        flex: 1,
+                        marginRight: 8
+                    },
+                    placeholder: "请输入数值",
+                    value: state.manualCustomValue,
+                    onChange: e=>this.setState({
+                        manualCustomValue: e.target.value
+                    })
+                }), p.a.createElement(u["a"], {
+                    style: {
+                        width: 90
+                    },
+                    value: state.manualCustomUnit,
+                    onChange: value=>this.setState({
+                        manualCustomUnit: value
+                    })
+                }, p.a.createElement(u["a"].Option, {
+                    value: "hours"
+                }, "小时"), p.a.createElement(u["a"].Option, {
+                    value: "days"
+                }, "天")))), MANUAL_EVALUATE_NOTES.map((line,index)=>p.a.createElement("p", {
+                    key: index,
+                    className: (index === MANUAL_EVALUATE_NOTES.length - 1 ? "mb-0" : "mb-2") + " text-muted font-size-sm"
+                }, line)))
+            }
+            renderManualResults() {
+                var dimensions = this.state.dimensions
+                  , columns = [{
+                    title: "用户",
+                    key: "user",
+                    render: (value,record)=>record.email ? record.email : p.a.createElement(p.a.Fragment, null, "#" + record.user_id + " ", "用户已删除")
+                }, {
+                    title: "订阅",
+                    dataIndex: "subscription_id",
+                    key: "subscription_id",
+                    render: value=>"#" + value
+                }, {
+                    title: "命中理由",
+                    key: "reasons",
+                    render: (value,record)=>p.a.createElement("div", null, (record.reasons || []).map((reason,index)=>p.a.createElement("div", {
+                        key: index
+                    }, reason)))
+                }, {
+                    title: "关键指标",
+                    key: "metrics",
+                    render: (value,record)=>{
+                        var metrics = record.metrics || {};
+                        // 维度标签复用 /risk/rule/fetch 下发的注册表；值与标签是分开的
+                        // 文本节点，标签词条已在覆盖翻译层字典里。刻意不带单位。
+                        return p.a.createElement("div", null, MANUAL_METRIC_KEYS.filter(key=>void 0 !== metrics[key] && null !== metrics[key]).map(key=>{
+                            var meta = dimensions[key] || {}
+                              , text = "used_ratio" === key ? Math.round(1e4 * Number(metrics[key])) / 100 + "%" : String(metrics[key]);
+                            return p.a.createElement("div", {
+                                key: key,
+                                className: "text-muted font-size-sm"
+                            }, (meta.label || key) + "：", text)
+                        }
+                        ))
+                    }
+                }];
+                return p.a.createElement(o["a"], {
+                    tableLayout: "auto",
+                    size: "small",
+                    rowKey: record=>record.subscription_id,
+                    dataSource: this.state.manualResults,
+                    columns: columns,
+                    pagination: !1,
+                    scroll: {
+                        x: 680,
+                        y: 320
+                    }
+                })
+            }
+            renderManualBody() {
+                if (!this.state.manualStarted)
+                    return this.renderManualConfig();
+                var state = this.state
+                  , progress = state.manualProgress || {}
+                  , scanned = progress.scanned || 0
+                  , total = progress.total || 0
+                  , flagged = progress.flagged || 0
+                  , percent = total > 0 ? Math.min(100, Math.round(scanned / total * 100)) : 0;
+                return p.a.createElement("div", null, p.a.createElement("p", {
+                    className: "mb-2"
+                }, state.manualRunning ? "正在分批评估，请保持本页面打开……" : progress.done ? "评估完成。" : "评估已停止，重新打开本弹窗可再次发起。"), progress.start_at ? p.a.createElement("p", {
+                    className: "mb-2 text-muted font-size-sm"
+                }, "评估窗口：", manualTimeText(progress.start_at) + " ~ " + manualTimeText(progress.end_at)) : null, p.a.createElement("p", {
+                    className: "mb-2"
+                }, "已扫描订阅 " + scanned + " / " + total + "，发现可疑 " + flagged + " 个（" + percent + "%）"), progress.done ? p.a.createElement("p", {
+                    className: "mb-2"
+                }, "共扫描 " + scanned + " 个订阅，窗口内有数据 " + (progress.with_evidence || 0) + " 个，命中规则 " + flagged + " 个。") : null, progress.done && progress.overflow > 0 ? p.a.createElement("div", {
+                    className: "alert alert-warning",
+                    role: "alert"
+                }, p.a.createElement("p", {
+                    className: "mb-0"
+                }, "可疑结果超过 200 条上限，仅列出前 200 条，其余 " + progress.overflow + " 条未展示；建议收窄评估窗口或调高规则阈值。")) : null, progress.done ? state.manualResults.length ? this.renderManualResults() : p.a.createElement("p", {
+                    className: "mb-0"
+                }, "所选窗口内未发现命中规则的订阅。") : p.a.createElement("p", {
+                    className: "mb-0 text-muted font-size-sm"
+                }, "评估结果不写入周期账本，关闭本弹窗即丢弃，可随时重新评估。"))
+            }
             render() {
                 var state = this.state
                   , rules = state.rules
@@ -117139,18 +117375,27 @@
                     onClick: ()=>this.openModal(null)
                 }, p.a.createElement(l["a"], {
                     type: "plus"
-                }), " 新增规则"), p.a.createElement(a["a"], {
+                }), " 新增规则"), p.a.createElement("div", null, p.a.createElement(a["a"], {
+                    style: {
+                        marginRight: 8
+                    },
+                    onClick: ()=>this.openManual()
+                }, p.a.createElement(l["a"], {
+                    type: "clock-circle"
+                }), " 自定义周期评估"), p.a.createElement(a["a"], {
                     type: "danger",
                     onClick: ()=>this.confirmRecompute()
                 }, p.a.createElement(l["a"], {
                     type: "reload"
-                }), " 重算历史周期")), p.a.createElement("div", {
+                }), " 重算历史周期"))), p.a.createElement("div", {
                     style: {
                         padding: "0 15px 15px"
                     }
                 }, p.a.createElement("p", {
+                    className: "mb-1 text-muted font-size-sm"
+                }, "规则改动只影响之后新完成的周期；要让改动应用到历史周期，请点击「重算历史周期」。"), p.a.createElement("p", {
                     className: "mb-0 text-muted font-size-sm"
-                }, "规则改动只影响之后新完成的周期；要让改动应用到历史周期，请点击「重算历史周期」。"), !state.fetchLoading && !state.available && p.a.createElement("div", {
+                }, "「自定义周期评估」用当前规则对最近一段时间做全站即时体检，不写入周期账本，也不影响用户列表的「风险」列。"), !state.fetchLoading && !state.available && p.a.createElement("div", {
                     className: "alert alert-warning mb-0",
                     role: "alert",
                     style: {
@@ -117257,7 +117502,23 @@
                     },
                     onOk: ()=>this.closeRecompute(),
                     onCancel: ()=>this.closeRecompute()
-                }, this.renderRecomputeBody()))
+                }, this.renderRecomputeBody()), p.a.createElement(c["a"], {
+                    title: "自定义周期评估",
+                    width: 720,
+                    visible: state.manualVisible,
+                    maskClosable: !1,
+                    closable: !state.manualRunning,
+                    okText: state.manualStarted ? state.manualRunning ? "停止并关闭" : "关闭" : "开始评估",
+                    okType: state.manualStarted && state.manualRunning ? "danger" : "primary",
+                    cancelText: "取消",
+                    cancelButtonProps: state.manualStarted ? {
+                        style: {
+                            display: "none"
+                        }
+                    } : void 0,
+                    onOk: ()=>state.manualStarted ? this.closeManual() : this.startManual(),
+                    onCancel: ()=>this.closeManual()
+                }, this.renderManualBody()))
             }
         }
         t["default"] = RiskRulePage
