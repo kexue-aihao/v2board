@@ -87,11 +87,17 @@ class UserController extends Controller
         ]);
     }
 
-    private function filter(Request $request, $builder)
+    private function filter(Request $request, $builder, ?SubscriptionRiskService $riskService = null)
     {
         $filters = $request->input('filter');
         if ($filters) {
             foreach ($filters as $k => $filter) {
+                // 风险分支必须先于「模糊」改写：validator 放行什么，这里就原样收什么，
+                // 拒绝时报的才是客户端真正发的 condition，而不是被改写成 like 的产物。
+                if ($filter['key'] === 'risk') {
+                    $this->applyRiskFilter($builder, (string)$filter['condition'], (string)$filter['value'], $riskService);
+                    continue;
+                }
                 if ($filter['condition'] === '模糊') {
                     $filter['condition'] = 'like';
                     $filter['value'] = "%{$filter['value']}%";
@@ -115,6 +121,85 @@ class UserController extends Controller
         }
     }
 
+    /**
+     * 「风险」列过滤。徽标语义（SubscriptionRiskService::summaryForUser）逐条对译成 SQL：
+     *   可疑   = 任一订阅的最新周期判定为 suspicious
+     *   待观察 = 非可疑，且（无任何已评估周期 或 有订阅首个 30 天周期未走完 或 最新周期为 pending）
+     *   正常   = 非可疑且以上三个待观察来源全部不成立
+     * 徽标是逐行现算的，这里必须用同一套判据，否则筛出来的行和列上显示的牌子对不上。
+     */
+    private function applyRiskFilter($builder, string $condition, string $value, ?SubscriptionRiskService $riskService = null): void
+    {
+        // 风险是派生徽标，只有相等语义；其余 condition 属 API 面误用，拒绝。
+        if ($condition !== '=') {
+            abort(500, __('参数有误'));
+        }
+        // 词汇表外的值筛空集而不是 500：与兄弟 select 字段一致（banned/is_admin 的
+        // 陈旧值经 SQL 强转后同样得空结果）。过滤抽屉切换字段名会保留上一字段已填的
+        // 旧值，这是管理端可达的正常路径，不能拿 500 打断列表。
+        if (!in_array($value, ['suspicious', 'pending', 'normal'], true)) {
+            $builder->whereRaw('1 = 0');
+            return;
+        }
+
+        // fetch() 会把自己那份服务实例传进来：available() 的 9 次 schema 探测是实例级
+        // memo，共享实例让过滤与徽标循环只探一次。其余共用 filter() 的端点各建各的。
+        $riskService = $riskService ?: new SubscriptionRiskService();
+        // 风险表未安装时徽标对全员显示「待观察」，过滤语义保持一致：pending 全命中，其余空集。
+        if (!$riskService->available()) {
+            if ($value !== 'pending') {
+                $builder->whereRaw('1 = 0');
+            }
+            return;
+        }
+
+        // 「某订阅的最新一个已评估周期状态为 X」：同订阅不存在 cycle_end 更大的行。
+        $latestCycleWithStatus = function (string $status) {
+            return function ($query) use ($status) {
+                $query->select(DB::raw(1))
+                    ->from('v2_subscription_risk_cycle as risk_latest')
+                    ->whereColumn('risk_latest.user_id', 'v2_user.id')
+                    ->where('risk_latest.status', $status)
+                    ->whereNotExists(function ($newer) {
+                        $newer->select(DB::raw(1))
+                            ->from('v2_subscription_risk_cycle as risk_newer')
+                            ->whereColumn('risk_newer.subscription_id', 'risk_latest.subscription_id')
+                            ->whereColumn('risk_newer.cycle_end', '>', 'risk_latest.cycle_end');
+                    });
+            };
+        };
+        $anyCycle = function ($query) {
+            $query->select(DB::raw(1))
+                ->from('v2_subscription_risk_cycle as risk_any')
+                ->whereColumn('risk_any.user_id', 'v2_user.id');
+        };
+        $firstCycleIncomplete = function ($query) {
+            $query->select(DB::raw(1))
+                ->from('v2_subscription as risk_sub')
+                ->whereColumn('risk_sub.user_id', 'v2_user.id')
+                ->where('risk_sub.started_at', '>', 0)
+                ->where('risk_sub.started_at', '>', time() - SubscriptionRiskService::CYCLE_SECONDS);
+        };
+
+        if ($value === 'suspicious') {
+            $builder->whereExists($latestCycleWithStatus('suspicious'));
+            return;
+        }
+        if ($value === 'pending') {
+            $builder->whereNotExists($latestCycleWithStatus('suspicious'))
+                ->where(function ($query) use ($anyCycle, $firstCycleIncomplete, $latestCycleWithStatus) {
+                    $query->whereNotExists($anyCycle)
+                        ->orWhereExists($firstCycleIncomplete)
+                        ->orWhereExists($latestCycleWithStatus('pending'));
+                });
+            return;
+        }
+        $builder->whereNotExists($latestCycleWithStatus('suspicious'))
+            ->whereExists($anyCycle)
+            ->whereNotExists($firstCycleIncomplete)
+            ->whereNotExists($latestCycleWithStatus('pending'));
+    }
+
     public function fetch(UserFetch $request)
     {
         $current = $request->input('current') ? $request->input('current') : 1;
@@ -126,12 +211,13 @@ class UserController extends Controller
             DB::raw('(u+d) as total_used')
         )
             ->orderBy($sort, $sortType);
-        $this->filter($request, $userModel);
+        // 提前建好传给 filter()：风险过滤与下方徽标循环共享实例，schema 探测只跑一次。
+        $riskService = new SubscriptionRiskService();
+        $this->filter($request, $userModel, $riskService);
         $total = $userModel->count();
         $res = $userModel->forPage($current, $pageSize)
             ->get();
         $plan = Plan::get();
-        $riskService = new SubscriptionRiskService();
         $onlineDeviceSummaries = (new OnlineDeviceService())->summariesForUsers($res);
         for ($i = 0; $i < count($res); $i++) {
             for ($k = 0; $k < count($plan); $k++) {

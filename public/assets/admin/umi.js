@@ -72317,6 +72317,23 @@
                             value: 1
                         }]
                     }, {
+                        // 手工补丁：风险徽标过滤。选项值与 summaryForUser 的三态一致，
+                        // 后端在 UserController::applyRiskFilter 里翻成同语义 EXISTS。
+                        key: "risk",
+                        title: "风险",
+                        condition: ["="],
+                        type: "select",
+                        options: [{
+                            key: "疑似内鬼",
+                            value: "suspicious"
+                        }, {
+                            key: "待观察",
+                            value: "pending"
+                        }, {
+                            key: "正常",
+                            value: "normal"
+                        }]
+                    }, {
                         key: "invite_by_email",
                         title: "\u9080\u8bf7\u4eba\u90ae\u7bb1",
                         condition: ["\u6a21\u7cca"]
@@ -117198,49 +117215,78 @@
                 }, line)))
             }
             renderManualResults() {
+                // 布局教训（生产 134 行实测）：指标堆 12 个 div 会把行高撑到几百像素，而
+                // antd 单元格默认垂直居中，其余列内容被顶出 y 滚动可视区，看起来像空表；
+                // 双滚动下不给列宽，指标列还会被挤到几十像素逐字断行。所以：列给显式宽、
+                // 单元格顶部对齐、指标改行内流式（对内不断行、对间可换行）、长串 break-all。
                 var dimensions = this.state.dimensions
+                  , cellTop = ()=>({
+                    style: {
+                        verticalAlign: "top"
+                    }
+                })
                   , columns = [{
                     title: "用户",
                     key: "user",
-                    render: (value,record)=>record.email ? record.email : p.a.createElement(p.a.Fragment, null, "#" + record.user_id + " ", "用户已删除")
+                    width: 190,
+                    onCell: cellTop,
+                    render: (value,record)=>p.a.createElement("div", {
+                        style: {
+                            wordBreak: "break-all"
+                        }
+                    }, record.email ? record.email : p.a.createElement(p.a.Fragment, null, "#" + record.user_id + " ", "用户已删除"))
                 }, {
                     title: "订阅",
                     dataIndex: "subscription_id",
                     key: "subscription_id",
+                    width: 72,
+                    onCell: cellTop,
                     render: value=>"#" + value
                 }, {
                     title: "命中理由",
                     key: "reasons",
+                    // 刻意不给宽：吸收剩余宽度与 y 滚动条沟槽，表头表体才对得齐。
+                    onCell: cellTop,
                     render: (value,record)=>p.a.createElement("div", null, (record.reasons || []).map((reason,index)=>p.a.createElement("div", {
-                        key: index
+                        key: index,
+                        className: index ? "mt-1" : "",
+                        style: {
+                            wordBreak: "break-all"
+                        }
                     }, reason)))
                 }, {
                     title: "关键指标",
                     key: "metrics",
+                    width: 270,
+                    onCell: cellTop,
                     render: (value,record)=>{
                         var metrics = record.metrics || {};
                         // 维度标签复用 /risk/rule/fetch 下发的注册表；值与标签是分开的
                         // 文本节点，标签词条已在覆盖翻译层字典里。刻意不带单位。
-                        return p.a.createElement("div", null, MANUAL_METRIC_KEYS.filter(key=>void 0 !== metrics[key] && null !== metrics[key]).map(key=>{
+                        return p.a.createElement("div", {
+                            className: "text-muted font-size-sm"
+                        }, MANUAL_METRIC_KEYS.filter(key=>void 0 !== metrics[key] && null !== metrics[key]).map(key=>{
                             var meta = dimensions[key] || {}
                               , text = "used_ratio" === key ? Math.round(1e4 * Number(metrics[key])) / 100 + "%" : String(metrics[key]);
-                            return p.a.createElement("div", {
+                            return p.a.createElement("span", {
                                 key: key,
-                                className: "text-muted font-size-sm"
+                                style: {
+                                    display: "inline-block",
+                                    whiteSpace: "nowrap",
+                                    marginRight: 10
+                                }
                             }, (meta.label || key) + "：", text)
                         }
                         ))
                     }
                 }];
                 return p.a.createElement(o["a"], {
-                    tableLayout: "auto",
                     size: "small",
                     rowKey: record=>record.subscription_id,
                     dataSource: this.state.manualResults,
                     columns: columns,
                     pagination: !1,
                     scroll: {
-                        x: 680,
                         y: 320
                     }
                 })
@@ -117504,7 +117550,9 @@
                     onCancel: ()=>this.closeRecompute()
                 }, this.renderRecomputeBody()), p.a.createElement(c["a"], {
                     title: "自定义周期评估",
-                    width: 720,
+                    // 配置视图窄、评估/结果视图宽：结果表四列显式宽度合计约 820，
+                    // 880 的弹窗身体（-48 内边距）刚好容纳，不再出现横向挤压。
+                    width: state.manualStarted ? 880 : 640,
                     visible: state.manualVisible,
                     maskClosable: !1,
                     closable: !state.manualRunning,

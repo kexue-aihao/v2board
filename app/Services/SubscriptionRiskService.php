@@ -306,12 +306,13 @@ class SubscriptionRiskService
 
         $ruleResult = $this->ruleService()->evaluate($metrics);
         $reasons = $ruleResult['reasons'];
-        // 复用周期评估的重复 IP 证据标注。同一文案模板，翻译层对二者的处理保持一致——
-        // 当前理由串属库存中文数据，各语种均原样展示（漏翻不坏的既有边界），并无覆盖规则。
+        // 沿用周期评估的重复 IP 证据模板，另拼定位后缀（归属地/运营商/IDC，词汇与订阅
+        // 审计抽屉三列一致）。理由串属中文数据，各语种原样展示（漏翻不坏的既有边界）。
         foreach ($window['ip_rows']->filter(function ($row) {
             return (int)$row->request_count > 1;
         })->take(10) as $ipRow) {
-            $reasons[] = '重复 IP：' . $ipRow->request_ip . ' 出现 ' . $ipRow->request_count . ' 次';
+            $reasons[] = '重复 IP：' . $ipRow->request_ip . ' 出现 ' . $ipRow->request_count . ' 次'
+                . $this->describeIpLocation((string)$ipRow->request_ip);
         }
 
         return [
@@ -320,6 +321,47 @@ class SubscriptionRiskService
             'reasons' => array_values(array_unique($reasons)),
             'fired' => $ruleResult['fired']
         ];
+    }
+
+    /**
+     * 重复 IP 证据行的定位后缀：（归属地，运营商，IDC：…）。三段词汇与订阅审计抽屉的
+     * 归属地/运营商/IDC 三列完全一致（含 is_idc 三态：厂商名或「是」/「否」/「未知」）。
+     * 复用本轮 collectWindow 已填充的 locationMemo，正常路径零新增点查。
+     */
+    private function describeIpLocation(string $ip): string
+    {
+        // 审计层对取不到合法客户端地址的请求存的是字面量 "unknown"（SubscribeAuditService），
+        // 给它拼「（未知，IDC：未知）」纯属噪音——非法 IP 不加后缀，保留裸理由行。
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            return '';
+        }
+        if (!array_key_exists($ip, $this->locationMemo)) {
+            // 拉取归约只处理非空 IP，重复 IP 理应已入 memo；兜底补查一次。
+            $this->locationMemo[$ip] = $this->locationService()->lookup($ip);
+        }
+        $location = $this->locationMemo[$ip];
+        $place = implode(' / ', array_filter([
+            (string)($location['country_name'] ?? '') !== '' ? $location['country_name'] : (string)($location['country_code'] ?? ''),
+            (string)($location['province'] ?? '') !== '' ? $location['province'] : (string)($location['region'] ?? ''),
+            (string)($location['city'] ?? ''),
+            (string)($location['district'] ?? '')
+        ], function ($part) {
+            return (string)$part !== '';
+        }));
+        if ($place === '') {
+            $place = '未知';
+        }
+        if (($location['is_idc'] ?? null) === true) {
+            $idc = 'IDC：' . ((string)($location['idc_vendor'] ?? '') !== '' ? $location['idc_vendor'] : '是');
+        } elseif (($location['is_idc'] ?? null) === false) {
+            $idc = 'IDC：否';
+        } else {
+            $idc = 'IDC：未知';
+        }
+        $parts = array_filter([$place, (string)($location['isp'] ?? ''), $idc], function ($part) {
+            return (string)$part !== '';
+        });
+        return '（' . implode('，', $parts) . '）';
     }
 
     /**
