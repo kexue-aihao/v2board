@@ -37,6 +37,10 @@ class Kernel extends HttpKernel
 //            \Illuminate\View\Middleware\ShareErrorsFromSession::class,
 //            \App\Http\Middleware\VerifyCsrfToken::class,
 //            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            // Language 必须同时进 web 组：/{subscribe_path} 订阅路由与 500 错误页
+            // 都在 web 组产出本地化文案，缺它则 webman 长驻 worker 的 locale
+            // 残留会跨请求泄漏（无条件 setLocale 是泄漏的唯一闸门）。
+            \App\Http\Middleware\Language::class,
         ],
 
         'api' => [
