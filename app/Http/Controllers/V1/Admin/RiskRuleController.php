@@ -356,6 +356,11 @@ class RiskRuleController extends Controller
                 'touched_at' => time(),
                 'started_by' => $this->actor($request)
             ];
+            // 必须在跑第一批之前就把游标登记进缓存：下面每批结束时都要重读缓存复核
+            // run_id 归属，restart 批若不先登记，复核读到的是上一轮残留（或首次使用时
+            // 的 null），本轮必然被自己的复核判成「已被接管」而 500。顺带让并发守卫
+            // 从第一批就生效，而不是等到第一批跑完才拦得住第二个管理员。
+            Cache::put($key, $state, self::CURSOR_TTL);
             $this->audit($request, 'RISK MANUAL EVALUATE start run=' . $state['run_id']
                 . ' hours=' . (int)$hours
                 . ' window=[' . $state['start_at'] . ',' . $state['end_at'] . '] total=' . $state['total']
@@ -369,11 +374,16 @@ class RiskRuleController extends Controller
             abort(500, __('评估任务不存在或已超时，请重新开始'));
         }
 
-        // step 必须回带自己那轮的 run_id：done 态短存期间允许别人 restart 接管，旧轮
-        // 客户端的迟到重试若不校验轮次，会被拉去驱动新轮的游标、拿到新轮的计数当成
-        // 自己的结果。轮次不符一律终止，绝不跨轮嫁接。
+        // step 回带自己那轮的 run_id：done 态短存期间允许别人 restart 接管，旧轮客户端
+        // 的迟到重试若不校验轮次，会被拉去驱动新轮的游标、拿到新轮的计数当成自己的
+        // 结果。只拦「带了但不匹配」——那才是跨轮嫁接；空值放行是对部署前已加载的旧版
+        // 管理端（step 不带 run_id）的向后兼容，否则常驻标签页在换版后每一轮都会在第
+        // 二批被拒且报错引导的「重新开始」同样无解。数据侧的保护主闸是下方的服务端
+        // 归属复核（run_id 取自缓存态而非客户端），不受此宽限影响。
+        $clientRunId = (string)$request->input('run_id', '');
         if (!$request->input('restart')
-            && (string)$request->input('run_id', '') !== (string)($state['run_id'] ?? '')) {
+            && $clientRunId !== ''
+            && $clientRunId !== (string)($state['run_id'] ?? '')) {
             abort(500, __('评估任务不存在或已超时，请重新开始'));
         }
 
