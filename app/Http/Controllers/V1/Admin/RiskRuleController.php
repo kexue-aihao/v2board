@@ -21,6 +21,7 @@ class RiskRuleController extends Controller
     private const BATCH_SECONDS = 4.0;
     private const CURSOR_TTL = 3600;
     private const RESTART_GUARD_SECONDS = 60;
+    private const MANUAL_LOCK_SECONDS = 120;
     // 手动评估结果明细的累计上限：明细跟着游标状态存缓存，无界会把缓存值撑到 MB 级；
     // 超限后只累计数不存明细，前端提示收窄窗口或调高阈值。
     private const MANUAL_RESULT_LIMIT = 200;
@@ -299,7 +300,7 @@ class RiskRuleController extends Controller
 
     /**
      * 手动自定义周期评估：用当前规则对「最近 N 小时」窗口做一次全站评估，判定三态
-     * 逐批落库 v2_subscription_risk_manual（done 批按 run_id 清残留）——这张表就是
+     * 逐批写入暂存表，完整轮次才一次发布到 v2_subscription_risk_manual——后者才是
      * 用户列表「风险」列与筛选的数据源。30 天账本（v2_subscription_risk_cycle）不受
      * 影响，只服务审计抽屉的历史周期视图。与 recomputeAll 同一套前端驱动的游标分批
      * （队列不可用的原因见彼处注释），窗口与规则快照取在 restart 时并冻结在游标状态
@@ -317,6 +318,25 @@ class RiskRuleController extends Controller
             abort(500, __('手动评估结果表尚未安装，请先执行数据库升级'));
         }
 
+        if (!$service->manualStagingAvailable()) {
+            abort(500, __('手动评估暂存表尚未安装，请先执行数据库升级'));
+        }
+
+        $lock = Cache::lock(CacheKey::get('RISK_MANUAL_LOCK', 'global'), self::MANUAL_LOCK_SECONDS);
+        if (!$lock->get()) {
+            abort(500, __('已有手动评估任务正在进行，请稍后再试'));
+        }
+
+        try {
+            return $this->manualEvaluateLocked($request, $service);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function manualEvaluateLocked(Request $request, SubscriptionRiskService $service)
+    {
+
         $key = CacheKey::get('RISK_MANUAL_CURSOR', 'global');
         $state = Cache::get($key);
 
@@ -333,6 +353,8 @@ class RiskRuleController extends Controller
                 || (int)$hours > self::MANUAL_WINDOW_MAX_HOURS) {
                 abort(500, __('评估窗口需为 1 小时到 92 天之间的整数小时'));
             }
+            // 未完成轮次从不发布；接管时直接丢弃其暂存结果，避免它们无限累积。
+            DB::table('v2_subscription_risk_manual_stage')->delete();
             // 整轮冻结同一份规则快照：跨批现读规则表会让评估中途的规则改动把一轮结果
             // 切成两套判定标准。快照摘要一并写进审计日志，事后能解释这轮按什么判的。
             $ruleSnapshot = (new RiskRuleService())->enabledRules();
@@ -406,15 +428,11 @@ class RiskRuleController extends Controller
         $timedOut = false;
         foreach ($batch as $subscription) {
             $assessment = $service->assessWindow($subscription, (int)$state['start_at'], (int)$state['end_at']);
-            // 三态全落库：这张表是「风险」列与筛选的数据源，不落 normal/no_data 就
-            // 无法把「正常」「窗口没数据」与「从没评估过」区分开。手工 encode 的
-            // 原因同周期表（JSON_UNESCAPED_UNICODE，phpMyAdmin 里可读）。
-            // 用原生 ON DUPLICATE KEY 而不是 updateOrCreate：后者是非原子的
-            // SELECT+INSERT，客户端超时重试与在跑请求并发处理同一批时，输者会撞
-            // subscription_id 唯一键直接 500；原子写入天然收敛。
+            // 每批只写暂存表，绝不让半轮结果影响用户列表。重试同一批时按
+            // (run_id, subscription_id) 原子 UPSERT；完整轮次才会发布到正式结果表。
             $now = time();
             DB::statement(
-                'INSERT INTO `v2_subscription_risk_manual`
+                'INSERT INTO `v2_subscription_risk_manual_stage`
                     (`run_id`,`user_id`,`subscription_id`,`status`,`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`)
                  VALUES (?,?,?,?,?,?,?,?,?,?)
                  ON DUPLICATE KEY UPDATE
@@ -474,20 +492,40 @@ class RiskRuleController extends Controller
             }
         }
 
-        // 归属复核：本请求处理期间游标可能已被并发 restart 接管（单订阅评估停滞超过
-        // 60 秒守卫窗口的场景）。易主后旧轮请求就地终止——绝不能拿旧轮的 run_id 写回
-        // 游标，更不能拿它去删新轮已落库的判定行。
-        $current = Cache::get($key);
-        if (!is_array($current) || (string)($current['run_id'] ?? '') !== (string)$state['run_id']) {
-            abort(500, __('评估任务不存在或已超时，请重新开始'));
-        }
-
         $done = !$timedOut && $batch->count() < self::BATCH_LIMIT;
         $state['touched_at'] = time();
         if ($done) {
-            // 清掉未被本轮覆盖的残留行：订阅已删除、或上一轮中途放弃的遗留。放在
-            // done 批做而不是 restart：中断的轮次留下的新旧混合，由下一次完整轮收敛。
-            SubscriptionRiskManual::where('run_id', '<>', (string)$state['run_id'])->delete();
+            // 只有游标仍归本轮时才发布。暂存结果和正式结果的替换同一事务提交，
+            // 中断、超时或被接管的轮次都不会改变用户列表的风险判定。
+            $published = DB::transaction(function () use ($key, $state) {
+                $current = Cache::get($key);
+                if (!is_array($current)
+                    || (string)($current['run_id'] ?? '') !== (string)$state['run_id']) {
+                    return false;
+                }
+
+                DB::statement(
+                    'INSERT INTO `v2_subscription_risk_manual`
+                        (`run_id`,`user_id`,`subscription_id`,`status`,`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`)
+                     SELECT `run_id`,`user_id`,`subscription_id`,`status`,`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`
+                     FROM `v2_subscription_risk_manual_stage`
+                     WHERE `run_id` = ?
+                     ON DUPLICATE KEY UPDATE
+                        `run_id` = VALUES(`run_id`), `user_id` = VALUES(`user_id`),
+                        `status` = VALUES(`status`), `window_start` = VALUES(`window_start`),
+                        `window_end` = VALUES(`window_end`), `risk_reasons` = VALUES(`risk_reasons`),
+                        `metrics` = VALUES(`metrics`), `updated_at` = VALUES(`updated_at`)',
+                    [(string)$state['run_id']]
+                );
+                SubscriptionRiskManual::where('run_id', '<>', (string)$state['run_id'])->delete();
+                DB::table('v2_subscription_risk_manual_stage')
+                    ->where('run_id', (string)$state['run_id'])
+                    ->delete();
+                return true;
+            });
+            if (!$published) {
+                abort(500, __('评估任务不存在或已超时，请重新开始'));
+            }
             // 弹窗明细的幂等重放仍走缓存：标 done 短存一段，restart 或 TTL 到期清掉。
             $state['done'] = true;
             Cache::put($key, $state, self::MANUAL_DONE_TTL);
@@ -496,6 +534,10 @@ class RiskRuleController extends Controller
                 . ' flagged=' . $state['flagged']
                 . ' window=[' . $state['start_at'] . ',' . $state['end_at'] . ']');
         } else {
+            $current = Cache::get($key);
+            if (!is_array($current) || (string)($current['run_id'] ?? '') !== (string)$state['run_id']) {
+                abort(500, __('评估任务不存在或已超时，请重新开始'));
+            }
             Cache::put($key, $state, self::CURSOR_TTL);
         }
 

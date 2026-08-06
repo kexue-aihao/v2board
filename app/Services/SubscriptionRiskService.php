@@ -16,6 +16,7 @@ class SubscriptionRiskService
     public const CYCLE_SECONDS = 30 * 86400;
     private $availability;
     private $manualAvailability;
+    private $manualStagingAvailability;
     private $ruleService;
     private $metricsColumn;
     private $nodeLogAvailability;
@@ -587,6 +588,18 @@ class SubscriptionRiskService
             return $this->manualAvailability = Schema::hasTable('v2_subscription_risk_manual');
         } catch (\Throwable $e) {
             return $this->manualAvailability = false;
+        }
+    }
+
+    public function manualStagingAvailable(): bool
+    {
+        if ($this->manualStagingAvailability !== null) {
+            return $this->manualStagingAvailability;
+        }
+        try {
+            return $this->manualStagingAvailability = Schema::hasTable('v2_subscription_risk_manual_stage');
+        } catch (\Throwable $e) {
+            return $this->manualStagingAvailability = false;
         }
     }
 

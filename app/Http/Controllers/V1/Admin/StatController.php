@@ -18,12 +18,55 @@ use App\Models\StatServer;
 use App\Models\StatUser;
 use App\Models\Ticket;
 use App\Models\User;
+use App\Services\StatisticalService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 class StatController extends Controller
 {
+    public function getStat(Request $request)
+    {
+        return $this->getOverride($request);
+    }
+
+    public function getStatRecord(Request $request)
+    {
+        $type = (string)$request->input('type');
+        if (!in_array($type, ['paid_total', 'commission_total', 'register_count'], true)) {
+            abort(422, __('参数有误'));
+        }
+
+        $service = $this->historicalStatistics($request);
+        return response(['data' => $service->getStatRecord($type) ?: []]);
+    }
+
+    public function getRanking(Request $request)
+    {
+        $type = (string)$request->input('type');
+        if (!in_array($type, ['server_traffic_rank', 'user_consumption_rank', 'invite_rank'], true)) {
+            abort(422, __('参数有误'));
+        }
+
+        $limit = max(1, min(100, (int)$request->input('limit', 20)));
+        $service = $this->historicalStatistics($request);
+        return response(['data' => $service->getRanking($type, $limit) ?: []]);
+    }
+
+    private function historicalStatistics(Request $request): StatisticalService
+    {
+        $startAt = (int)$request->input('start_at', strtotime('-30 days'));
+        $endAt = (int)$request->input('end_at', time());
+        if ($startAt <= 0 || $endAt <= $startAt || $endAt > time() + 60) {
+            abort(422, __('参数有误'));
+        }
+
+        $service = new StatisticalService();
+        $service->setStartAt($startAt);
+        $service->setEndAt($endAt);
+        return $service;
+    }
+
     public function getOverride(Request $request)
     {
         $traffic = [

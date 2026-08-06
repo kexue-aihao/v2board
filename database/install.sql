@@ -794,6 +794,25 @@ CREATE TABLE `v2_subscription_risk_manual` (
     KEY `run_id` (`run_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+DROP TABLE IF EXISTS `v2_subscription_risk_manual_stage`;
+CREATE TABLE `v2_subscription_risk_manual_stage` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `run_id` varchar(32) NOT NULL,
+    `user_id` int(11) NOT NULL,
+    `subscription_id` bigint(20) NOT NULL,
+    `status` varchar(16) NOT NULL DEFAULT 'no_data',
+    `window_start` bigint(20) NOT NULL DEFAULT 0,
+    `window_end` bigint(20) NOT NULL DEFAULT 0,
+    `risk_reasons` text DEFAULT NULL,
+    `metrics` text DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `run_subscription` (`run_id`,`subscription_id`),
+    KEY `run_id` (`run_id`),
+    KEY `updated_at` (`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 DROP TABLE IF EXISTS `v2_subscription_token_history`;
 CREATE TABLE `v2_subscription_token_history` (
     `id` bigint(20) NOT NULL AUTO_INCREMENT,

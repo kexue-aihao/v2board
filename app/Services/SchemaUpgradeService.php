@@ -15,6 +15,7 @@ class SchemaUpgradeService
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
         'risk_rule_schema' => 'risk_rule_schema_v1',
         'risk_manual_schema' => 'risk_manual_schema_v1',
+        'risk_manual_stage_schema' => 'risk_manual_stage_schema_v1',
         'token_history_schema' => 'token_history_schema_v1',
         'password_policy_schema' => 'password_policy_schema_v1',
         'reseller_schema' => 'reseller_schema_v1',
@@ -80,6 +81,9 @@ class SchemaUpgradeService
                 return;
             case 'risk_manual_schema':
                 $this->applyRiskManualSchema();
+                return;
+            case 'risk_manual_stage_schema':
+                $this->applyRiskManualStageSchema();
                 return;
             case 'token_history_schema':
                 $this->applyTokenHistorySchema();
@@ -590,6 +594,51 @@ class SchemaUpgradeService
         $this->ensureUniqueIndex('v2_subscription_risk_manual', 'subscription_id', ['subscription_id']);
         $this->ensureIndex('v2_subscription_risk_manual', 'user_id', ['user_id']);
         $this->ensureIndex('v2_subscription_risk_manual', 'run_id', ['run_id']);
+    }
+
+    /**
+     * 手动评估的暂存表。未完成的轮次只写这里；扫描完毕后才以单条 INSERT ... SELECT
+     * 事务性地发布到 v2_subscription_risk_manual，避免半轮结果驱动用户风险徽标。
+     */
+    private function applyRiskManualStageSchema(): void
+    {
+        $this->requireTable('v2_subscription_risk_manual');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_manual_stage` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `run_id` varchar(32) NOT NULL,
+            `user_id` int(11) NOT NULL,
+            `subscription_id` bigint(20) NOT NULL,
+            `status` varchar(16) NOT NULL DEFAULT 'no_data',
+            `window_start` bigint(20) NOT NULL DEFAULT 0,
+            `window_end` bigint(20) NOT NULL DEFAULT 0,
+            `risk_reasons` text DEFAULT NULL,
+            `metrics` text DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `run_subscription` (`run_id`,`subscription_id`),
+            KEY `run_id` (`run_id`),
+            KEY `updated_at` (`updated_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'run_id' => "varchar(32) NOT NULL DEFAULT ''",
+            'user_id' => 'int(11) NOT NULL',
+            'subscription_id' => 'bigint(20) NOT NULL',
+            'status' => "varchar(16) NOT NULL DEFAULT 'no_data'",
+            'window_start' => 'bigint(20) NOT NULL DEFAULT 0',
+            'window_end' => 'bigint(20) NOT NULL DEFAULT 0',
+            'risk_reasons' => 'text DEFAULT NULL',
+            'metrics' => 'text DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL DEFAULT 0',
+            'updated_at' => 'int(11) NOT NULL DEFAULT 0'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscription_risk_manual_stage', $column, $definition);
+        }
+        $this->ensureUniqueIndex('v2_subscription_risk_manual_stage', 'run_subscription', ['run_id', 'subscription_id']);
+        $this->ensureIndex('v2_subscription_risk_manual_stage', 'run_id', ['run_id']);
+        $this->ensureIndex('v2_subscription_risk_manual_stage', 'updated_at', ['updated_at']);
     }
 
     private function applyTokenHistorySchema(): void

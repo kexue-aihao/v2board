@@ -11,6 +11,17 @@ use Illuminate\Http\Request;
 
 class KnowledgeController extends Controller
 {
+    public function getCategory(Request $request)
+    {
+        $query = Knowledge::where('show', 1);
+        if ($request->input('language') !== null) {
+            $query->where('language', $request->input('language'));
+        }
+        return response([
+            'data' => $query->orderBy('sort', 'ASC')->pluck('category')->unique()->values()
+        ]);
+    }
+
     public function fetch(Request $request)
     {
         if ($request->input('id')) {

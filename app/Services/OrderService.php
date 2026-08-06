@@ -351,19 +351,42 @@ class OrderService
         $order->surplus_order_ids = array_column($orders, 'id');
     }
 
-    public function paid(string $callbackNo)
+    public function paid(string $callbackNo): bool
     {
-        $order = $this->order;
-        if ((int)$order->total_amount <= 0) {
+        if (!$this->order->id) return false;
+        if ((int)$this->order->total_amount <= 0) {
             return $this->completeFree();
         }
-        if ($order->status !== 0) return true;
-        $order->status = 1;
-        $order->paid_at = time();
-        $order->callback_no = $callbackNo;
-        if (!$order->save()) return false;
+
+        // Payment callbacks and cancellations race across workers. Reload under the same
+        // row lock used by cancel(), so only one terminal transition can win.
+        $tradeNo = DB::transaction(function () use ($callbackNo) {
+            $order = Order::where('id', $this->order->id)
+                ->lockForUpdate()
+                ->first();
+            if (!$order) return null;
+
+            $this->order = $order;
+            if ((int)$order->status !== 0) return false;
+
+            $order->status = 1;
+            $order->paid_at = time();
+            $order->callback_no = $callbackNo;
+            if (!$order->save()) {
+                throw new \RuntimeException('Unable to mark order as paid');
+            }
+
+            return $order->trade_no;
+        });
+
+        if ($tradeNo === null) return false;
+        // A prior payment or cancellation won the lock. Preserve the callback's
+        // idempotent success response without reactivating the order.
+        if ($tradeNo === false) return true;
+
         try {
-            OrderHandleJob::dispatch($order->trade_no);
+            // Do not run a synchronous queue job before the paid state commits.
+            OrderHandleJob::dispatch($tradeNo);
         } catch (\Exception $e) {
             return false;
         }

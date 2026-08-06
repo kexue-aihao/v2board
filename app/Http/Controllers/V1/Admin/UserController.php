@@ -391,6 +391,38 @@ class UserController extends Controller
         ]);
     }
 
+    public function setInviteUser(Request $request)
+    {
+        $params = $request->validate([
+            'id' => 'required|integer|min:1',
+            'invite_user_id' => 'nullable|integer|min:1',
+            'invite_user_email' => 'nullable|email:strict'
+        ]);
+        $user = User::find($params['id']);
+        if (!$user) {
+            abort(404, __('用户不存在'));
+        }
+
+        $inviteUserId = $params['invite_user_id'] ?? null;
+        if ($inviteUserId === null && !empty($params['invite_user_email'])) {
+            $inviteUserId = User::where('email', $params['invite_user_email'])->value('id');
+            if (!$inviteUserId) {
+                abort(422, __('推荐人不存在'));
+            }
+        }
+        if ($inviteUserId !== null) {
+            if ((int)$inviteUserId === (int)$user->id || !User::where('id', $inviteUserId)->exists()) {
+                abort(422, __('推荐人不存在'));
+            }
+        }
+
+        $user->invite_user_id = $inviteUserId;
+        if (!$user->save()) {
+            abort(500, __('保存失败'));
+        }
+        return response(['data' => true]);
+    }
+
     public function setPrimarySubscription(Request $request)
     {
         $user = User::findOrFail($request->input('user_id'));

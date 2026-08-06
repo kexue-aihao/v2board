@@ -41,6 +41,11 @@ class NoticeController extends Controller
         ]);
     }
 
+    public function update(NoticeSave $request)
+    {
+        return $this->save($request);
+    }
+
 
 
     public function show(Request $request)

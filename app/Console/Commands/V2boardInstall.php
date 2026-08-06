@@ -40,7 +40,7 @@ class V2boardInstall extends Command
      *
      * @return mixed
      */
-    public function handle()
+    public function handle(): int
     {
         try {
             $this->info("__     ______  ____                      _  ");
@@ -80,7 +80,7 @@ class V2boardInstall extends Command
                 abort(500, '数据库文件格式有误');
             }
             $this->info('正在导入数据库请稍等...');
-            foreach ($sql as $item) {
+            foreach ($sql as $index => $item) {
                 $item = trim($item);
                 if ($item === '') {
                     continue;
@@ -88,6 +88,8 @@ class V2boardInstall extends Command
                 try {
                     DB::statement($item);
                 } catch (\Throwable $e) {
+                    $this->error('数据库导入失败，已在第 ' . ($index + 1) . ' 条语句停止：' . $e->getMessage());
+                    return self::FAILURE;
                 }
             }
             $this->info('数据库导入完成');
@@ -107,8 +109,10 @@ class V2boardInstall extends Command
 
             $defaultSecurePath = hash('crc32b', config('app.key'));
             $this->info("访问 http(s)://你的站点/{$defaultSecurePath} 进入管理面板，你可以在用户中心修改你的密码。");
-        } catch (\Exception $e) {
+            return self::SUCCESS;
+        } catch (\Throwable $e) {
             $this->error($e->getMessage());
+            return self::FAILURE;
         }
     }
 

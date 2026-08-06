@@ -68,7 +68,7 @@ class SubscribeAuditRetentionService
      * 清理单个用户的审计记录。这里连判定一起删：冻结之后这是唯一能重置误判徽章的
      * 路径，而留着引用了具体 IP 的判定、下面证据却已清空，等于一条无法核实的指控。
      *
-     * @return array{subscribe_request_log:int,node_connection_log:int,subscription_risk_cycle:int,subscription_risk_manual:int,ip_account_link:int}
+     * @return array{subscribe_request_log:int,node_connection_log:int,subscription_risk_cycle:int,subscription_risk_manual:int,subscription_risk_manual_stage:int,ip_account_link:int}
      */
     public function purgeUser(int $userId, bool $withRisk = true, int $chunk = 5000): array
     {
@@ -78,6 +78,7 @@ class SubscribeAuditRetentionService
             'node_connection_log' => 0,
             'subscription_risk_cycle' => 0,
             'subscription_risk_manual' => 0,
+            'subscription_risk_manual_stage' => 0,
             'ip_account_link' => 0
         ];
         if ($userId <= 0) {
@@ -97,14 +98,17 @@ class SubscribeAuditRetentionService
             // 时刻快照，订阅换绑后会过时，所以除按 user_id 清外，还要按该用户现存
             // 订阅的 subscription_id 补一刀——徽标与筛选正是以订阅清单为锚。
             $counts['subscription_risk_manual'] = $this->purgeUserTable('v2_subscription_risk_manual', $userId, $chunk)
-                + $this->purgeManualBySubscriptions($userId, $chunk);
+                + $this->purgeManualBySubscriptions('v2_subscription_risk_manual', $userId, $chunk);
+            // 未完成手动评估的暂存行同样含有 IP 派生判定，按用户清理时不能残留。
+            $counts['subscription_risk_manual_stage'] = $this->purgeUserTable('v2_subscription_risk_manual_stage', $userId, $chunk)
+                + $this->purgeManualBySubscriptions('v2_subscription_risk_manual_stage', $userId, $chunk);
         }
         return $counts;
     }
 
-    private function purgeManualBySubscriptions(int $userId, int $chunk): int
+    private function purgeManualBySubscriptions(string $table, int $userId, int $chunk): int
     {
-        if (!Schema::hasTable('v2_subscription_risk_manual') || !Schema::hasTable('v2_subscription')) {
+        if (!Schema::hasTable($table) || !Schema::hasTable('v2_subscription')) {
             return 0;
         }
         $subscriptionIds = DB::table('v2_subscription')->where('user_id', $userId)->pluck('id');
@@ -113,7 +117,7 @@ class SubscribeAuditRetentionService
         }
         $total = 0;
         do {
-            $deleted = DB::table('v2_subscription_risk_manual')
+            $deleted = DB::table($table)
                 ->whereIn('subscription_id', $subscriptionIds)
                 ->orderBy('id')
                 ->limit($chunk)
