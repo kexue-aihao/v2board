@@ -6,7 +6,7 @@ deploy_setup() {
 
     PHP_BIN="${PHP_BIN:-php}"
 
-    # PATH 中的 php 可能只是命令名，先解析为实际路径以识别其 aaPanel 配置。
+    # All project processes must use the same aaPanel-managed PHP configuration.
     case "$PHP_BIN" in
         /*) ;;
         *)
@@ -17,19 +17,18 @@ deploy_setup() {
     esac
     if [ -x "$PHP_BIN" ] && command -v readlink >/dev/null 2>&1; then
         RESOLVED_PHP_BIN="$(readlink -f "$PHP_BIN" 2>/dev/null || true)"
-        if [ -n "$RESOLVED_PHP_BIN" ]; then
-            PHP_BIN="$RESOLVED_PHP_BIN"
-        fi
+        [ -n "$RESOLVED_PHP_BIN" ] && PHP_BIN="$RESOLVED_PHP_BIN"
     fi
 
     case "$PHP_BIN" in
         /www/server/php/*/bin/php)
             AAPANEL_PHP_DIR="${PHP_BIN%/bin/php}"
+            AAPANEL_PHP_VERSION="${AAPANEL_PHP_DIR##*/php/}"
             AAPANEL_PHP_INI="$AAPANEL_PHP_DIR/etc/php.ini"
             ;;
         *)
             echo "ERROR: aaPanel PHP binary is required: $PHP_BIN" >&2
-            echo "Set PHP_BIN to /www/server/php/<version>/bin/php before running this script." >&2
+            echo "Set PHP_BIN to /www/server/php/<version>/bin/php." >&2
             return 1
             ;;
     esac
@@ -91,23 +90,110 @@ deploy_check_runtime() {
         return 1
     fi
 
-    for extension in pdo_mysql fileinfo redis; do
+    for extension in pdo_mysql fileinfo redis pcntl posix; do
         if ! echo "$modules" | grep -Fxq "$extension"; then
             echo "ERROR: Required PHP extension is missing: $extension" >&2
             echo "Check $PHP_INI and the PHP extension directory. No automatic repair was attempted." >&2
             return 1
         fi
     done
-    if [ "$version_id" -ge 80000 ] && ! echo "$modules" | grep -Fxq pcntl; then
-        echo "ERROR: Required PHP extension is missing for PHP 8+: pcntl" >&2
-        echo "Check $PHP_INI and the PHP extension directory. No automatic repair was attempted." >&2
+}
+
+deploy_function_is_enabled() {
+    deploy_php -r "exit(function_exists('$1') ? 0 : 1);"
+}
+
+deploy_print_disabled_function_conflicts() {
+    local conflicts=" $1 "
+
+    case "$conflicts" in
+        *" header "*|*" header_remove "*|*" headers_sent "*|*" headers_list "*|*" http_response_code "*)
+            echo "    HTTP response functions: AdapterMan replaces native response handling in Webman." >&2
+            ;;
+    esac
+    case "$conflicts" in
+        *" setcookie "*)
+            echo "    setcookie: AdapterMan provides cookie handling for Webman requests." >&2
+            ;;
+    esac
+    case "$conflicts" in
+        *" session_create_id "*|*" session_id "*|*" session_name "*|*" session_save_path "*|*" session_status "*|*" session_start "*|*" session_write_close "*|*" session_regenerate_id "*|*" session_unset "*|*" session_get_cookie_params "*|*" session_set_cookie_params "*)
+            echo "    session_*: AdapterMan provides session handling for Webman requests." >&2
+            ;;
+    esac
+    case "$conflicts" in
+        *" set_time_limit "*)
+            echo "    set_time_limit: AdapterMan requires this disabled for its long-running worker model." >&2
+            ;;
+    esac
+}
+
+deploy_print_enabled_function_conflicts() {
+    local conflicts=" $1 "
+
+    case "$conflicts" in
+        *" putenv "*)
+            echo "    putenv: V2Board's Webman bootstrap sets its console mode." >&2
+            ;;
+    esac
+    case "$conflicts" in
+        *" stream_socket_client "*)
+            echo "    stream_socket_client: Workerman network connection support." >&2
+            ;;
+    esac
+    case "$conflicts" in
+        *" exec "*|*" shell_exec "*|*" proc_open "*|*" proc_get_status "*|*" proc_close "*)
+            echo "    exec, shell_exec, proc_*: Workerman creates and supervises worker processes." >&2
+            ;;
+    esac
+    case "$conflicts" in
+        *" pcntl_signal_dispatch "*|*" pcntl_signal "*|*" pcntl_alarm "*|*" pcntl_fork "*|*" pcntl_wait "*)
+            echo "    pcntl_*: Workerman forks workers and processes reload/stop signals." >&2
+            ;;
+    esac
+    case "$conflicts" in
+        *" posix_getuid "*|*" posix_getpwuid "*|*" posix_kill "*|*" posix_setsid "*|*" posix_getpid "*|*" posix_getpwnam "*|*" posix_getgrnam "*|*" posix_getgid "*|*" posix_setgid "*|*" posix_initgroups "*|*" posix_setuid "*|*" posix_isatty "*)
+            echo "    posix_*: Workerman manages PIDs, sessions, users, and process groups." >&2
+            ;;
+    esac
+}
+
+deploy_check_aapanel_php_isolation() {
+    local conf matches="" v2board_fpm=""
+
+    # AdapterMan 必须在 aaPanel php.ini 中禁用 HTTP/Session 函数。如果同一 PHP 版本
+    # 同时作为 PHP-FPM 被其它站点使用，尤其是 phpMyAdmin，登录与跳转会受到影响。
+    for conf in /www/server/panel/vhost/nginx/*.conf; do
+        [ -f "$conf" ] || continue
+        if grep -Fq "$ROOT_DIR/public" "$conf" \
+           && grep -Eq 'enable-php-[0-9]+\.conf' "$conf"; then
+            v2board_fpm="${v2board_fpm}${v2board_fpm:+$'\n'}$conf"
+        fi
+        if grep -Eq "enable-php-${AAPANEL_PHP_VERSION}\\.conf" "$conf"; then
+            matches="${matches}${matches:+$'\n'}$conf"
+        fi
+    done
+    [ -z "$v2board_fpm" ] || {
+        echo "ERROR: the V2Board aaPanel vhost still enables PHP-FPM:" >&2
+        echo "$v2board_fpm" >&2
+        echo "Set this site to Pure Static. Dynamic requests must be reverse-proxied to Webman," >&2
+        echo "otherwise PHP-FPM can run project routes with a different aaPanel PHP configuration." >&2
         return 1
-    fi
+    }
+    [ -z "$matches" ] || {
+        echo "ERROR: aaPanel PHP ${AAPANEL_PHP_VERSION} is still enabled for PHP-FPM site(s):" >&2
+        echo "$matches" >&2
+        echo "AdapterMan requires disabled HTTP/Session functions in $PHP_INI." >&2
+        echo "Using that shared PHP version can break phpMyAdmin or the listed PHP-FPM sites." >&2
+        echo "Use a dedicated aaPanel PHP version for V2Board and set every listed site to Pure Static," >&2
+        echo "then run this script again. No aaPanel configuration was changed." >&2
+        return 1
+    }
 }
 
 deploy_check_webman_runtime() {
-    local disabled_functions required_function missing=0
-    local required_functions=(
+    local function
+    local adapterman_disabled=(
         header header_remove headers_sent headers_list http_response_code
         setcookie
         session_create_id session_id session_name session_save_path session_status
@@ -115,21 +201,46 @@ deploy_check_webman_runtime() {
         session_get_cookie_params session_set_cookie_params
         set_time_limit
     )
+    local workerman_enabled=(
+        stream_socket_client
+        exec shell_exec
+        proc_open proc_get_status proc_close
+        pcntl_signal_dispatch pcntl_signal pcntl_alarm pcntl_fork pcntl_wait
+        posix_getuid posix_getpwuid posix_kill posix_setsid posix_getpid
+        posix_getpwnam posix_getgrnam posix_getgid posix_setgid posix_initgroups
+        posix_setuid posix_isatty
+    )
+    local adapterman_conflicts=() workerman_conflicts=()
 
-    disabled_functions="$(deploy_php -r 'echo ini_get("disable_functions");' 2>&1)" || {
-        echo "$disabled_functions" >&2
-        echo "ERROR: PHP CLI cannot read disabled functions from $PHP_INI" >&2
-        return 1
-    }
+    deploy_check_aapanel_php_isolation || return 1
+    deploy_check_supervisor_php_config || return 1
 
-    for required_function in "${required_functions[@]}"; do
-        if ! printf '%s\n' "$disabled_functions" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -Fxq "$required_function"; then
-            echo "ERROR: aaPanel Disabled functions is missing: $required_function" >&2
-            missing=1
+    for function in "${adapterman_disabled[@]}"; do
+        if deploy_function_is_enabled "$function"; then
+            adapterman_conflicts+=("$function")
         fi
     done
-    if [ "$missing" -ne 0 ]; then
-        echo "AdapterMan requires every listed function to be disabled in aaPanel PHP settings." >&2
+    for function in putenv "${workerman_enabled[@]}"; do
+        if ! deploy_function_is_enabled "$function"; then
+            workerman_conflicts+=("$function")
+        fi
+    done
+
+    if [ "${#adapterman_conflicts[@]}" -gt 0 ] || [ "${#workerman_conflicts[@]}" -gt 0 ]; then
+        echo "ERROR: aaPanel Disabled functions conflicts with this Webman deployment:" >&2
+        if [ "${#adapterman_conflicts[@]}" -gt 0 ]; then
+            echo "  Add to Disabled functions (AdapterMan HTTP/Cookie/Session compatibility):" >&2
+            printf '    %s\n' "${adapterman_conflicts[*]}" >&2
+            deploy_print_disabled_function_conflicts "${adapterman_conflicts[*]}"
+        fi
+        if [ "${#workerman_conflicts[@]}" -gt 0 ]; then
+            echo "  Remove from Disabled functions:" >&2
+            printf '    %s\n' "${workerman_conflicts[*]}" >&2
+            deploy_print_enabled_function_conflicts "${workerman_conflicts[*]}"
+        fi
+        echo "No aaPanel setting was changed automatically." >&2
+        echo "Keeping any listed required function disabled means AdapterMan/Webman cannot run;" >&2
+        echo "use a separate aaPanel PHP version or choose a different HTTP runtime." >&2
         return 1
     fi
 
@@ -292,6 +403,37 @@ deploy_supervisorctl_bin() {
     return 1
 }
 
+deploy_supervisor_config() {
+    local conf
+
+    for conf in /www/server/panel/plugin/supervisor/profile/*.ini \
+                /etc/supervisor/conf.d/*.conf \
+                /etc/supervisord.d/*.ini; do
+        [ -f "$conf" ] || continue
+        grep -q 'webman\.php' "$conf" || continue
+        grep -Fq "$ROOT_DIR" "$conf" || continue
+        echo "$conf"
+        return 0
+    done
+    return 1
+}
+
+deploy_check_supervisor_php_config() {
+    local conf command
+
+    conf="$(deploy_supervisor_config)" || return 0
+    command="$(sed -n 's/^[[:space:]]*command[[:space:]]*=[[:space:]]*//p' "$conf" | head -n 1)"
+    case "$command" in
+        *"$PHP_BIN"*"-c"*"$PHP_INI"*webman.php*) return 0 ;;
+    esac
+
+    echo "ERROR: Supervisor Webman command does not use the aaPanel PHP configuration:" >&2
+    echo "  $conf" >&2
+    echo "Expected command=${PHP_BIN} -c ${PHP_INI} ${ROOT_DIR}/webman.php start" >&2
+    echo "Do not use bare php, -n, or a project php.ini. No process was stopped." >&2
+    return 1
+}
+
 # 程序名不能写死：aaPanel 的配置在 supervisord.conf 的 files= 指向的
 # plugin/supervisor/profile/*.ini 里，一个程序一个文件，通用部署一般也是这个布局。
 # 所以「哪个文件同时提到 webman.php 和本项目目录」就足够定位，不必解析 ini 分块。
@@ -301,15 +443,10 @@ deploy_supervisor_program() {
         echo "$SUPERVISOR_PROGRAM"
         return 0
     fi
-    for conf in /www/server/panel/plugin/supervisor/profile/*.ini \
-                /etc/supervisor/conf.d/*.conf \
-                /etc/supervisord.d/*.ini; do
-        [ -f "$conf" ] || continue
-        grep -q 'webman\.php' "$conf" || continue
-        grep -Fq "$ROOT_DIR" "$conf" || continue
+    if conf="$(deploy_supervisor_config)"; then
         name="$(sed -n 's/^\[program:\([^]]*\)\].*/\1/p' "$conf" | head -n 1)"
         [ -n "$name" ] && { echo "$name"; return 0; }
-    done
+    fi
     return 1
 }
 
