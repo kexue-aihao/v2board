@@ -37,10 +37,10 @@ echo
 # supervisord 不认、属主也不对的实例（update.sh 里 deploy_stop_webman 的注释是同一个坑）。
 # 所以只把剩下的手工步骤列清楚。
 echo "Remaining manual steps:"
-echo "  1. Point the web server at ${ROOT_DIR}/public and reverse-proxy to http://127.0.0.1:$(deploy_webman_port)."
+echo "  1. Point the web server at ${ROOT_DIR}/public and configure the upstream PHP-FPM/Webman rewrite rules."
 echo "  2. Start Webman, either under supervisor (recommended) or directly:"
-echo "       ${PHP_BIN} -c ${PHP_INI} webman.php start -d"
-echo "     Supervisor's command= must use the same absolute PHP binary and ${PHP_INI}."
+echo "       PHP_BIN=${PHP_BIN} /bin/bash ${ROOT_DIR}/scripts/webman.sh start -d"
+echo "     Supervisor's command= must use ${ROOT_DIR}/scripts/webman.sh start."
 echo "  3. Start a queue worker: ${PHP_BIN} -c ${PHP_INI} artisan horizon   (also usually under supervisor)."
 echo "  4. Confirm the scheduler: wait two minutes, then check 系统状态 in the admin panel,"
 echo "     or run ${PHP_BIN} -c ${PHP_INI} artisan schedule:run by hand and watch for output."

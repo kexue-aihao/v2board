@@ -549,8 +549,8 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 
 aaPanel 升级示例：
 
-    PHP_BIN=/www/server/php/85/bin/php \
-    PHP_INI=/www/server/php/85/etc/php.ini \
+    PHP_BIN=/www/server/php/81/bin/php \
+    PHP_INI=/www/server/php/81/etc/php.ini \
     DEPLOY_BRANCH=dev bash update.sh
 
 update.sh 会执行 Git 拉取、Composer 安装、数据库升级、缓存清理、IP 缓存清理和 Webman 重启；不会每次自动执行历史 IP 回填和风险计算。
@@ -559,28 +559,28 @@ PHP 配置只使用 aaPanel 管理的同一套，不再存在项目内 php.ini�
 
 | 变量 | 要求 | 用途 |
 | --- | --- | --- |
-| PHP_BIN | `/www/server/php/<版本>/bin/php` | aaPanel 专供 V2Board 的 PHP CLI，例如 `/www/server/php/85/bin/php` |
+| PHP_BIN | `/www/server/php/<版本>/bin/php` | aaPanel 唯一安装的 PHP CLI，例如 `/www/server/php/81/bin/php` |
 | PHP_INI | 与 PHP_BIN 同版本的 `/www/server/php/<版本>/etc/php.ini` | Webman、Horizon、artisan、Composer 与 cron 全部共用 |
 
-**必须为 V2Board 单独安装一个 aaPanel PHP 版本。** 例如 PHP 8.1 留给 phpMyAdmin，PHP 8.5 专供 V2Board。站点在 aaPanel 中必须选择“纯静态”，所有动态请求由 Nginx 反代给 Webman；不能把专供版本作为任何 PHP-FPM 站点的 PHP 版本。安装和升级脚本会扫描 aaPanel vhost：发现该版本仍被 PHP-FPM 站点使用时会停止，避免 AdapterMan 的禁用函数影响 phpMyAdmin 或其它站点。
+**只需安装一个 aaPanel PHP 版本。** 例如 PHP 8.1 同时供 V2Board、PHP-FPM 与 phpMyAdmin 使用；不需要第二个 PHP 版本，也不要为了 AdapterMan 强制把站点设为“纯静态”。Webman 进程从同一份 aaPanel `php.ini` 启动，但只在该进程内临时禁用 AdapterMan 所需函数，PHP-FPM/phpMyAdmin 不受影响。
 
 脚本会将 PATH 中的 `php` 解析为绝对路径；若它不是 aaPanel PHP，请显式指定 `PHP_BIN`。`PHP_INI` 不必指定；若指定，只能是该 PHP_BIN 对应的 `etc/php.ini`，防止不同进程误用另一套配置。
 
 在 aaPanel 对应 PHP 版本的 **Install extensions** 中安装并启用：`pdo_mysql`、`fileinfo`、`redis`、`pcntl`、`posix`。
 
-AdapterMan 必须在 aaPanel **Disabled functions** 中禁用下列函数，以在 Webman 常驻进程中替换 HTTP 响应、Cookie 与 Session 实现：
+下列函数必须**保持不在** aaPanel **Disabled functions** 中，因为 PHP-FPM/phpMyAdmin 的响应、Cookie、登录 Session 需要它们。`scripts/webman.sh` 会在启动 Webman 时仅对该进程临时禁用它们，以让 AdapterMan 替换 HTTP 响应、Cookie 与 Session 实现：
 
     header,header_remove,headers_sent,headers_list,http_response_code,setcookie,session_create_id,session_id,session_name,session_save_path,session_status,session_start,session_write_close,session_regenerate_id,session_unset,session_get_cookie_params,session_set_cookie_params,set_time_limit
 
-同时，不能禁用下列函数；它们分别由项目启动代码和 Workerman 的 worker 创建、信号、进程重载及 PID/用户管理使用：
+同时，aaPanel 全局也不能禁用下列函数；它们分别由项目启动代码和 Workerman 的 worker 创建、信号、进程重载及 PID/用户管理使用：
 
     putenv,stream_socket_client,exec,shell_exec,proc_open,proc_get_status,proc_close,pcntl_signal_dispatch,pcntl_signal,pcntl_alarm,pcntl_fork,pcntl_wait,posix_getuid,posix_getpwuid,posix_kill,posix_setsid,posix_getpid,posix_getpwnam,posix_getgrnam,posix_getgid,posix_setgid,posix_initgroups,posix_setuid,posix_isatty
 
-`init.sh` 与 `update.sh` 会在下载依赖或停止 Webman 前检查这两组冲突，并报告具体函数及影响功能；脚本不会自动修改 aaPanel。若选择继续禁用其中任一 Workerman 所需函数，就不能继续使用本项目的 AdapterMan/Webman HTTP 运行方式，只能改用独立 aaPanel PHP 版本或替换 HTTP 运行时。
+`init.sh` 与 `update.sh` 会在下载依赖或停止 Webman 前检查这两组冲突，并报告具体函数及影响功能；脚本不会自动修改 aaPanel。若选择继续全局禁用其中任一 PHP-FPM/phpMyAdmin 或 Workerman 所需函数，就不能继续使用本项目的共享 PHP AdapterMan/Webman 运行方式，只能改用 PHP-FPM HTTP 运行时。
 
 首次安装或升级前，可先运行无副作用预检；它只读取 PHP、aaPanel vhost 与 Supervisor 配置，不会下载依赖、写入数据库、停止服务或修改 cron：
 
-    PHP_BIN=/www/server/php/85/bin/php DEPLOY_CHECK_ONLY=1 bash init.sh
+    PHP_BIN=/www/server/php/81/bin/php DEPLOY_CHECK_ONLY=1 bash init.sh
 
 已安装站点也可将最后的 `init.sh` 换成 `update.sh`。
 
@@ -591,7 +591,7 @@ Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorc
 
 托管情况下必须走 supervisorctl：supervisor 配置通常是 `autorestart=true`，手工 `webman.php stop` 之后 supervisord 会在几秒内把它重新拉起来占住端口，随后部署脚本自己的 start 就会撞上 `Address already in use`，并且起出一套 supervisord 不认、进程属主也不对的实例。
 
-另需注意 supervisor 配置里的 `command=` 必须使用 aaPanel PHP 的绝对路径及同版本 `etc/php.ini`，例如 `command=/www/server/php/85/bin/php -c /www/server/php/85/etc/php.ini webman.php start`。不要写裸 `php`，也不要使用 `-n`，以免 Supervisor 读取了另一套配置。
+另需注意 supervisor 配置里的 `command=` 应使用 Webman 包装脚本，例如 `command=PHP_BIN=/www/server/php/81/bin/php /bin/bash /www/wwwroot/v2board/scripts/webman.sh start`。包装脚本固定读取同版本 aaPanel `etc/php.ini`，仅为 Webman 注入 AdapterMan 所需覆盖；不要写裸 `php`、`-n` 或项目 ini。
 
 ### 11.1 计划任务（部署必需）
 
@@ -600,7 +600,7 @@ Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorc
 init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），正常情况下无需手工配置。写入失败时脚本不会静默跳过，会打印 WARNING 并给出可直接粘贴的条目，形如：
 
     # v2board-schedule /www/wwwroot/v2board
-    * * * * * { cd '/www/wwwroot/v2board' && '/www/server/php/85/bin/php' -c '/www/server/php/85/etc/php.ini' artisan schedule:run; } >> /dev/null 2>> '/www/wwwroot/v2board/storage/logs/schedule-cron.log'
+    * * * * * { cd '/www/wwwroot/v2board' && '/www/server/php/81/bin/php' -c '/www/server/php/81/etc/php.ini' artisan schedule:run; } >> /dev/null 2>> '/www/wwwroot/v2board/storage/logs/schedule-cron.log'
 
 | 项目 | 说明 |
 | --- | --- |
@@ -668,7 +668,7 @@ init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），�
     systemctl status crond || pgrep -x crond || pgrep -x cron
 
     # 3. 手动跑一次，看到期任务是否逐条执行
-    /www/server/php/85/bin/php -c /www/server/php/85/etc/php.ini artisan schedule:run -v
+    /www/server/php/81/bin/php -c /www/server/php/81/etc/php.ini artisan schedule:run -v
 
     # 4. 列出全部条目与执行时间
     php artisan schedule:list
@@ -690,8 +690,8 @@ init.sh 负责的是「代码依赖 + 数据库 + 管理员 + 计划任务」，
 
 | 步骤 | 说明 |
 | --- | --- |
-| Web 服务器 | 站点根目录指向 `public/`，并把动态请求反代到 `http://127.0.0.1:6600`（端口取自 webman.php） |
-| 启动 Webman | supervisor 托管（推荐）或 `PHP_BIN -c PHP_INI webman.php start -d`；supervisor 的 `command=` 必须用绝对路径的同一个 aaPanel PHP 与 PHP_INI |
+| Web 服务器 | 站点根目录指向 `public/`，保留上游 PHP-FPM/Webman 伪静态规则；Webman 监听 `127.0.0.1:6600`（端口取自 webman.php） |
+| 启动 Webman | supervisor 托管（推荐）或 `PHP_BIN=/www/server/php/81/bin/php /bin/bash /www/wwwroot/v2board/scripts/webman.sh start -d`；supervisor 的 `command=` 也必须调用该包装脚本 |
 | 启动队列 | `PHP_BIN -c PHP_INI artisan horizon`，同样建议交给 supervisor。缺它则邮件、支付回调等队列任务堆积不消费 |
 | 计划任务 | init.sh 已写入，按 11.1 验证一遍 |
 | Redis | `.env.example` 里 CACHE_DRIVER、QUEUE_CONNECTION、SESSION_DRIVER 全是 redis，且安装器不会询问 Redis 参数。Redis 未装或不在 127.0.0.1:6379 时，装完就是 500 —— 需手工改 .env 的 REDIS_* 后 `artisan config:clear` |
