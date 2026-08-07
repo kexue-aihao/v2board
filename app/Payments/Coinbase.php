@@ -30,13 +30,17 @@ class Coinbase {
 
     public function pay($order) {
 
+        if (($order['gateway_currency'] ?? null) !== 'CNY') {
+            abort(500, 'Coinbase only supports CNY payments');
+        }
+
         $params = [
             'name' => '订阅套餐',
-            'description' => '订单号 ' . $order['trade_no'],
+            'description' => '订单号 ' . $order['display_trade_no'],
             'pricing_type' => 'fixed_price',
             'local_price' => [
-                'amount' => sprintf('%.2f', $order['total_amount'] / 100),
-                'currency' => 'CNY'
+                'amount' => sprintf('%.2f', $order['gateway_amount_minor'] / 100),
+                'currency' => $order['gateway_currency']
             ],
             'metadata' => [
                 "outTradeNo" => $order['trade_no'],
@@ -62,25 +66,66 @@ class Coinbase {
         
         $payload = trim(request()->getContent() ?: json_encode($_POST));
         $json_param = json_decode($payload, true); 
+        if (!is_array($json_param)) {
+            return false;
+        }
 
 
-        $headerName = 'X-Cc-Webhook-Signature';
-        $headers = getallheaders();
-        $signatureHeader = isset($headers[$headerName]) ? $headers[$headerName] : '';
         $computedSignature = \hash_hmac('sha256', $payload, $this->config['coinbase_webhook_key']);
 
-        if (!self::hashEqual($signatureHeader, $computedSignature)) {
-            abort(400, 'HMAC signature does not match');
+        if (!self::hashEqual($this->header('X-Cc-Webhook-Signature'), $computedSignature)) {
+            return false;
         }
-        
-        $out_trade_no = $json_param['event']['data']['metadata']['outTradeNo'];
-        $pay_trade_no=$json_param['event']['id'];
+
+        if (($json_param['event']['type'] ?? null) !== 'charge:confirmed') {
+            return 'success';
+        }
+        $eventData = $json_param['event']['data'] ?? [];
+        $code = (string)($eventData['code'] ?? '');
+        if ($code === '') return false;
+        $charge = $this->charge($code);
+        $timeline = $charge['timeline'] ?? [];
+        $last = is_array($timeline) && $timeline ? end($timeline) : null;
+        $local = $charge['pricing']['local'] ?? [];
+        if (!is_array($last) || ($last['status'] ?? null) !== 'COMPLETED'
+            || !isset($local['amount']) || !is_numeric($local['amount'])
+            || strtoupper((string)($local['currency'] ?? '')) !== 'CNY'
+            || empty($charge['metadata']['outTradeNo'])) {
+            return false;
+        }
+
         return [
-            'trade_no' => $out_trade_no,
-            'callback_no' => $pay_trade_no
+            'trade_no' => (string)$charge['metadata']['outTradeNo'],
+            'callback_no' => (string)($charge['id'] ?? $json_param['event']['id'] ?? ''),
+            'paid_amount_minor' => (int)round((float)$local['amount'] * 100),
+            'currency' => 'CNY'
         ];
-        http_response_code(200);
-        return('success');
+    }
+
+    private function charge(string $code): ?array
+    {
+        $base = rtrim((string)$this->config['coinbase_url'], '/');
+        $url = preg_match('#/charges$#', $base) ? $base . '/' . rawurlencode($code) : $base . '/charges/' . rawurlencode($code);
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['X-CC-Api-Key: ' . $this->config['coinbase_api_key'], 'X-CC-Version: 2018-03-22']);
+        $body = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        $data = is_string($body) ? json_decode($body, true) : null;
+        return $status >= 200 && $status < 300 && is_array($data['data'] ?? null) ? $data['data'] : null;
+    }
+
+    private function header(string $name): string
+    {
+        $value = request()->header($name);
+        if ($value !== null) return (string)$value;
+        $headers = function_exists('getallheaders') ? getallheaders() : [];
+        foreach ($headers as $header => $value) {
+            if (strcasecmp($header, $name) === 0) return (string)$value;
+        }
+        return '';
     }
 
 

@@ -3,8 +3,8 @@
 namespace App\Http\Controllers\V1\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Admin\PaymentSave;
 use App\Models\Payment;
+use App\Services\PaymentAttemptService;
 use App\Services\PaymentService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -16,7 +16,10 @@ class PaymentController extends Controller
     {
         $methods = [];
         foreach (glob(base_path('app//Payments') . '/*.php') as $file) {
-            array_push($methods, pathinfo($file)['filename']);
+            $driver = pathinfo($file)['filename'];
+            if (PaymentAttemptService::isDriverAvailable($driver)) {
+                array_push($methods, $driver);
+            }
         }
         return response([
             'data' => $methods
@@ -41,7 +44,20 @@ class PaymentController extends Controller
 
     public function getPaymentForm(Request $request)
     {
-        $paymentService = new PaymentService($request->input('payment'), $request->input('id'));
+        $paymentId = (int)$request->input('id');
+        $driver = (string)$request->input('payment');
+        if ($paymentId) {
+            $payment = Payment::find($paymentId);
+            if (!$payment) abort(404, __('支付方式不存在'));
+            $driver = (string)$payment->payment;
+        }
+        if (!PaymentAttemptService::isInstalledDriver($driver)) {
+            abort(422, 'Payment driver is not installed');
+        }
+        if (!$paymentId && !PaymentAttemptService::isDriverAvailable($driver)) {
+            abort(422, 'This payment driver is not allowlisted');
+        }
+        $paymentService = new PaymentService($driver, $paymentId ?: null);
         return response([
             'data' => $paymentService->form()
         ]);
@@ -49,10 +65,18 @@ class PaymentController extends Controller
 
     public function show(Request $request)
     {
-        $payment = Payment::find($request->input('id'));
-        if (!$payment) abort(500, __('支付方式不存在'));
-        $payment->enable = !$payment->enable;
-        if (!$payment->save()) abort(500, __('保存失败'));
+        DB::transaction(function () use ($request) {
+            $payment = Payment::where('id', $request->input('id'))->lockForUpdate()->first();
+            if (!$payment) abort(500, __('支付方式不存在'));
+            if (!PaymentAttemptService::isDriverAvailable((string)$payment->payment)) {
+                abort(422, 'This payment driver is not allowlisted');
+            }
+            if ($payment->enable) {
+                (new PaymentAttemptService())->invalidateForPayment((int)$payment->id, 'payment method disabled');
+            }
+            $payment->enable = !$payment->enable;
+            if (!$payment->save()) abort(500, __('保存失败'));
+        });
         return response([
             'data' => true
         ]);
@@ -79,17 +103,30 @@ class PaymentController extends Controller
             'handling_fee_fixed.integer' => '固定手续费格式有误',
             'handling_fee_percent.between' => '百分比手续费范围须在0.1-100之间'
         ]);
+        if (!PaymentAttemptService::isInstalledDriver((string)$params['payment'])) {
+            abort(422, 'Payment driver is not installed');
+        }
         if ($request->input('id')) {
-            $payment = Payment::find($request->input('id'));
-            if (!$payment) abort(500, __('支付方式不存在'));
-            try {
-                $payment->update($params);
-            } catch (\Exception $e) {
-                abort(500, $e->getMessage());
-            }
+            DB::transaction(function () use ($request, $params) {
+                $payment = Payment::where('id', $request->input('id'))->lockForUpdate()->first();
+                if (!$payment) abort(500, __('支付方式不存在'));
+                if ((string)$params['payment'] !== (string)$payment->payment
+                    && !PaymentAttemptService::isDriverAvailable((string)$params['payment'])) {
+                    abort(422, 'This payment driver is not allowlisted');
+                }
+                (new PaymentAttemptService())->invalidateForPayment((int)$payment->id, 'payment configuration changed');
+                try {
+                    $payment->update($params);
+                } catch (\Exception $e) {
+                    abort(500, 'Unable to save payment configuration');
+                }
+            });
             return response([
                 'data' => true
             ]);
+        }
+        if (!PaymentAttemptService::isDriverAvailable((string)$params['payment'])) {
+            abort(422, 'This payment driver is not allowlisted');
         }
         $params['uuid'] = Helper::randomChar(8);
         if (!Payment::create($params)) {
@@ -102,10 +139,14 @@ class PaymentController extends Controller
 
     public function drop(Request $request)
     {
-        $payment = Payment::find($request->input('id'));
-        if (!$payment) abort(500, __('支付方式不存在'));
+        $deleted = DB::transaction(function () use ($request) {
+            $payment = Payment::where('id', $request->input('id'))->lockForUpdate()->first();
+            if (!$payment) abort(500, __('支付方式不存在'));
+            (new PaymentAttemptService())->invalidateForPayment((int)$payment->id, 'payment method deleted');
+            return $payment->delete();
+        });
         return response([
-            'data' => $payment->delete()
+            'data' => $deleted
         ]);
     }
 

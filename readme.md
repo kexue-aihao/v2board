@@ -102,7 +102,7 @@
 | POST | /comm/arithmetic/verify | 无 | challenge_id、answer | 返回 correct、verified；关闭时直接返回 `{correct:true,verified:true}`；不返回正确答案 |
 | GET | /plan/fetch | 无 | 无 | Signature 首页套餐列表（show=1，按 sort 升序） |
 | POST | /telegram/webhook | access_token | access_token（=md5(telegram_bot_token)）及 Telegram 回调参数 | Telegram Webhook；仅接受 POST；access_token 校验失败返回 401 |
-| POST/GET | /payment/notify/{method}/{uuid} | 无 | 支付回调参数 | 支付平台异步通知，由驱动验签。已取消订单收到真实回调时记日志并通知管理员人工核实；驱动回传 paid_amount 时校验实付金额，欠款则拒绝开通并告警 |
+| POST/GET | /payment/notify/{method}/{uuid} | 无 | 支付回调参数 | 支付平台异步通知。仅当回调验签、终态、支付尝试号、支付方式、网关流水、精确金额和币种全部匹配时才开通；缺少支付尝试的历史回调一律拒绝 |
 
 ### 4.3 公共配置扩展字段
 
@@ -531,6 +531,7 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 | --- | --- |
 | php artisan v2board:install | 初始化安装 |
 | php artisan v2board:update | 数据库升级（默认幂等 schema 迁移，见下） |
+| php artisan payment:invalidate-legacy --force | 作废所有未绑定支付尝试的旧待支付订单；支付安全升级后首次部署必须执行 |
 | php artisan ip:clear-location-cache | 清理 IP 归属缓存 |
 | php artisan ip:backfill-subscribe-locations | 回填历史 IP 归属 |
 | php artisan subscription:risk | 计算已完成风险周期（--force 重算已评估周期） |
@@ -546,6 +547,17 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 | php artisan schedule:list | 列出全部计划任务及其执行时间 |
 
 `php artisan v2board:update` 默认走幂等 schema 迁移（`SchemaUpgradeService::run`，执行记录落 `v2_schema_migrations`），按需建表且可反复执行。除订阅、风控、IP 归属缓存等历史表外，还会建资金流水审计表 `v2_balance_log`（每次余额变更留痕，`unique_key` 唯一键保证同一笔只入账一次）、订阅凭证历史 `v2_subscription_token_history`、IP+账号累积 `v2_ip_account_link`，以及 OAuth 身份、Telegram 绑定等表。加 `--legacy` 才回退执行 `database/update.sql`。首次升级到含资金流水的版本时，建表窗口内的余额变更会静默跳过写流水，表建好后自动开始记录。
+
+支付安全升级会创建 `v2_payment_attempt`，将订单与唯一外部支付尝试、金额、币种及网关流水绑定。首次升级时会自动关闭 BTCPay、Coinbase、MGate；停止结账入口后执行：
+
+```bash
+php artisan v2board:update
+php artisan payment:invalidate-legacy --force
+```
+
+第二条命令会取消全部没有支付尝试记录的待支付订单，并按原有幂等余额退款逻辑处理。执行完成后再恢复 Webman/Horizon 和结账入口；旧支付链接的晚到回调不会自动开通。BTCPay、Coinbase 还必须先完成沙箱验收，并在管理员配置中将 `payment_secure_driver_allowlist` 明确设为 `['BTCPay']`、`['Coinbase']` 或两者，再单独启用对应支付方式。MGate 即使被写入该配置也会保持隔离，直到实现官方终态与查单校验。
+
+支付宝当面付重新启用前，需在支付方式配置中填写与该 AppID 对应的 `seller_id`；缺少或不匹配该商户标识的已签名回调不会开通订单。
 
 aaPanel 升级示例：
 
@@ -710,7 +722,7 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 | IP 数据库 | 放在 resources/ipdb，不放入 public |
 | 配置变更 | 修改多订阅开关后清理缓存并重启 Webman |
 | 资金变更 | 余额只经 UserService::addBalance 原语：事务内加锁读用户行、拒绝透支、写 v2_balance_log 流水审计；传 unique_key 时同键幂等，保证并发/重试下同一笔只入账一次 |
-| 支付回调 | 校验支付驱动一致性与实付金额：驱动回传 paid_amount 时欠款（超四舍五入误差）拒绝开通并告警；已取消订单再收到真实回调记日志并通知管理员，不再静默吞掉 |
+| 支付回调 | 验签后仍必须匹配不可变支付尝试、支付方式、终态、网关流水、精确金额和币种；金额不符、取消/失效订单和无支付尝试回调均拒绝自动开通 |
 
 ### 12.1 Cloudflare 免费版防护 CC 与刷注册
 

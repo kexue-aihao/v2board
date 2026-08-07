@@ -38,11 +38,8 @@ class StripeALL {
     
     public function pay($order)
     {
-        $currency = $this->config['currency'];
-        $exchange = $this->exchange('CNY', strtoupper($currency));
-        if (!$exchange) {
-            throw new abort('Currency conversion API failed', 500);
-        }
+        $currency = $order['gateway_currency'];
+        $amount = $order['gateway_amount_minor'];
         //jump url
         $jumpUrl = null;
         $actionType = 0;
@@ -55,7 +52,7 @@ class StripeALL {
         ]);
         // 准备支付意图的基础参数
         $params = [
-            'amount' => floor($order['total_amount'] * $exchange),
+            'amount' => $amount,
             'currency' => $currency,
             'confirm' => true,
             'payment_method' => $stripePaymentMethod->id,
@@ -113,7 +110,7 @@ class StripeALL {
                 [
                     'price_data' => [
                         'currency' => $currency,
-                        'unit_amount' => floor($order['total_amount'] * $exchange),
+                        'unit_amount' => $amount,
                         'product_data' => [
                             'name' => 'user-#' . $order['user_id'] . '-' . substr($order['trade_no'], -8),
                         ]
@@ -136,12 +133,25 @@ class StripeALL {
         ];
     }
 
+    public function prepare($order)
+    {
+        $currency = strtoupper(trim((string)$this->config['currency']));
+        $exchange = $this->exchange('CNY', $currency);
+        if (!$exchange) {
+            throw new \RuntimeException('Currency conversion has timed out');
+        }
+        return [
+            'amount_minor' => (int)floor($order['total_amount'] * $exchange),
+            'currency' => $currency
+        ];
+    }
+
     public function notify($params)
     {
         try {
             $event = \Stripe\Webhook::constructEvent(
                 request()->getContent() ?: json_encode($_POST),
-                $_SERVER['HTTP_STRIPE_SIGNATURE'],
+                request()->header('Stripe-Signature', ''),
                 $this->config['stripe_webhook_key']
             );
         } catch (\Stripe\Error\SignatureVerification $e) {
@@ -150,7 +160,7 @@ class StripeALL {
         switch ($event->type) {
             case 'payment_intent.succeeded':
                 $object = $event->data->object;
-                if ($object->status === 'succeeded') {
+                if ($object->status === 'succeeded' && (int)$object->amount_received > 0) {
                     if (!isset($object->metadata->out_trade_no)) {
                         return('order error');
                     }
@@ -158,7 +168,9 @@ class StripeALL {
                     $tradeNo = $metaData->out_trade_no;
                     return [
                         'trade_no' => $tradeNo,
-                        'callback_no' => $object->id
+                        'callback_no' => $object->id,
+                        'paid_amount_minor' => (int)$object->amount_received,
+                        'currency' => strtoupper((string)$object->currency)
                     ];
                 }
                 break;
@@ -167,16 +179,22 @@ class StripeALL {
                     if ($object->payment_status === 'paid') {
                         return [
                             'trade_no' => $object->client_reference_id,
-                            'callback_no' => $object->payment_intent
+                            'callback_no' => $object->payment_intent,
+                            'paid_amount_minor' => (int)$object->amount_total,
+                            'currency' => strtoupper((string)$object->currency)
                         ];
                     }
                     break;
                 case 'checkout.session.async_payment_succeeded':
                     $object = $event->data->object;
-                    return [
-                        'trade_no' => $object->client_reference_id,
-                        'callback_no' => $object->payment_intent
-                    ];
+                    if ($object->payment_status === 'paid') {
+                        return [
+                            'trade_no' => $object->client_reference_id,
+                            'callback_no' => $object->payment_intent,
+                            'paid_amount_minor' => (int)$object->amount_total,
+                            'currency' => strtoupper((string)$object->currency)
+                        ];
+                    }
                     break;
             default:
                 throw new abort('webhook events are not supported');

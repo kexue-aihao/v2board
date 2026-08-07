@@ -24,7 +24,8 @@ class SchemaUpgradeService
         'oauth_identity_schema' => 'oauth_identity_schema_v1',
         'telegram_binding_schema' => 'telegram_binding_schema_v1',
         'ip_account_link_schema' => 'ip_account_link_schema_v1',
-        'balance_log_schema' => 'balance_log_schema_v1'
+        'balance_log_schema' => 'balance_log_schema_v1',
+        'payment_attempt_schema' => 'payment_attempt_schema_v1'
     ];
 
     public function run(): array
@@ -111,6 +112,9 @@ class SchemaUpgradeService
                 return;
             case 'balance_log_schema':
                 $this->applyBalanceLogSchema();
+                return;
+            case 'payment_attempt_schema':
+                $this->applyPaymentAttemptSchema();
                 return;
         }
 
@@ -1192,6 +1196,64 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_balance_log', 'type_created', ['type', 'created_at']);
         // 按来源反查（如「这张订单退过几次款」）。
         $this->ensureIndex('v2_balance_log', 'source', ['source_type', 'source_id']);
+    }
+
+    private function applyPaymentAttemptSchema(): void
+    {
+        $this->requireTable('v2_order');
+        $this->requireTable('v2_payment');
+        $freshTable = !Schema::hasTable('v2_payment_attempt');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_payment_attempt` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `order_id` int(11) NOT NULL,
+            `payment_id` int(11) NOT NULL,
+            `payment_uuid` char(32) NOT NULL,
+            `driver` varchar(64) NOT NULL,
+            `attempt_no` char(32) NOT NULL,
+            `order_amount_cents` int(11) NOT NULL,
+            `gateway_amount_minor` bigint(20) DEFAULT NULL,
+            `gateway_currency` varchar(12) DEFAULT NULL,
+            `gateway_transaction_id` varchar(255) DEFAULT NULL,
+            `gateway_transaction_hash` char(64) DEFAULT NULL,
+            `status` enum('initializing','pending','paid','failed','invalidated') NOT NULL,
+            `failure_reason` varchar(255) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'order_id' => 'int(11) NOT NULL',
+            'payment_id' => 'int(11) NOT NULL',
+            'payment_uuid' => 'char(32) NOT NULL',
+            'driver' => 'varchar(64) NOT NULL',
+            'attempt_no' => 'char(32) NOT NULL',
+            'order_amount_cents' => 'int(11) NOT NULL',
+            'gateway_amount_minor' => 'bigint(20) DEFAULT NULL',
+            'gateway_currency' => 'varchar(12) DEFAULT NULL',
+            'gateway_transaction_id' => 'varchar(255) DEFAULT NULL',
+            'gateway_transaction_hash' => 'char(64) DEFAULT NULL',
+            'status' => "enum('initializing','pending','paid','failed','invalidated') NOT NULL",
+            'failure_reason' => 'varchar(255) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_payment_attempt', $column, $definition);
+        }
+
+        $this->ensureIndex('v2_payment_attempt', 'uniq_order', ['order_id'], true);
+        $this->ensureIndex('v2_payment_attempt', 'uniq_attempt_no', ['attempt_no'], true);
+        $this->ensureIndex('v2_payment_attempt', 'uniq_gateway_transaction', ['payment_id', 'gateway_transaction_hash'], true);
+        $this->ensureIndex('v2_payment_attempt', 'payment_status', ['payment_id', 'status']);
+
+        // Existing installations have payment links that cannot be mapped to an
+        // immutable attempt. Quarantine the known unsafe drivers on first upgrade.
+        if ($freshTable) {
+            DB::table('v2_payment')
+                ->whereIn('payment', ['BTCPay', 'Coinbase', 'MGate'])
+                ->update(['enable' => 0, 'updated_at' => time()]);
+        }
     }
 
     private function requireTable(string $table): void

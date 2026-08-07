@@ -17,7 +17,11 @@ class PaymentService
         $this->method = $method;
         $this->class = '\\App\\Payments\\' . $this->method;
         if (!class_exists($this->class)) abort(500, 'gate is not found');
-        if ($id) $payment = Payment::find($id)->toArray();
+        if ($id) {
+            $row = Payment::find($id);
+            if (!$row) abort(500, 'gate is not found');
+            $payment = $row->toArray();
+        }
         if ($uuid) {
             // 支付回调路由 /guest/payment/notify/{method}/{uuid} 的两段来自不同来源、此前互不校验：
             // {method} 决定加载哪个驱动类，{uuid} 决定加载哪一行配置。攻击者可用 A 驱动去加载 B 的
@@ -46,7 +50,42 @@ class PaymentService
     public function notify($params)
     {
         if (!$this->config['enable']) abort(500, 'gate is not enable');
-        return $this->payment->notify($params);
+        $result = $this->payment->notify($params);
+        if (!is_array($result)) {
+            return $result;
+        }
+        $result['payment_id'] = (int)$this->config['id'];
+        $result['payment_uuid'] = (string)$this->config['uuid'];
+        $result['driver'] = (string)$this->method;
+        return $result;
+    }
+
+    public function prepare(array $order): array
+    {
+        if ($this->method === 'MGate') {
+            throw new \RuntimeException('MGate is quarantined pending gateway verification support');
+        }
+        if (method_exists($this->payment, 'prepare')) {
+            $quote = $this->payment->prepare($order);
+            if (!is_array($quote)) {
+                throw new \RuntimeException('Payment driver returned an invalid payment quote');
+            }
+            return $quote;
+        }
+
+        $currency = 'CNY';
+        if ($this->method === 'Epusdt') {
+            $currency = strtoupper(trim((string)($this->config['epusdt_currency'] ?? '') ?: 'CNY'));
+        } elseif ($this->method === 'Bepusdt') {
+            $currency = strtoupper(trim((string)($this->config['bepusdt_fiat'] ?? '') ?: 'CNY'));
+        }
+        if ($currency !== 'CNY') {
+            throw new \RuntimeException('Payment driver cannot securely quote a non-CNY payment');
+        }
+        return [
+            'amount_minor' => (int)$order['total_amount'],
+            'currency' => 'CNY'
+        ];
     }
 
     public function pay($order)
@@ -60,9 +99,12 @@ class PaymentService
 
         return $this->payment->pay([
             'notify_url' => $notifyUrl,
-            'return_url' => url('/#/order/' . $order['trade_no']),
+            'return_url' => url('/#/order/' . ($order['display_trade_no'] ?? $order['trade_no'])),
             'trade_no' => $order['trade_no'],
+            'display_trade_no' => $order['display_trade_no'] ?? $order['trade_no'],
             'total_amount' => $order['total_amount'],
+            'gateway_amount_minor' => $order['gateway_amount_minor'],
+            'gateway_currency' => $order['gateway_currency'],
             'user_id' => $order['user_id'],
             'stripe_token' => $order['stripe_token']
         ]);

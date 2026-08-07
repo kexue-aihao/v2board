@@ -44,11 +44,7 @@ class StripeCheckout {
 
     public function pay($order)
     {
-        $currency = $this->config['currency'];
-        $exchange = $this->exchange('CNY', strtoupper($currency));
-        if (!$exchange) {
-            abort(500, __('Currency conversion has timed out, please try again later'));
-        }
+        $currency = $order['gateway_currency'];
         $customFieldName = isset($this->config['stripe_custom_field_name']) ? $this->config['stripe_custom_field_name'] : 'Contact Infomation';
 
         $params = [
@@ -60,9 +56,9 @@ class StripeCheckout {
                     'price_data' => [
                         'currency' => $currency,
                         'product_data' => [
-                            'name' => $order['trade_no']
+                            'name' => $order['display_trade_no']
                         ],
-                        'unit_amount' => floor($order['total_amount'] * $exchange)
+                        'unit_amount' => $order['gateway_amount_minor']
                     ],
                     'quantity' => 1
                 ]
@@ -85,12 +81,24 @@ class StripeCheckout {
         try {
             $session = Session::create($params);
         } catch (\Exception $e) {
-            info($e);
-            abort(500, "Failed to create order. Error: {$e->getMessage}");
+            abort(500, 'Failed to create payment session');
         }
         return [
             'type' => 1, // 0:qrcode 1:url
             'data' => $session->url
+        ];
+    }
+
+    public function prepare($order)
+    {
+        $currency = strtoupper(trim((string)$this->config['currency']));
+        $exchange = $this->exchange('CNY', $currency);
+        if (!$exchange) {
+            throw new \RuntimeException('Currency conversion has timed out');
+        }
+        return [
+            'amount_minor' => (int)floor($order['total_amount'] * $exchange),
+            'currency' => $currency
         ];
     }
 
@@ -100,7 +108,7 @@ class StripeCheckout {
         try {
             $event = \Stripe\Webhook::constructEvent(
                 request()->getContent() ?: json_encode($_POST),
-                $_SERVER['HTTP_STRIPE_SIGNATURE'],
+                request()->header('Stripe-Signature', ''),
                 $this->config['stripe_webhook_key']
             );
         } catch (\Stripe\Error\SignatureVerification $e) {
@@ -113,16 +121,22 @@ class StripeCheckout {
                 if ($object->payment_status === 'paid') {
                     return [
                         'trade_no' => $object->client_reference_id,
-                        'callback_no' => $object->payment_intent
+                        'callback_no' => $object->payment_intent,
+                        'paid_amount_minor' => (int)$object->amount_total,
+                        'currency' => strtoupper((string)$object->currency)
                     ];
                 }
                 break;
             case 'checkout.session.async_payment_succeeded':
                 $object = $event->data->object;
-                return [
-                    'trade_no' => $object->client_reference_id,
-                    'callback_no' => $object->payment_intent
-                ];
+                if ($object->payment_status === 'paid') {
+                    return [
+                        'trade_no' => $object->client_reference_id,
+                        'callback_no' => $object->payment_intent,
+                        'paid_amount_minor' => (int)$object->amount_total,
+                        'currency' => strtoupper((string)$object->currency)
+                    ];
+                }
                 break;
             default:
                 abort(500, 'event is not support');

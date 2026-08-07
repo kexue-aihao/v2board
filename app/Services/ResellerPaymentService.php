@@ -17,6 +17,9 @@ class ResellerPaymentService
     {
         $this->driver = $payment->driver;
         $allowed = (array)config('v2board.reseller_allowed_payment_drivers', []);
+        if (!PaymentAttemptService::isDriverAvailable($payment->driver)) {
+            abort(422, 'Payment driver is not allowlisted');
+        }
         if (!$allowInactive && (!$payment->enabled || !in_array($payment->driver, $allowed, true))) {
             abort(422, 'Payment driver is not allowed');
         }
@@ -43,7 +46,10 @@ class ResellerPaymentService
     {
         $drivers = [];
         foreach (glob(base_path('app/Payments') . '/*.php') as $file) {
-            $drivers[] = pathinfo($file, PATHINFO_FILENAME);
+            $driver = pathinfo($file, PATHINFO_FILENAME);
+            if (PaymentAttemptService::isDriverAvailable($driver)) {
+                $drivers[] = $driver;
+            }
         }
         sort($drivers);
         return $drivers;
@@ -73,14 +79,19 @@ class ResellerPaymentService
         $notifyUrl = url("/api/v1/store/{$storeSlug}/payment/notify/{$order->payment->uuid}");
         $returnUrl = url("/store/{$storeSlug}#/order/{$platformOrder->trade_no}");
 
-        return $this->payment->pay([
+        $checkout = [
             'notify_url' => $notifyUrl,
             'return_url' => $returnUrl,
             'trade_no' => $platformOrder->trade_no,
+            'display_trade_no' => $platformOrder->trade_no,
             'total_amount' => $platformOrder->total_amount,
             'user_id' => $platformOrder->user_id,
             'stripe_token' => $stripeToken,
-        ]);
+        ];
+        $quote = $this->quote($checkout);
+        $checkout['gateway_amount_minor'] = $quote['amount_minor'];
+        $checkout['gateway_currency'] = $quote['currency'];
+        return $this->payment->pay($checkout);
     }
 
     public function notify(array $params)
@@ -113,6 +124,31 @@ class ResellerPaymentService
             return (int)round((float)$params['amount'] * 100);
         }
         return null;
+    }
+
+    private function quote(array $order): array
+    {
+        if (method_exists($this->payment, 'prepare')) {
+            $quote = $this->payment->prepare($order);
+        } else {
+            $currency = 'CNY';
+            if ($this->driver === 'Epusdt') {
+                $currency = strtoupper(trim((string)($this->config['epusdt_currency'] ?? '')) ?: 'CNY');
+            } elseif ($this->driver === 'Bepusdt') {
+                $currency = strtoupper(trim((string)($this->config['bepusdt_fiat'] ?? '')) ?: 'CNY');
+            }
+            if ($currency !== 'CNY') {
+                abort(422, 'This payment driver cannot securely quote a non-CNY payment');
+            }
+            $quote = ['amount_minor' => (int)$order['total_amount'], 'currency' => $currency];
+        }
+
+        $amount = $quote['amount_minor'] ?? null;
+        $currency = strtoupper(trim((string)($quote['currency'] ?? '')));
+        if (!is_int($amount) || $amount < 1 || !preg_match('/^[A-Z0-9]{3,12}$/', $currency)) {
+            abort(500, 'Payment driver did not provide a verifiable amount and currency');
+        }
+        return ['amount_minor' => $amount, 'currency' => $currency];
     }
 
     private function normalizeConfig(array $config): array

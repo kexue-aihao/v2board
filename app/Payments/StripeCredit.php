@@ -42,16 +42,11 @@ class StripeCredit {
 
     public function pay($order)
     {
-        info($order);
-        $currency = $this->config['currency'];
-        $exchange = $this->exchange('CNY', strtoupper($currency));
-        if (!$exchange) {
-            abort(500, __('Currency conversion has timed out, please try again later'));
-        }
+        $currency = $order['gateway_currency'];
         Stripe::setApiKey($this->config['stripe_sk_live']);
         try {
             $charge = \Stripe\Charge::create([
-                'amount' => floor($order['total_amount'] * $exchange),
+                'amount' => $order['gateway_amount_minor'],
                 'currency' => $currency,
                 'source' => $order['stripe_token'],
                 'metadata' => [
@@ -61,7 +56,6 @@ class StripeCredit {
                 ]
             ]);
         } catch (\Exception $e) {
-            info($e);
             abort(500, __('Payment failed. Please check your credit card information'));
         }
         if (!$charge->paid) {
@@ -73,13 +67,26 @@ class StripeCredit {
         ];
     }
 
+    public function prepare($order)
+    {
+        $currency = strtoupper(trim((string)$this->config['currency']));
+        $exchange = $this->exchange('CNY', $currency);
+        if (!$exchange) {
+            throw new \RuntimeException('Currency conversion has timed out');
+        }
+        return [
+            'amount_minor' => (int)floor($order['total_amount'] * $exchange),
+            'currency' => $currency
+        ];
+    }
+
     public function notify($params)
     {
         \Stripe\Stripe::setApiKey($this->config['stripe_sk_live']);
         try {
             $event = \Stripe\Webhook::constructEvent(
                 request()->getContent() ?: json_encode($_POST),
-                $_SERVER['HTTP_STRIPE_SIGNATURE'],
+                request()->header('Stripe-Signature', ''),
                 $this->config['stripe_webhook_key']
             );
         } catch (\Stripe\Error\SignatureVerification $e) {
@@ -105,7 +112,9 @@ class StripeCredit {
                     $tradeNo = $metaData->out_trade_no;
                     return [
                         'trade_no' => $tradeNo,
-                        'callback_no' => $object->id
+                        'callback_no' => $object->id,
+                        'paid_amount_minor' => (int)$object->amount,
+                        'currency' => strtoupper((string)$object->currency)
                     ];
                 }
                 break;

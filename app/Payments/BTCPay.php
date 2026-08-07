@@ -36,10 +36,14 @@ class BTCPay {
 
     public function pay($order) {
 
+        if (($order['gateway_currency'] ?? null) !== 'CNY') {
+            abort(500, 'BTCPay only supports CNY payments');
+        }
+
         $params = [
             'jsonResponse' => true,
-            'amount' => sprintf('%.2f', $order['total_amount'] / 100),
-            'currency' => 'CNY',
+            'amount' => sprintf('%.2f', $order['gateway_amount_minor'] / 100),
+            'currency' => $order['gateway_currency'],
             'metadata' => [
                 'orderId' => $order['trade_no']
             ]
@@ -62,43 +66,57 @@ class BTCPay {
 
     public function notify($params) {
         $payload = trim(request()->getContent() ?: json_encode($_POST));
-
-        $headers = getallheaders();
-
-        //IS Btcpay-Sig
-        //NOT BTCPay-Sig
-        //API doc is WRONG!
-        $headerName = 'Btcpay-Sig';
-        $signraturHeader = isset($headers[$headerName]) ? $headers[$headerName] : '';
         $json_param = json_decode($payload, true);
-
+        if (!is_array($json_param)) return false;
         $computedSignature = "sha256=" . \hash_hmac('sha256', $payload, $this->config['btcpay_webhook_key']);
-
-        if (!self::hashEqual($signraturHeader, $computedSignature)) {
-            abort(400, 'HMAC signature does not match');
+        if (!self::hashEqual($this->header('Btcpay-Sig'), $computedSignature)) {
             return false;
         }
 
-        //get order id store in metadata
-        $context = stream_context_create(array(
-            'http' => array(
-                'method' => 'GET',
-                'header' => "Authorization:" . "token " . $this->config['btcpay_api_key'] . "\r\n"
-            )
-        ));
+        // A valid signature only proves the event was sent by BTCPay. Fulfilment
+        // is restricted to the final settlement event and a server-side invoice check.
+        if (($json_param['type'] ?? null) !== 'InvoiceSettled' || empty($json_param['invoiceId'])) {
+            return 'success';
+        }
+        $invoiceDetail = $this->invoice((string)$json_param['invoiceId']);
+        if (!$invoiceDetail || ($invoiceDetail['status'] ?? null) !== 'Settled'
+            || strtoupper((string)($invoiceDetail['currency'] ?? '')) !== 'CNY'
+            || empty($invoiceDetail['metadata']['orderId'])
+            || !isset($invoiceDetail['amount']) || !is_numeric($invoiceDetail['amount'])) {
+            return false;
+        }
 
-        $invoiceDetail = file_get_contents($this->config['btcpay_url'] . 'api/v1/stores/' . $this->config['btcpay_storeId'] . '/invoices/' . $json_param['invoiceId'], false, $context);
-        $invoiceDetail = json_decode($invoiceDetail, true);
-
-    
-        $out_trade_no = $invoiceDetail['metadata']["orderId"];
-        $pay_trade_no=$json_param['invoiceId'];
         return [
-            'trade_no' => $out_trade_no,
-            'callback_no' => $pay_trade_no
+            'trade_no' => (string)$invoiceDetail['metadata']['orderId'],
+            'callback_no' => (string)$json_param['invoiceId'],
+            'paid_amount_minor' => (int)round((float)$invoiceDetail['amount'] * 100),
+            'currency' => 'CNY'
         ];
-        http_response_code(200);
-        return('success');
+    }
+
+    private function invoice(string $invoiceId): ?array
+    {
+        $url = rtrim((string)$this->config['btcpay_url'], '/') . '/api/v1/stores/'
+            . rawurlencode((string)$this->config['btcpay_storeId']) . '/invoices/' . rawurlencode($invoiceId);
+        $context = stream_context_create(['http' => [
+            'method' => 'GET',
+            'header' => "Authorization: token " . $this->config['btcpay_api_key'] . "\r\nAccept: application/json\r\n",
+            'timeout' => 15,
+        ]]);
+        $body = @file_get_contents($url, false, $context);
+        $data = is_string($body) ? json_decode($body, true) : null;
+        return is_array($data) ? $data : null;
+    }
+
+    private function header(string $name): string
+    {
+        $value = request()->header($name);
+        if ($value !== null) return (string)$value;
+        $headers = function_exists('getallheaders') ? getallheaders() : [];
+        foreach ($headers as $header => $value) {
+            if (strcasecmp($header, $name) === 0) return (string)$value;
+        }
+        return '';
     }
 
 

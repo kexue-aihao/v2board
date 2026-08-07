@@ -176,6 +176,30 @@ CREATE TABLE `v2_order` (
                             INDEX idx_user_status (`user_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+DROP TABLE IF EXISTS `v2_payment_attempt`;
+CREATE TABLE `v2_payment_attempt` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `order_id` int(11) NOT NULL,
+    `payment_id` int(11) NOT NULL,
+    `payment_uuid` char(32) NOT NULL,
+    `driver` varchar(64) NOT NULL,
+    `attempt_no` char(32) NOT NULL,
+    `order_amount_cents` int(11) NOT NULL,
+    `gateway_amount_minor` bigint(20) DEFAULT NULL,
+    `gateway_currency` varchar(12) DEFAULT NULL,
+    `gateway_transaction_id` varchar(255) DEFAULT NULL,
+    `gateway_transaction_hash` char(64) DEFAULT NULL,
+    `status` enum('initializing','pending','paid','failed','invalidated') NOT NULL,
+    `failure_reason` varchar(255) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uniq_order` (`order_id`),
+    UNIQUE KEY `uniq_attempt_no` (`attempt_no`),
+    UNIQUE KEY `uniq_gateway_transaction` (`payment_id`, `gateway_transaction_hash`),
+    KEY `payment_status` (`payment_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 
 DROP TABLE IF EXISTS `v2_payment`;
 CREATE TABLE `v2_payment` (

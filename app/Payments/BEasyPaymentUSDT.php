@@ -33,8 +33,11 @@ class BEasyPaymentUSDT {
 
     public function pay($order)
     {
+        if (($order['gateway_currency'] ?? null) !== 'CNY') {
+            abort(500, 'BEasy only supports CNY payments');
+        }
         $params = [
-            'amount' => $order['total_amount'] / 100,
+            'amount' => $order['gateway_amount_minor'] / 100,
             'trade_type' => $this->config['bepusdt_trade_type'],
             'notify_url' => $order['notify_url'],
             'order_id' => $order['trade_no'],
@@ -47,7 +50,8 @@ class BEasyPaymentUSDT {
 
         $curl = new Curl();
         $curl->setUserAgent('BEPUSDT');
-        $curl->setOpt(CURLOPT_SSL_VERIFYPEER, 0);
+        $curl->setOpt(CURLOPT_SSL_VERIFYPEER, true);
+        $curl->setOpt(CURLOPT_SSL_VERIFYHOST, 2);
         $curl->setOpt(CURLOPT_HTTPHEADER, array('Content-Type:application/json'));
         $curl->post($this->config['bepusdt_url'] . '/api/v1/order/create-transaction', json_encode($params));
         $result = $curl->response;
@@ -66,6 +70,9 @@ class BEasyPaymentUSDT {
 
     public function notify($params)
     {
+        if (!is_array($params) || empty($params['signature']) || empty($this->config['bepusdt_apitoken'])) {
+            return false;
+        }
         $sign = $params['signature'];
         unset($params['signature']);
         ksort($params);
@@ -75,6 +82,9 @@ class BEasyPaymentUSDT {
         if (!hash_equals($generateSignature, $sign)) {
             return('cannot pass verification');
         }
+        if (!isset($params['status'], $params['amount'], $params['order_id'], $params['trade_id']) || !is_numeric($params['amount'])) {
+            return false;
+        }
         $status = $params['status'];
         // 1: pending 2: success 3: expired
         if ($status != 2) {
@@ -83,6 +93,8 @@ class BEasyPaymentUSDT {
         return [
             'trade_no' => $params['order_id'],
             'callback_no' => $params['trade_id'],
+            'paid_amount_minor' => (int)round((float)$params['amount'] * 100),
+            'currency' => 'CNY',
             'custom_result' => 'ok'
         ];
     }

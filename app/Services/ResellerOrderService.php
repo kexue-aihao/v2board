@@ -174,7 +174,7 @@ class ResellerOrderService
                 'driver' => $payment->driver,
                 'parameter_keys' => array_keys($params),
                 'trade_status' => $params['trade_status'] ?? null,
-                'out_trade_no' => $params['out_trade_no'] ?? null,
+                'has_out_trade_no' => !empty($params['out_trade_no']),
             ]);
             abort(500, 'Payment verification failed');
         }

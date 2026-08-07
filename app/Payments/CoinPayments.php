@@ -40,11 +40,11 @@ class CoinPayments {
             'cmd' => '_pay_simple',
             'reset' => 1,
             'merchant' => $this->config['coinpayments_merchant_id'],
-            'item_name' => $order['trade_no'],
+            'item_name' => $order['display_trade_no'],
             'item_number' => $order['trade_no'],
             'want_shipping' => 0,
-            'currency' => $this->config['coinpayments_currency'],
-            'amountf' => sprintf('%.2f', $order['total_amount'] / 100),
+            'currency' => $order['gateway_currency'],
+            'amountf' => sprintf('%.2f', $order['gateway_amount_minor'] / 100),
             'success_url' => $successUrl,
             'cancel_url' => $order['return_url'],
             'ipn_url' => $order['notify_url']
@@ -58,21 +58,34 @@ class CoinPayments {
         ];
     }
 
+    public function prepare($order)
+    {
+        $currency = strtoupper(trim((string)($this->config['coinpayments_currency'] ?? '')));
+        if (!preg_match('/^[A-Z0-9]{3,12}$/', $currency)) {
+            throw new \RuntimeException('CoinPayments currency is invalid');
+        }
+        return [
+            'amount_minor' => (int)$order['total_amount'],
+            'currency' => $currency
+        ];
+    }
+
     public function notify($params)
     {
 
-        if (!isset($params['merchant']) || $params['merchant'] != trim($this->config['coinpayments_merchant_id'])) {
-            abort(500, 'No or incorrect Merchant ID passed');
+        if (empty($this->config['coinpayments_merchant_id']) || empty($this->config['coinpayments_ipn_secret'])
+            || !isset($params['merchant']) || !hash_equals(trim((string)$this->config['coinpayments_merchant_id']), (string)$params['merchant'])) {
+            return false;
         }
 
-        $headers = getallheaders();
+        $headers = function_exists('getallheaders') ? getallheaders() : [];
 
         ksort($params);
         reset($params);
         $request = stripslashes(http_build_query($params));
 
         $headerName = 'Hmac';
-        $signHeader = isset($headers[$headerName]) ? $headers[$headerName] : '';
+        $signHeader = request()->header($headerName) ?: (isset($headers[$headerName]) ? $headers[$headerName] : '');
 
         $hmac = hash_hmac("sha512", $request, trim($this->config['coinpayments_ipn_secret']));
 
@@ -81,16 +94,22 @@ class CoinPayments {
         // }
 
         if (!hash_equals($hmac, $signHeader)) {
-            abort(400, 'HMAC signature does not match');
+            return false;
         }
 
         // HMAC Signature verified at this point, load some variables.
-        $status = $params['status'];
+        if (!isset($params['status'], $params['item_number'], $params['txn_id'], $params['amount1'], $params['currency1'])
+            || !is_numeric($params['amount1'])) {
+            return false;
+        }
+        $status = (int)$params['status'];
         if ($status >= 100 || $status == 2) {
             // payment is complete or queued for nightly payout, success
             return [
                 'trade_no' => $params['item_number'],
                 'callback_no' => $params['txn_id'],
+                'paid_amount_minor' => (int)round((float)$params['amount1'] * 100),
+                'currency' => strtoupper((string)$params['currency1']),
                 'custom_result' => 'IPN OK'
             ];
         } else if ($status < 0) {

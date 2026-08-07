@@ -11,6 +11,7 @@ use App\Models\Order;
 use App\Models\Plan;
 use App\Models\User;
 use App\Services\OrderService;
+use App\Services\PaymentAttemptService;
 use App\Services\UserService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -105,8 +106,7 @@ class OrderController extends Controller
         }
         if ($order->status !== 0) abort(500, __('只能对待支付的订单进行操作'));
 
-        $orderService = new OrderService($order);
-        if (!$orderService->cancel()) {
+        if (!(new PaymentAttemptService())->cancelOrder($order, 'order cancelled by administrator')) {
             abort(500, __('更新失败'));
         }
         return response([

@@ -36,9 +36,12 @@ class EPay {
 
     public function pay($order)
     {
+        if (($order['gateway_currency'] ?? null) !== 'CNY') {
+            abort(500, 'EPay only supports CNY payments');
+        }
         $params = [
-            'money' => $order['total_amount'] / 100,
-            'name' => $order['trade_no'],
+            'money' => $order['gateway_amount_minor'] / 100,
+            'name' => $order['display_trade_no'],
             'notify_url' => $order['notify_url'],
             'return_url' => $order['return_url'],
             'out_trade_no' => $order['trade_no'],
@@ -57,7 +60,7 @@ class EPay {
 
     public function notify($params)
     {
-        if (!is_array($params) || empty($params['sign'])) {
+        if (!is_array($params) || empty($params['sign']) || empty($this->config['pid']) || empty($this->config['key'])) {
             return false;
         }
         $sign = strtolower(trim((string)$params['sign']));
@@ -67,18 +70,19 @@ class EPay {
         if (!in_array($tradeStatus, ['TRADE_SUCCESS', 'TRADE_FINISHED'], true)) {
             return false;
         }
-        if (empty($params['out_trade_no']) || empty($params['trade_no'])) return false;
+        if (empty($params['out_trade_no']) || empty($params['trade_no'])
+            || !hash_equals((string)$this->config['pid'], (string)($params['pid'] ?? ''))) return false;
 
         // #25：回传实付金额（分）供 handle() 校验欠款。EPay 异步通知回显下单时提交的 money（元），
         // 且 money 已在验签范围内（sign 覆盖全部非空参数），不可被篡改。
-        $paidAmount = (isset($params['money']) && is_numeric($params['money']))
-            ? (int) round(((float) $params['money']) * 100)
-            : null;
+        if (!isset($params['money']) || !is_numeric($params['money'])) return false;
+        $paidAmount = (int) round(((float) $params['money']) * 100);
 
         return [
             'trade_no' => $params['out_trade_no'],
             'callback_no' => $params['trade_no'],
-            'paid_amount' => $paidAmount
+            'paid_amount_minor' => $paidAmount,
+            'currency' => 'CNY'
         ];
     }
 

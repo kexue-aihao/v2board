@@ -51,6 +51,9 @@ class Epusdt
 
     public function pay($order)
     {
+        if (($order['gateway_currency'] ?? null) !== 'CNY') {
+            abort(500, 'Epusdt cannot securely quote a non-CNY payment');
+        }
         $network = strtolower(trim((string) ($this->config['epusdt_network'] ?? '')));
         $token = empty($this->config['epusdt_asset']) ? 'usdt' : strtolower(trim((string) $this->config['epusdt_asset']));
         $params = [
@@ -59,7 +62,7 @@ class Epusdt
             'currency' => empty($this->config['epusdt_currency']) ? 'cny' : strtolower(trim((string) $this->config['epusdt_currency'])),
             'token' => $token,
             'network' => $network === '' ? 'tron' : $network,
-            'amount' => round($order['total_amount'] / 100, 2),
+            'amount' => round($order['gateway_amount_minor'] / 100, 2),
             'notify_url' => $order['notify_url'],
             'redirect_url' => $order['return_url'],
         ];
@@ -68,7 +71,8 @@ class Epusdt
 
         $curl = new Curl();
         $curl->setUserAgent('epusdt');
-        $curl->setOpt(CURLOPT_SSL_VERIFYPEER, 0);
+        $curl->setOpt(CURLOPT_SSL_VERIFYPEER, true);
+        $curl->setOpt(CURLOPT_SSL_VERIFYHOST, 2);
         $curl->setOpt(CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
         $curl->post(
             rtrim((string) $this->config['epusdt_url'], '/') . '/payments/gmpay/v1/order/create-transaction',
@@ -97,7 +101,8 @@ class Epusdt
 
             $curl = new Curl();
             $curl->setUserAgent('epusdt');
-            $curl->setOpt(CURLOPT_SSL_VERIFYPEER, 0);
+            $curl->setOpt(CURLOPT_SSL_VERIFYPEER, true);
+            $curl->setOpt(CURLOPT_SSL_VERIFYHOST, 2);
             $curl->setOpt(CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
             $curl->post(
                 rtrim((string) $this->config['epusdt_url'], '/') . '/pay/switch-network',
@@ -144,13 +149,17 @@ class Epusdt
             return false;
         }
 
-        if (!isset($params['status']) || (int) $params['status'] !== 2) {
+        if (!isset($params['status'], $params['amount'], $params['currency'], $params['trade_id'], $params['order_id'], $params['pid'])
+            || !hash_equals(trim((string)($this->config['epusdt_pid'] ?? '')), (string)$params['pid'])
+            || !is_numeric($params['amount']) || (int) $params['status'] !== 2) {
             return 'failed';
         }
 
         return [
             'trade_no' => $params['order_id'],
             'callback_no' => $params['trade_id'],
+            'paid_amount_minor' => (int)round((float)$params['amount'] * 100),
+            'currency' => strtoupper((string)$params['currency']),
             'custom_result' => 'ok',
         ];
     }

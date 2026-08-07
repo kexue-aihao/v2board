@@ -34,6 +34,9 @@ class WechatPayNative {
 
     public function pay($order)
     {
+        if (($order['gateway_currency'] ?? null) !== 'CNY') {
+            abort(500, 'Wechat Pay only supports CNY payments');
+        }
         $gateway = Omnipay::create('WechatPay_Native');
         $gateway->setAppId($this->config['app_id']);
         $gateway->setMchId($this->config['mch_id']);
@@ -41,9 +44,9 @@ class WechatPayNative {
         $gateway->setNotifyUrl($order['notify_url']);
 
         $params = [
-            'body'              => $order['trade_no'],
+            'body'              => $order['display_trade_no'],
             'out_trade_no'      => $order['trade_no'],
-            'total_fee'         => $order['total_amount'],
+            'total_fee'         => $order['gateway_amount_minor'],
             'spbill_create_ip'  => '0.0.0.0',
             'fee_type'          => 'CNY'
         ];
@@ -75,10 +78,19 @@ class WechatPayNative {
         if (!$response->isPaid()) {
             return('FAIL');
         }
+        if (($data['appid'] ?? null) !== ($this->config['app_id'] ?? null)
+            || (string)($data['mch_id'] ?? '') !== (string)($this->config['mch_id'] ?? '')
+            || strtoupper((string)($data['fee_type'] ?? 'CNY')) !== 'CNY'
+            || !isset($data['total_fee'], $data['out_trade_no'], $data['transaction_id'])
+            || !ctype_digit((string)$data['total_fee']) || trim((string)$data['transaction_id']) === '') {
+            return false;
+        }
 
         return [
             'trade_no' => $data['out_trade_no'],
-            'callback_no' => $data['transaction_id']
+            'callback_no' => $data['transaction_id'],
+            'paid_amount_minor' => (int)$data['total_fee'],
+            'currency' => 'CNY'
         ];
     }
 }

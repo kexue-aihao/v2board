@@ -180,6 +180,7 @@ class ConfigController extends Controller
                 'arithmetic_verification_enable' => (int)config('v2board.arithmetic_verification_enable', 0),
                 'reseller_enable' => (int)config('v2board.reseller_enable', 0),
                 'reseller_allowed_payment_drivers' => array_values((array)config('v2board.reseller_allowed_payment_drivers', [])),
+                'payment_secure_driver_allowlist' => array_values((array)config('v2board.payment_secure_driver_allowlist', [])),
                 'oauth_google_enable' => (int)config('v2board.oauth_google_enable', 0),
                 'oauth_google_client_id' => config('v2board.oauth_google_client_id'),
                 'oauth_google_client_secret_configured' => (bool)config('v2board.oauth_google_client_secret'),
@@ -229,6 +230,12 @@ class ConfigController extends Controller
             if (array_key_exists($secret, $data) && trim((string)$data[$secret]) === '') {
                 unset($data[$secret]);
             }
+        }
+        if (array_key_exists('payment_secure_driver_allowlist', $data)) {
+            $data['payment_secure_driver_allowlist'] = array_values(array_intersect(
+                ['BTCPay', 'Coinbase'],
+                (array)$data['payment_secure_driver_allowlist']
+            ));
         }
         if ((int)($data['admin_2fa_force_enable'] ?? config('v2board.admin_2fa_force_enable', 0)) === 1) {
             $hasUnprotectedStaff = User::where(function ($query) {

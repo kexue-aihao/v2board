@@ -15,6 +15,7 @@ use App\Models\ResellerPlan;
 use App\Models\ResellerPlanTemplate;
 use App\Models\User;
 use App\Services\AuthService;
+use App\Services\PaymentAttemptService;
 use App\Services\ResellerOrderService;
 use App\Services\ResellerSharedSubscriptionService;
 use App\Utils\Helper;
@@ -69,7 +70,9 @@ class Controller extends BaseController
         $payments = ResellerPayment::where('reseller_id', $this->store($request)->id)
             ->whereIn('driver', (array)config('v2board.reseller_allowed_payment_drivers', []))
             ->where('enabled', 1)->orderBy('sort')->orderBy('id')->get();
-        return response(['data' => $payments->map(function (ResellerPayment $payment) {
+        return response(['data' => $payments->filter(function (ResellerPayment $payment) {
+            return PaymentAttemptService::isDriverAvailable((string)$payment->driver);
+        })->map(function (ResellerPayment $payment) {
             return ['id' => (int)$payment->id, 'name' => $payment->name, 'driver' => $payment->driver];
         })->values()]);
     }
@@ -186,7 +189,7 @@ class Controller extends BaseController
     {
         $mapping = $this->ownedMapping($request);
         if ((int)$mapping->platformOrder->status !== 0) abort(422, 'You can only cancel pending orders');
-        if (!(new \App\Services\OrderService($mapping->platformOrder))->cancel()) {
+        if (!(new \App\Services\PaymentAttemptService())->cancelOrder($mapping->platformOrder, 'reseller order cancelled by user')) {
             abort(500, 'Cancel failed');
         }
         return response(['data' => true]);

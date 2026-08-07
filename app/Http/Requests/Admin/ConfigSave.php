@@ -101,6 +101,7 @@ class ConfigSave extends FormRequest
         'arithmetic_verification_enable' => 'in:0,1',
         'reseller_enable' => 'in:0,1',
         'reseller_allowed_payment_drivers' => 'nullable|array',
+        'payment_secure_driver_allowlist' => 'nullable|array',
         'telegram_subscription_binding_enable' => 'in:0,1',
         'telegram_binding_check_interval' => 'integer|min:60|max:3600',
         'oauth_google_enable' => 'in:0,1',

@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Models\Subscription;
 use App\Services\CouponService;
 use App\Services\OrderService;
+use App\Services\PaymentAttemptService;
 use App\Services\PaymentService;
 use App\Services\PlanService;
 use App\Services\UserService;
@@ -248,20 +249,31 @@ class OrderController extends Controller
             ]);
         }
         $payment = Payment::find($method);
-        if (!$payment || $payment->enable !== 1) abort(500, __('Payment method is not available'));
-        $paymentService = new PaymentService($payment->payment, $payment->id);
-        $order->handling_amount = NULL;
-        if ($payment->handling_fee_fixed || $payment->handling_fee_percent) {
-            $order->handling_amount = round(($order->total_amount * ($payment->handling_fee_percent / 100)) + $payment->handling_fee_fixed);
+        if (!$payment || (int)$payment->enable !== 1 || !PaymentAttemptService::isDriverAvailable((string)$payment->payment)) {
+            abort(422, __('Payment method is not available'));
         }
-        $order->payment_id = $method;
-        if (!$order->save()) abort(500, __('Request failed, please try again later'));
-        $result = $paymentService->pay([
-            'trade_no' => $tradeNo,
-            'total_amount' => isset($order->handling_amount) ? ($order->total_amount + $order->handling_amount) : $order->total_amount,
+
+        $attemptService = new PaymentAttemptService();
+        $attempt = $attemptService->create($order, $payment);
+        $paymentService = new PaymentService($attempt->driver, $attempt->payment_id);
+        $checkout = [
+            'trade_no' => $attempt->attempt_no,
+            'display_trade_no' => $order->trade_no,
+            'total_amount' => (int)$attempt->order_amount_cents,
             'user_id' => $order->user_id,
             'stripe_token' => $request->input('token')
-        ]);
+        ];
+
+        try {
+            $quote = $paymentService->prepare($checkout);
+            $attempt = $attemptService->markPending($attempt, $quote);
+            $checkout['gateway_amount_minor'] = (int)$attempt->gateway_amount_minor;
+            $checkout['gateway_currency'] = (string)$attempt->gateway_currency;
+            $result = $paymentService->pay($checkout);
+        } catch (\Throwable $e) {
+            $attemptService->markFailed($attempt, 'payment gateway initialization failed');
+            abort(500, __('Payment gateway request failed'));
+        }
         return response([
             'type' => $result['type'],
             'data' => $result['data']
@@ -294,7 +306,11 @@ class OrderController extends Controller
         ])
             ->where('enable', 1)
             ->orderBy('sort', 'ASC')
-            ->get();
+            ->get()
+            ->filter(function (Payment $payment) {
+                return PaymentAttemptService::isDriverAvailable((string)$payment->payment);
+            })
+            ->values();
 
         return response([
             'data' => $methods
@@ -315,8 +331,7 @@ class OrderController extends Controller
         if ($order->status !== 0) {
             abort(500, __('You can only cancel pending orders'));
         }
-        $orderService = new OrderService($order);
-        if (!$orderService->cancel()) {
+        if (!(new PaymentAttemptService())->cancelOrder($order)) {
             abort(500, __('Cancel failed'));
         }
         return response([

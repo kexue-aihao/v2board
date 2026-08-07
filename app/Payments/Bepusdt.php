@@ -55,6 +55,9 @@ class Bepusdt
 
     public function pay($order)
     {
+        if (($order['gateway_currency'] ?? null) !== 'CNY') {
+            abort(500, 'BEpusdt cannot securely quote a non-CNY payment');
+        }
         $tradeType = strtolower(trim((string) ($this->config['bepusdt_trade_type'] ?? '')));
 
         $params = [
@@ -62,8 +65,8 @@ class Bepusdt
             'notify_url' => $order['notify_url'],
             'redirect_url' => $order['return_url'],
             // v2board 的 total_amount 存的是分，BEpusdt 收的是法币元。
-            'amount' => round($order['total_amount'] / 100, 2),
-            'name' => (string) $order['trade_no'],
+            'amount' => round($order['gateway_amount_minor'] / 100, 2),
+            'name' => (string) $order['display_trade_no'],
         ];
 
         $fiat = strtoupper(trim((string) ($this->config['bepusdt_fiat'] ?? '')));
@@ -151,7 +154,8 @@ class Bepusdt
         // status===0 的订单必定调 paid()，没有「确认收到但不入账」这一档，所以非成功状态只能
         // 回 false（→ 500）。BEpusdt 对未支付订单每分钟推一次 status=1，但文档明确 status=1/3
         // 不重试，因此只是日志噪音，不会形成重试风暴。
-        if (!isset($params['status']) || (int) $params['status'] !== 2) {
+        if (!isset($params['status'], $params['amount'], $params['order_id'])
+            || !is_numeric($params['amount']) || (int) $params['status'] !== 2) {
             return false;
         }
 
@@ -161,6 +165,8 @@ class Bepusdt
         return [
             'trade_no' => $params['order_id'],
             'callback_no' => $blockTxId !== '' ? $blockTxId : (string) ($params['trade_id'] ?? ''),
+            'paid_amount_minor' => (int)round((float)$params['amount'] * 100),
+            'currency' => strtoupper(trim((string)($this->config['bepusdt_fiat'] ?? '')) ?: 'CNY'),
         ];
     }
 
