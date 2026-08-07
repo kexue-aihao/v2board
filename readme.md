@@ -352,7 +352,7 @@ period 支持值：
 | POST | /user/resetPassword | id | 生成新随机密码并一次性返回明文，同时清会话 |
 | POST | /user/delUser | id | 删除用户及其订单/邀请/工单与审计数据 |
 | POST | /user/allDel | filter | 按筛选批量删除 |
-| POST | /user/setInviteUser | 用户关系参数 | 设置邀请关系（注：当前源码未实现 setInviteUser 方法，路由虽已注册但调用会报错，待修复） |
+| POST | /user/setInviteUser | id；可选 invite_user_id 或 invite_user_email | 设置推荐关系；两个可选参数均未传时清空推荐人。推荐人必须存在且不能是用户本人，成功返回 `data: true` |
 | POST | /user/subscription/set-primary | user_id、subscription_id | 设置指定用户主订阅 |
 | POST | /user/subscription/revoke | user_id、subscription_id | 撤销指定用户订阅 |
 | GET | /user/subscribe-requests | user_id 等筛选参数 | 历史 UA、IP、归属地与节点连接记录 |
@@ -423,7 +423,7 @@ IP 归属字段：
 | 知识库 | /knowledge/fetch、getCategory、save、show、drop、sort |
 | 系统 | /system/getSystemStatus、getQueueStats、getQueueWorkload、getQueueMasters、getSystemLog |
 | 主题 | /theme/getThemes、saveThemeConfig、getThemeConfig |
-| 风控规则 | /risk/rule/fetch、save、show、sort、drop、recompute |
+| 风控规则 | /risk/rule/fetch、save、show、sort、drop、recompute、manual-evaluate |
 | 订阅溯源 | /risk/trace/fetch、history、token/lookup、token/reveal |
 | 多账号同 IP | /risk/shared-ip/fetch、detail |
 | 倒卖商审批 | /reseller/summary、accounts、stores、review-logs、accounts/review、stores/review、accounts/reset-password |
@@ -431,7 +431,9 @@ IP 归属字段：
 
 协议节点的 save、update、drop、copy 均为 POST 请求。
 
-风控模块中：/risk/rule 的 save、show、sort、drop、recompute 为 POST；/risk/trace/fetch、/risk/trace/history 与 /risk/shared-ip/fetch、detail 为只读 GET；/risk/trace/token/lookup、/risk/trace/token/reveal 刻意使用 POST（而非 GET），以避免订阅 token 被拼进 query string 落入 nginx 访问日志、浏览器历史与 Referer。多账号同 IP 面板只读，数据来自 audit:ip-link 离线聚合出的 v2_ip_account_link 累积表。
+风控模块中：/risk/rule 的 save、show、sort、drop、recompute、manual-evaluate 为 POST；/risk/trace/fetch、/risk/trace/history 与 /risk/shared-ip/fetch、detail 为只读 GET；/risk/trace/token/lookup、/risk/trace/token/reveal 刻意使用 POST（而非 GET），以避免订阅 token 被拼进 query string 落入 nginx 访问日志、浏览器历史与 Referer。多账号同 IP 面板只读，数据来自 audit:ip-link 离线聚合出的 v2_ip_account_link 累积表。
+
+`POST /risk/rule/manual-evaluate` 为管理员发起的全站自定义时间窗订阅风险评估。首个请求传 `restart=1` 和整数 `hours`（1-2208，即 1 小时至 92 天）；响应返回 `run_id`、进度计数和时间窗。未完成时以返回的 `run_id` 发起后续请求推进批处理；完成后返回最多 200 条可疑订阅明细。评估按启动时的规则快照执行，并将结果写入手动风险结果表，供管理端用户列表的风险列和筛选使用。
 
 倒卖商模块另注册了 /reseller/fetch、/reseller/update，以及旧版单数别名 /reseller/template/fetch、/reseller/template/save（与 templates、templates/save 等价，为兼容旧版前端保留）。
 
@@ -488,7 +490,7 @@ IP 归属字段：
 
 | 方法 | 接口路径 | 参数 | 返回 |
 | --- | --- | --- | --- |
-| GET | /api/v2/server/config | token、node_id | 节点监听、协议、TLS、路由和轮询配置 |
+| ANY（客户端应使用 GET） | /api/v2/server/config | token、node_id | 节点监听、协议、TLS、路由和轮询配置；当前路由会将所有 HTTP 方法分发至同一配置处理器 |
 
 token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-Match，配置未变化时直接返回 304（response('',304)，不走 abort）。
 
@@ -784,8 +786,12 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 | GET | /payment-drivers | 无 | 已安装与已允许支付驱动 |
 | POST | /payment-drivers | allowed[] | 保存支付驱动白名单 |
 | GET | /orders | page、pageSize、status、keyword | 倒卖商订单审计，不返回支付密钥 |
+| GET | /fetch | 无 | 旧版管理员前端兼容的倒卖商账号列表（固定每页 50 条） |
+| POST | /update | id、status；可选 store_slug、store_name、store_description | 旧版兼容的账号与店铺统一更新；会撤销该倒卖商全部会话，存在待回调订单时不可修改 store_slug |
+| GET | /template/fetch | 无 | `/templates` 的旧版单数别名 |
+| POST | /template/save | id、base_plan_id、enabled、sort | `/templates/save` 的旧版单数别名 |
 
-兼容旧版管理员前端的别名仍保留：`/reseller/fetch`、`/reseller/update`、`/reseller/template/fetch`、`/reseller/template/save`。
+以上四个兼容接口仅为支持旧版管理员前端保留；新接入应使用 `/accounts`、`/stores`、`/templates` 等现行接口。
 
 ### 14.4 店铺前台接口
 
