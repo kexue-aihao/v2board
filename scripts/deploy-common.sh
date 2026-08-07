@@ -9,6 +9,24 @@ deploy_setup() {
     fi
     PHP_BIN="${PHP_BIN:-php}"
 
+    # PATH 中的 php 往往就是 aaPanel 某个版本的二进制，但仅保留命令名时无法
+    # 从 /www/server/php/<version>/bin/php 推导同版本的完整 php.ini。将命令名
+    # 解析为实际路径；显式传入绝对路径或 PHP_INI 的部署方式保持不变。
+    case "$PHP_BIN" in
+        /*) ;;
+        *)
+            if command -v "$PHP_BIN" >/dev/null 2>&1; then
+                PHP_BIN="$(command -v "$PHP_BIN")"
+            fi
+            ;;
+    esac
+    if [ -x "$PHP_BIN" ] && command -v readlink >/dev/null 2>&1; then
+        RESOLVED_PHP_BIN="$(readlink -f "$PHP_BIN" 2>/dev/null || true)"
+        if [ -n "$RESOLVED_PHP_BIN" ]; then
+            PHP_BIN="$RESOLVED_PHP_BIN"
+        fi
+    fi
+
     if [ -z "${PHP_INI:-}" ] && [[ "$PHP_BIN" == /www/server/php/*/bin/php ]]; then
         AAPANEL_PHP_DIR="${PHP_BIN%/bin/php}"
         if [ -f "$AAPANEL_PHP_DIR/etc/php.ini" ]; then
