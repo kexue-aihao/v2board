@@ -12,6 +12,7 @@ use App\Models\Plan;
 use App\Models\User;
 use App\Services\AuthService;
 use App\Services\ArithmeticVerificationService;
+use App\Services\TelegramLoginLinkService;
 use App\Services\TwoFactorService;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
@@ -326,7 +327,19 @@ class AuthController extends Controller
         }
 
         if ($request->input('verify')) {
-            $key =  CacheKey::get('TEMP_TOKEN', $request->input('verify'));
+            $verify = $request->input('verify');
+            if (!is_string($verify)) {
+                abort(500, __('Token error'));
+            }
+            if (TelegramLoginLinkService::isLoginToken($verify)) {
+                $user = (new TelegramLoginLinkService())->consume($verify);
+                if (!$user) {
+                    abort(500, __('Token error'));
+                }
+                return $this->quickLoginResponse($user, $request);
+            }
+
+            $key =  CacheKey::get('TEMP_TOKEN', $verify);
             $userId = Cache::get($key);
             if (!$userId) {
                 abort(500, __('Token error'));
@@ -339,14 +352,7 @@ class AuthController extends Controller
                 abort(500, __('Your account has been suspended'));
             }
             Cache::forget($key);
-            $authService = new AuthService($user);
-            $twoFactor = (new TwoFactorService())->issueLoginResult($user, $request);
-            if ($twoFactor) {
-                return response(['data' => $twoFactor]);
-            }
-            return response([
-                'data' => $authService->generateAuthData($request)
-            ]);
+            return $this->quickLoginResponse($user, $request);
         }
     }
 
@@ -358,17 +364,30 @@ class AuthController extends Controller
         $user = AuthService::decryptAuthData($authorization);
         if (!$user) abort(403, '未登录或登陆已过期');
 
-        $code = Helper::guid();
-        $key = CacheKey::get('TEMP_TOKEN', $code);
-        Cache::put($key, $user['id'], 60);
-        $redirect = '/#/login?verify=' . $code . '&redirect=' . ($request->input('redirect') ? $request->input('redirect') : 'dashboard');
-        if (config('v2board.app_url')) {
-            $url = config('v2board.app_url') . $redirect;
-        } else {
-            $url = url($redirect);
+        $model = User::find($user['id']);
+        if (!$model || $model->banned) {
+            abort(403, __('Your account has been suspended'));
         }
+
+        $url = (new TelegramLoginLinkService())->issue(
+            $model,
+            null,
+            $request->input('redirect') ? $request->input('redirect') : 'dashboard'
+        );
         return response([
             'data' => $url
+        ]);
+    }
+
+    private function quickLoginResponse(User $user, Request $request)
+    {
+        $authService = new AuthService($user);
+        $twoFactor = (new TwoFactorService())->issueLoginResult($user, $request);
+        if ($twoFactor) {
+            return response(['data' => $twoFactor]);
+        }
+        return response([
+            'data' => $authService->generateAuthData($request)
         ]);
     }
 

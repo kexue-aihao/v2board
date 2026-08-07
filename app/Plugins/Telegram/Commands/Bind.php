@@ -69,6 +69,9 @@ class Bind extends Telegram {
         if ($user->telegram_id) {
             abort(500, '该账号已经绑定了Telegram账号');
         }
+        if (User::where('telegram_id', $message->chat_id)->exists()) {
+            abort(500, '该 Telegram 账号已经绑定了其他网站账号');
+        }
         $user->telegram_id = $message->chat_id;
         if (!$user->save()) {
             abort(500, '设置失败');

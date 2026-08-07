@@ -102,7 +102,14 @@
 | POST | /comm/arithmetic/verify | 无 | challenge_id、answer | 返回 correct、verified；关闭时直接返回 `{correct:true,verified:true}`；不返回正确答案 |
 | GET | /plan/fetch | 无 | 无 | Signature 首页套餐列表（show=1，按 sort 升序） |
 | POST | /telegram/webhook | access_token | access_token（=md5(telegram_bot_token)）及 Telegram 回调参数 | Telegram Webhook；仅接受 POST；access_token 校验失败返回 401 |
+
 | POST/GET | /payment/notify/{method}/{uuid} | 无 | 支付回调参数 | 支付平台异步通知。仅当回调验签、终态、支付尝试号、支付方式、网关流水、精确金额和币种全部匹配时才开通；缺少支付尝试的历史回调一律拒绝 |
+
+### Telegram 免密码登录
+
+已通过机器人 `/bind` 绑定网站账号的用户可在私聊发送 `/login`。机器人会发送一条仅能使用一次、60 秒有效的 HTTPS 登录链接；Telegram 内置浏览器和外部浏览器均可打开。链接不会绕过已启用的 2FA，且不得转发给他人。
+
+部署后执行 `php artisan v2board:update` 创建登录链接表。若 Telegram 命令菜单未显示 `/login`，在管理端重新设置一次 Telegram Webhook 即可同步命令列表。
 
 ### 4.3 公共配置扩展字段
 

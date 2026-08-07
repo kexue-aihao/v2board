@@ -59,6 +59,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('telegram:verify-bindings')
             ->cron('*/' . $telegramBindingMinutes . ' * * * *')
             ->withoutOverlapping();
+        $schedule->command('telegram:prune-login-links')->hourly()->withoutOverlapping();
     }
 
     /**

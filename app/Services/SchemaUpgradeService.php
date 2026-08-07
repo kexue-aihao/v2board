@@ -25,7 +25,8 @@ class SchemaUpgradeService
         'telegram_binding_schema' => 'telegram_binding_schema_v1',
         'ip_account_link_schema' => 'ip_account_link_schema_v1',
         'balance_log_schema' => 'balance_log_schema_v1',
-        'payment_attempt_schema' => 'payment_attempt_schema_v1'
+        'payment_attempt_schema' => 'payment_attempt_schema_v1',
+        'telegram_login_link_schema' => 'telegram_login_link_schema_v1'
     ];
 
     public function run(): array
@@ -115,6 +116,9 @@ class SchemaUpgradeService
                 return;
             case 'payment_attempt_schema':
                 $this->applyPaymentAttemptSchema();
+                return;
+            case 'telegram_login_link_schema':
+                $this->applyTelegramLoginLinkSchema();
                 return;
         }
 
@@ -1254,6 +1258,39 @@ class SchemaUpgradeService
                 ->whereIn('payment', ['BTCPay', 'Coinbase', 'MGate'])
                 ->update(['enable' => 0, 'updated_at' => time()]);
         }
+    }
+
+    private function applyTelegramLoginLinkSchema(): void
+    {
+        $this->requireTable('v2_user');
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_telegram_login_link` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `telegram_chat_id` bigint(20) DEFAULT NULL,
+            `token_hash` char(64) NOT NULL,
+            `expires_at` int(11) NOT NULL,
+            `consumed_at` int(11) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'telegram_chat_id' => 'bigint(20) DEFAULT NULL',
+            'token_hash' => 'char(64) NOT NULL',
+            'expires_at' => 'int(11) NOT NULL',
+            'consumed_at' => 'int(11) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_telegram_login_link', $column, $definition);
+        }
+
+        $this->ensureIndex('v2_telegram_login_link', 'uniq_user', ['user_id'], true);
+        $this->ensureIndex('v2_telegram_login_link', 'uniq_telegram_chat', ['telegram_chat_id'], true);
+        $this->ensureIndex('v2_telegram_login_link', 'uniq_token_hash', ['token_hash'], true);
+        $this->ensureIndex('v2_telegram_login_link', 'expires_at', ['expires_at']);
     }
 
     private function requireTable(string $table): void

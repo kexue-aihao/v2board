@@ -17,6 +17,7 @@ use App\Services\OrderService;
 use App\Services\PasswordPolicyService;
 use App\Services\UserService;
 use App\Services\SubscriptionService;
+use App\Services\TelegramLoginLinkService;
 use App\Services\ResellerSharedSubscriptionService;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
@@ -624,15 +625,11 @@ class UserController extends Controller
             abort(500, __('The user does not exist'));
         }
 
-        $code = Helper::guid();
-        $key = CacheKey::get('TEMP_TOKEN', $code);
-        Cache::put($key, $user->id, 60);
-        $redirect = '/#/login?verify=' . $code . '&redirect=' . ($request->input('redirect') ? $request->input('redirect') : 'dashboard');
-        if (config('v2board.app_url')) {
-            $url = config('v2board.app_url') . $redirect;
-        } else {
-            $url = url($redirect);
-        }
+        $url = (new TelegramLoginLinkService())->issue(
+            $user,
+            null,
+            $request->input('redirect') ? $request->input('redirect') : 'dashboard'
+        );
         return response([
             'data' => $url
         ]);

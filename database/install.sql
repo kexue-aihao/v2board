@@ -1110,6 +1110,22 @@ CREATE TABLE `v2_telegram_subscription_binding` (
     KEY `status_checked` (`status`,`last_checked_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE `v2_telegram_login_link` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NOT NULL,
+    `telegram_chat_id` bigint(20) DEFAULT NULL,
+    `token_hash` char(64) NOT NULL,
+    `expires_at` int(11) NOT NULL,
+    `consumed_at` int(11) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uniq_user` (`user_id`),
+    UNIQUE KEY `uniq_telegram_chat` (`telegram_chat_id`),
+    UNIQUE KEY `uniq_token_hash` (`token_hash`),
+    KEY `expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE `v2_user_oauth_identity` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
     `user_id` int(11) NOT NULL,
