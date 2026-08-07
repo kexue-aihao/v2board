@@ -692,6 +692,74 @@ init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOS
 | 资金变更 | 余额只经 UserService::addBalance 原语：事务内加锁读用户行、拒绝透支、写 v2_balance_log 流水审计；传 unique_key 时同键幂等，保证并发/重试下同一笔只入账一次 |
 | 支付回调 | 校验支付驱动一致性与实付金额：驱动回传 paid_amount 时欠款（超四舍五入误差）拒绝开通并告警；已取消订单再收到真实回调记日志并通知管理员，不再静默吞掉 |
 
+### 12.1 Cloudflare 免费版防护 CC 与刷注册
+
+Cloudflare 免费版能够承担基础 DDoS 缓解、缓存和浏览器挑战，但它不是业务限流的替代品。建议按“源站不暴露、边缘先过滤、应用再校验”的顺序部署；先在低峰期用自己的浏览器、客户端、支付驱动和 Telegram Bot 完整验收，再提高挑战或限速强度。
+
+#### 前置条件：禁止绕过 Cloudflare
+
+1. 将主站域名的 A/AAAA/CNAME 记录设为橙色云朵（`Proxied`），只让 Cloudflare 回源 HTTP(S)；API 与前台同域时一并受保护。
+2. 源站防火墙仅放行 Cloudflare 的 [官方回源 IP 段](https://www.cloudflare.com/ips/) 到 80/443；Webman 的 6600 端口只监听本地 nginx，不开放公网。SSH、数据库、Redis 和面板端口不得经公网暴露。
+3. Cloudflare SSL/TLS 使用 `Full (strict)`，源站安装有效证书或 Cloudflare Origin Certificate；不要使用 `Flexible`，否则 Cloudflare 到源站仍是明文。
+4. 将 Cloudflare 的 IPv4/IPv6 回源 CIDR 加入 `.env` 的 `TRUSTED_PROXIES`，并保留 `127.0.0.1,::1`。例如：`TRUSTED_PROXIES=127.0.0.1,::1,<Cloudflare CIDR 列表>`。变更后执行 `php artisan config:clear` 并重启 Webman。不要设为 `*`，否则直连源站的请求可以伪造 `X-Forwarded-For`。
+
+第 4 步不能省略：当前注册次数、邮件验证码限流、算术题绑定和订阅审计均依赖 `$request->ip()`。未信任 Cloudflare 回源段时，应用看到的是 Cloudflare 边缘 IP，所有访客可能共用同一个限流桶，审计 IP 也会失真。
+
+#### 免费版控制项
+
+在 Cloudflare 控制台启用以下能力；免费套餐的规则数量和 Rate Limiting 可用配额可能调整，以控制台当前显示为准。
+
+| 位置 | 建议 | 目的与注意事项 |
+| --- | --- | --- |
+| Security / Bots | 开启 Bot Fight Mode，并观察 Security Events | 降低通用爬虫和简单 CC。它可能影响非浏览器调用，先验证支付、Telegram、订阅和节点通信；出现误拦时优先收窄自定义规则或关闭此开关，不要让关键回调依赖浏览器挑战。 |
+| Security / WAF / Custom rules | 为注册和发信接口创建 `Managed Challenge` 规则 | 对访问注册页的正常浏览器透明度较高，同时提高脚本刷接口成本。先用 Challenge 观察事件，确认无误后才对明显恶意特征使用 Block。 |
+| Security / Settings | 正常时期保持默认或 Medium 安全级别；攻击期间临时启用 Under Attack Mode | Under Attack Mode 会挑战几乎所有访问者，可能影响客户端和第三方回调，只作为短时间止血措施。恢复后关闭并保留精确的接口规则。 |
+| Caching | 只缓存静态资源和主题产物 | 不缓存 `/api/*`、订阅地址、支付回调或带鉴权的响应；缓存动态 API 会导致登录、订单或订阅数据串扰。 |
+
+#### 注册接口挑战规则
+
+在 **Security > WAF > Custom rules** 创建一条规则，动作为 **Managed Challenge**。以下表达式覆盖主站和倒卖商店铺的注册、邮箱验证码与找回密码入口：
+
+```
+http.request.method eq "POST" and (
+  http.request.uri.path eq "/api/v1/passport/auth/register" or
+  http.request.uri.path eq "/api/v1/passport/comm/sendEmailVerify" or
+  http.request.uri.path eq "/api/v1/passport/auth/forget" or
+  (
+    starts_with(http.request.uri.path, "/api/v1/store/") and
+    ends_with(http.request.uri.path, "/passport/register")
+  )
+)
+```
+
+不要把整段 `/api/v1/*` 统一设为 Challenge，也不要把下列机器接口纳入规则：
+
+| 必须豁免的路径 | 原因 |
+| --- | --- |
+| `/api/v1/guest/payment/notify/*`、`/api/v1/store/*/payment/notify/*` | 支付平台无法完成浏览器 JavaScript 挑战；业务层已做驱动验签和金额校验。 |
+| `/api/v1/guest/telegram/webhook` | Telegram 回调不是浏览器请求。 |
+| `/api/v1/client/subscribe`、配置的自定义订阅路径 | 订阅客户端无法完成挑战。 |
+| `/api/v1/server/*`、`/api/v2/server/*` | 节点程序通过 `server_token` 调用，不能要求浏览器挑战。 |
+
+若控制台提供 **Rate Limiting rules**，在上述 Challenge 之外按 IP 增加限速。可从以下保守阈值开始，并根据 Security Events、真实注册转化率和邮件队列负载调整：
+
+| 目标 | 起始阈值 | 超限动作 |
+| --- | --- | --- |
+| `/api/v1/passport/auth/register` 与店铺 `/passport/register` | 每 IP 10 分钟 5 次 | Managed Challenge；持续命中再短时 Block |
+| `/api/v1/passport/comm/sendEmailVerify` | 每 IP 1 分钟 3 次、每小时 10 次 | Block 或 Managed Challenge |
+| `/api/v1/passport/auth/login` | 每 IP 1 分钟 20 次 | Managed Challenge；不要按邮箱直接在边缘封禁，以免被恶意者利用来锁定他人 |
+
+边缘 IP 限速挡不住分布式代理池，因此必须同时打开现有服务端能力：管理端配置中启用 `register_limit_by_ip_enable`，设置合理的 `register_limit_count` 与 `register_limit_expire`；启用 `email_verify`、`recaptcha_enable` 和 `arithmetic_verification_enable`；必要时启用 `invite_force` 或邮箱后缀白名单。当前后端对 `/passport/comm/sendEmailVerify` 已限制为每 IP 每分钟 3 次，算术题按 IP 绑定、5 分钟过期且最多 5 次作答；Cloudflare 规则应作为其前置防线。
+
+Cloudflare Turnstile 本身可免费使用，但**不能**直接填入本项目的 `recaptcha_data`：当前服务端使用 Google reCAPTCHA SDK 校验该字段。若要改用 Turnstile，必须同时修改前端提交逻辑与后端 Siteverify 校验；在未完成该改造前，继续使用已配置的 reCAPTCHA 或内置算术验证。
+
+#### 监控与应急
+
+1. 每次调整后查看 Cloudflare Security Events，确认挑战命中的是注册攻击而非支付、节点、订阅或 Telegram 回调。
+2. CC 发生时先临时启用 Under Attack Mode，并将注册/发信规则从 Challenge 提升为短时 Block；同时检查源站 CPU、带宽、nginx 日志、Redis 与 Horizon 队列。
+3. 攻击结束后关闭 Under Attack Mode，保留精确接口规则；不要长期封禁 Cloudflare IP，也不要根据单一 `User-Agent` 作为唯一拦截条件。
+4. 若源站 IP 已泄露，先在防火墙收紧为 Cloudflare IP 段，再更换源站 IP 或通过新的受控入口回源；仅修改 DNS 不能阻止攻击者直连旧 IP。
+
 ## 十三、代码来源
 
 | 类型 | 文件 |
