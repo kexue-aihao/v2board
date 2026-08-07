@@ -578,6 +578,12 @@ AdapterMan 必须在 aaPanel **Disabled functions** 中禁用下列函数，以�
 
 `init.sh` 与 `update.sh` 会在下载依赖或停止 Webman 前检查这两组冲突，并报告具体函数及影响功能；脚本不会自动修改 aaPanel。若选择继续禁用其中任一 Workerman 所需函数，就不能继续使用本项目的 AdapterMan/Webman HTTP 运行方式，只能改用独立 aaPanel PHP 版本或替换 HTTP 运行时。
 
+首次安装或升级前，可先运行无副作用预检；它只读取 PHP、aaPanel vhost 与 Supervisor 配置，不会下载依赖、写入数据库、停止服务或修改 cron：
+
+    PHP_BIN=/www/server/php/85/bin/php DEPLOY_CHECK_ONLY=1 bash init.sh
+
+已安装站点也可将最后的 `init.sh` 换成 `update.sh`。
+
 Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorctl 停启，不再自行 `webman.php start -d`：
 
 - supervisorctl 二进制按 PATH、`/www/server/panel/pyenv/bin`、`/usr/local/bin`、`/usr/bin` 顺序查找，可用 `SUPERVISORCTL` 覆盖。

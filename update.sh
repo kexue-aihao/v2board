@@ -30,6 +30,11 @@ deploy_setup
 deploy_check_runtime
 deploy_check_webman_runtime
 
+if [ "${DEPLOY_CHECK_ONLY:-0}" = "1" ]; then
+    echo "Deployment preflight passed. No files, database, services, or cron entries were changed."
+    exit 0
+fi
+
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-$(git symbolic-ref --quiet --short HEAD || true)}"
 [ -n "$DEPLOY_BRANCH" ] || {
     echo "ERROR: Detached HEAD. Set DEPLOY_BRANCH explicitly." >&2
