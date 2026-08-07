@@ -12,11 +12,11 @@ command -v git >/dev/null 2>&1 || {
     exit 1
 }
 deploy_check_runtime
+deploy_check_webman_runtime
 deploy_download_composer
 deploy_install_composer
 deploy_patch_adapterman
 deploy_check_mmdb
-deploy_check_webman_runtime
 
 deploy_php artisan v2board:install
 deploy_php artisan optimize:clear
@@ -33,8 +33,8 @@ echo
 echo "Remaining manual steps:"
 echo "  1. Point the web server at ${ROOT_DIR}/public and reverse-proxy to http://127.0.0.1:$(deploy_webman_port)."
 echo "  2. Start Webman, either under supervisor (recommended) or directly:"
-echo "       ${PHP_BIN} -c ${WEBMAN_PHP_INI} webman.php start -d"
-echo "     Supervisor's command= must use the same absolute PHP binary and ${WEBMAN_PHP_INI}."
+echo "       ${PHP_BIN} -c ${PHP_INI} webman.php start -d"
+echo "     Supervisor's command= must use the same absolute PHP binary and ${PHP_INI}."
 echo "  3. Start a queue worker: ${PHP_BIN} -c ${PHP_INI} artisan horizon   (also usually under supervisor)."
 echo "  4. Confirm the scheduler: wait two minutes, then check 系统状态 in the admin panel,"
 echo "     or run ${PHP_BIN} -c ${PHP_INI} artisan schedule:run by hand and watch for output."

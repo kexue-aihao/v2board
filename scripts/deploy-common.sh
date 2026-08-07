@@ -4,14 +4,9 @@ deploy_setup() {
     ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
     cd "$ROOT_DIR"
 
-    if [ -z "${PHP_BIN:-}" ] && [ -x /www/server/php/85/bin/php ]; then
-        PHP_BIN=/www/server/php/85/bin/php
-    fi
     PHP_BIN="${PHP_BIN:-php}"
 
-    # PATH 中的 php 往往就是 aaPanel 某个版本的二进制，但仅保留命令名时无法
-    # 从 /www/server/php/<version>/bin/php 推导同版本的完整 php.ini。将命令名
-    # 解析为实际路径；显式传入绝对路径或 PHP_INI 的部署方式保持不变。
+    # PATH 中的 php 可能只是命令名，先解析为实际路径以识别其 aaPanel 配置。
     case "$PHP_BIN" in
         /*) ;;
         *)
@@ -27,34 +22,31 @@ deploy_setup() {
         fi
     fi
 
-    if [ -z "${PHP_INI:-}" ] && [[ "$PHP_BIN" == /www/server/php/*/bin/php ]]; then
-        AAPANEL_PHP_DIR="${PHP_BIN%/bin/php}"
-        if [ -f "$AAPANEL_PHP_DIR/etc/php.ini" ]; then
-            PHP_INI="$AAPANEL_PHP_DIR/etc/php.ini"
-        elif [ -f "$AAPANEL_PHP_DIR/etc/php-cli.ini" ]; then
-            PHP_INI="$AAPANEL_PHP_DIR/etc/php-cli.ini"
-        fi
-    fi
-    PHP_INI="${PHP_INI:-cli-php.ini}"
-    PHP_CMD=("$PHP_BIN" -c "$PHP_INI")
+    case "$PHP_BIN" in
+        /www/server/php/*/bin/php)
+            AAPANEL_PHP_DIR="${PHP_BIN%/bin/php}"
+            AAPANEL_PHP_INI="$AAPANEL_PHP_DIR/etc/php.ini"
+            ;;
+        *)
+            echo "ERROR: aaPanel PHP binary is required: $PHP_BIN" >&2
+            echo "Set PHP_BIN to /www/server/php/<version>/bin/php before running this script." >&2
+            return 1
+            ;;
+    esac
 
-    # AdapterMan 要求 php.ini 通过 disable_functions 屏蔽 header/session 等原生函数，
-    # 否则拒绝启动。aaPanel 的 php.ini 由 PHP-FPM 共用，加上这些禁用会破坏同版本下的
-    # 其它站点，所以 Webman 固定使用仓库自带的 cli-php.ini，而 artisan 与 composer
-    # 继续使用上面探测到的 PHP_INI（它才带齐全部扩展）。
-    WEBMAN_PHP_INI="${WEBMAN_PHP_INI:-cli-php.ini}"
-    WEBMAN_PHP_CMD=("$PHP_BIN" -c "$WEBMAN_PHP_INI")
+    if [ -n "${PHP_INI:-}" ] && [ "$PHP_INI" != "$AAPANEL_PHP_INI" ]; then
+        echo "ERROR: PHP_INI must be the aaPanel configuration: $AAPANEL_PHP_INI" >&2
+        return 1
+    fi
+    PHP_INI="$AAPANEL_PHP_INI"
+    PHP_CMD=("$PHP_BIN" -c "$PHP_INI")
 
     if [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; then
         export COMPOSER_ALLOW_SUPERUSER=1
     fi
 
     if [ ! -f "$PHP_INI" ]; then
-        echo "ERROR: PHP CLI configuration not found: $ROOT_DIR/$PHP_INI" >&2
-        return 1
-    fi
-    if [ ! -f "$WEBMAN_PHP_INI" ]; then
-        echo "ERROR: Webman PHP configuration not found: $ROOT_DIR/$WEBMAN_PHP_INI" >&2
+        echo "ERROR: aaPanel PHP configuration not found: $PHP_INI" >&2
         return 1
     fi
     if ! command -v "$PHP_BIN" >/dev/null 2>&1 && [ ! -x "$PHP_BIN" ]; then
@@ -65,11 +57,6 @@ deploy_setup() {
 
 deploy_php() {
     "${PHP_CMD[@]}" "$@"
-}
-
-# Webman/AdapterMan 专用：使用 WEBMAN_PHP_INI 而不是 artisan 那套 PHP_INI。
-deploy_webman_php() {
-    "${WEBMAN_PHP_CMD[@]}" "$@"
 }
 
 deploy_check_runtime() {
@@ -87,8 +74,8 @@ deploy_check_runtime() {
     fi
 
     version_id="$(deploy_php -r 'echo PHP_VERSION_ID;' 2>&1)" || return 1
-    if [ "$version_id" -lt 70300 ]; then
-        echo "ERROR: PHP 7.3 or newer is required." >&2
+    if [ "$version_id" -lt 80000 ]; then
+        echo "ERROR: PHP 8.0 or newer is required by AdapterMan." >&2
         return 1
     fi
 
@@ -119,41 +106,34 @@ deploy_check_runtime() {
 }
 
 deploy_check_webman_runtime() {
-    local modules extension missing=0
+    local disabled_functions required_function missing=0
+    local required_functions=(
+        header header_remove headers_sent headers_list http_response_code
+        setcookie
+        session_create_id session_id session_name session_save_path session_status
+        session_start session_write_close session_regenerate_id session_unset
+        session_get_cookie_params session_set_cookie_params
+        set_time_limit
+    )
 
-    if ! grep -qE '^[[:space:]]*disable_functions[[:space:]]*=.*\bheader\b' "$WEBMAN_PHP_INI"; then
-        echo "ERROR: $WEBMAN_PHP_INI does not disable header/session functions." >&2
-        echo "AdapterMan refuses to start without them. Do NOT add disable_functions to the" >&2
-        echo "aaPanel php.ini shared with PHP-FPM; keep the Webman-only ini instead." >&2
-        return 1
-    fi
-
-    modules="$(deploy_webman_php -m 2>&1)" || {
-        echo "$modules" >&2
-        echo "ERROR: PHP CLI cannot start with $WEBMAN_PHP_INI" >&2
+    disabled_functions="$(deploy_php -r 'echo ini_get("disable_functions");' 2>&1)" || {
+        echo "$disabled_functions" >&2
+        echo "ERROR: PHP CLI cannot read disabled functions from $PHP_INI" >&2
         return 1
     }
-    if echo "$modules" | grep -Eiq 'PHP Startup|Unable to load dynamic library'; then
-        echo "$modules" >&2
-        echo "ERROR: $WEBMAN_PHP_INI has an extension loading error." >&2
-        return 1
-    fi
 
-    for extension in pdo_mysql redis pcntl; do
-        if ! echo "$modules" | grep -Fxq "$extension"; then
-            echo "ERROR: $WEBMAN_PHP_INI is missing PHP extension: $extension" >&2
+    for required_function in "${required_functions[@]}"; do
+        if ! printf '%s\n' "$disabled_functions" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -Fxq "$required_function"; then
+            echo "ERROR: aaPanel Disabled functions is missing: $required_function" >&2
             missing=1
         fi
     done
-    [ "$missing" = 0 ] || return 1
-
-    # fileinfo 只在文件类型探测时才用到，Webman 处理 API 请求并不依赖它，
-    # 因此缺失只提示、不阻断部署。
-    if ! echo "$modules" | grep -Fxq fileinfo; then
-        echo "WARNING: $WEBMAN_PHP_INI is missing PHP extension: fileinfo" >&2
+    if [ "$missing" -ne 0 ]; then
+        echo "AdapterMan requires every listed function to be disabled in aaPanel PHP settings." >&2
+        return 1
     fi
 
-    echo "Webman runtime: $WEBMAN_PHP_INI OK"
+    echo "Webman runtime: $PHP_INI OK"
 }
 
 deploy_download_composer() {
@@ -371,7 +351,7 @@ deploy_stop_webman() {
     fi
 
     if [ "$WEBMAN_MANAGER" != supervisor ]; then
-        deploy_webman_php webman.php stop >/dev/null 2>&1 || true
+        deploy_php webman.php stop >/dev/null 2>&1 || true
         # TERM 之后主进程有时不会立刻退出，残留进程会让启动校验误判为成功。
         local attempt port
         for attempt in 1 2 3 4 5; do
@@ -426,7 +406,7 @@ deploy_start_webman() {
             return 1
         fi
         # 启动失败时 AdapterMan 会把原因写到输出上，不要吞掉。
-        deploy_webman_php webman.php start -d || {
+        deploy_php webman.php start -d || {
             echo "ERROR: Webman failed to start; see the AdapterMan output above." >&2
             return 1
         }
@@ -479,10 +459,7 @@ deploy_cron_php_bin() {
 }
 
 deploy_cron_php_ini() {
-    case "${PHP_INI:-cli-php.ini}" in
-        /*) echo "$PHP_INI" ;;
-        *)  echo "$ROOT_DIR/${PHP_INI:-cli-php.ini}" ;;
-    esac
+    echo "$PHP_INI"
 }
 
 # 可被 deploy_install_cron 改成 /dev/null（日志文件建不出来时的兜底，见 deploy_cron_prepare_log）。
@@ -490,8 +467,7 @@ deploy_cron_log() {
     echo "${V2BOARD_CRON_LOG:-$ROOT_DIR/storage/logs/schedule-cron.log}"
 }
 
-# artisan 用 PHP_INI（扩展齐全的那套），与 deploy_php 保持一致；不要用 WEBMAN_PHP_INI，
-# 它带 disable_functions。
+# cron、Webman、Horizon、artisan 与 Composer 都使用同一套 aaPanel PHP 配置。
 #
 # 输出去向是分开的，不是 >> /dev/null 2>&1：
 #   stdout -> /dev/null：Laravel 8 的 schedule:run 在没有到期任务时每分钟都会往 stdout 打一行
