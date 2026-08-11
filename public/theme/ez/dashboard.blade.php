@@ -72,15 +72,32 @@
         @media (prefers-color-scheme: dark) { html { background-color: #171A1D; } }
     </style>
     <script>window.routerBase = "/";</script>
-    {{-- baseConfig.js 的读取顺序是 window.EZ_CONFIG[key] ?? 编译默认值，且 SITE_CONFIG /
-         DEFAULT_CONFIG 两个键走 window.settings 的专用分支、不看这里，所以只给 PANEL_TYPE
-         一个键是安全的。用 Object.assign 合并而非直接赋值：custom_html 在文档末尾注入，
-         若运维在那里自己写了 EZ_CONFIG，后写的仍然覆盖本处（显式配置优先）。
+    {{-- 用访问器而不是普通赋值，因为 bundle 自己会把这个对象整体换掉。
+         index.js 的启动逻辑是：先动态载入内置默认配置模块（其中硬写 PANEL_TYPE:"V2board"）
+         并执行 window.EZ_CONFIG = 那份配置，随后才载入读取模块 baseConfig。也就是说单纯
+         在这里赋值必然被冲掉 —— 内联脚本跑得早，但覆盖发生在它之后、读取之前，最终仍读回
+         "V2board"，充值入口照旧不出现（这正是上一版改动上线后无效的原因）。
+         这里改为把 window.EZ_CONFIG 定义成 getter/setter：bundle 的整体赋值照常生效，
+         但每次赋值后都把强制项重新合并回去，故 PANEL_TYPE 始终是本主题配置决定的值，
+         而内置配置的其余键（API_CONFIG / SITE_CONFIG 等整棵树）原样保留。
+         configurable 留 true，运维仍可在 custom_html 里用 defineProperty 完全接管。
          必须在 bundle 之前执行：下面的 script 都带 defer，本内联脚本先跑。 --}}
     <script>
-        window.EZ_CONFIG = Object.assign({}, window.EZ_CONFIG || {}, {
-            PANEL_TYPE: @json($ezPanelType)
-        });
+        (function () {
+            var forced = { PANEL_TYPE: @json($ezPanelType) };
+            var value = Object.assign({}, window.EZ_CONFIG || {}, forced);
+            try {
+                Object.defineProperty(window, 'EZ_CONFIG', {
+                    configurable: true,
+                    get: function () { return value; },
+                    set: function (next) {
+                        value = Object.assign({}, next || {}, forced);
+                    }
+                });
+            } catch (e) {
+                window.EZ_CONFIG = value;
+            }
+        })();
     </script>
     <script>
         window.settings = {
