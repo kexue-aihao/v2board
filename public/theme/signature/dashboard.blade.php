@@ -77,6 +77,22 @@
         // 此处照 theme_color 的注入通道透传给前端 window.settings.theme；旧配置文件无此键时
         // ?? '' 兜底，前端留空回退主题内置 key。
         $signatureImgbbApiKey = trim((string)($theme_config['imgbb_api_key'] ?? ''));
+
+        // 钱包充值入口开关。本主题（EZ 架构重建）把整个 /wallet/deposit 功能锁在 baseConfig
+        // 的 PANEL_TYPE 上：isXiaoV2board() 判定 PANEL_TYPE === 'Xiao-V2board'，为假时
+        // ①用户下拉菜单不渲染充值项 ②路由 beforeEnter 把 /wallet/deposit 弹回 /dashboard
+        // ③「更多」页的充值卡片不渲染 ④充值页 setup 里再兜一次跳转。而 PANEL_TYPE 的编译
+        // 默认值是 'V2board'，且主题从未注入 window.EZ_CONFIG —— 于是充值入口在本项目里
+        // 一直是关着的，尽管后端功能完整（plan_id=0 → period=deposit → type=9 → addBalance，
+        // 带充值赠送阶梯与 v2_balance_log 流水）。
+        //
+        // 缺键时默认开启：老配置文件里没有这个字段，而 ThemeService 只在配置文件不存在时
+        // 才写默认值。关闭时写回 'V2board'，与编译默认值一致。
+        // 附带影响：同一标志还参与仪表盘「在线设备数」的显示条件
+        // （isXiaoV2board() && DASHBOARD_CONFIG.showOnlineDevicesLimit，后者编译默认 true），
+        // 后端 UserController 已下发 alive_ip 与 device_limit，数据齐备。
+        $signatureWalletDeposit = (string)($theme_config['wallet_deposit_enable'] ?? '1') === '1';
+        $signaturePanelType = $signatureWalletDeposit ? 'Xiao-V2board' : 'V2board';
     @endphp
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -103,6 +119,16 @@
         }
     </style>
     <script>window.routerBase = "/";</script>
+    {{-- baseConfig.js 的读取顺序是 window.EZ_CONFIG[key] ?? 编译默认值，且 SITE_CONFIG /
+         DEFAULT_CONFIG 两个键走 window.settings 的专用分支、不看这里，所以只给 PANEL_TYPE
+         一个键是安全的。用 Object.assign 合并而非直接赋值：custom_html 在文档末尾注入，
+         若运维在那里自己写了 EZ_CONFIG，后写的仍然覆盖本处（显式配置优先）。
+         必须在 bundle 之前执行：下面的 script 都带 defer，本内联脚本先跑。 --}}
+    <script>
+        window.EZ_CONFIG = Object.assign({}, window.EZ_CONFIG || {}, {
+            PANEL_TYPE: @json($signaturePanelType)
+        });
+    </script>
     <script>
         window.settings = {
             title: @json($title),

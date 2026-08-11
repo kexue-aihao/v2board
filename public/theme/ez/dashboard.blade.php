@@ -38,6 +38,23 @@
         $ezAssetUrl = function ($file) use ($theme, $ezAssetVersion) {
             return '/theme/' . $theme . '/assets/' . ltrim($file, '/') . '?v=' . $ezAssetVersion;
         };
+
+        // 钱包充值入口开关。EZ 主题把整个 /wallet/deposit 功能锁在 baseConfig 的
+        // PANEL_TYPE 上：isXiaoV2board() 判定 PANEL_TYPE === 'Xiao-V2board'，为假时
+        // ①用户下拉菜单不渲染充值项 ②路由 beforeEnter 把 /wallet/deposit 弹回 /dashboard
+        // ③「更多」页的充值卡片不渲染 ④充值页 setup 里再兜一次跳转。而 PANEL_TYPE 的编译
+        // 默认值是 'V2board'，且主题从未注入 window.EZ_CONFIG —— 于是充值入口在本项目里
+        // 一直是关着的，尽管后端功能完整（plan_id=0 → period=deposit → type=9 → addBalance，
+        // 带充值赠送阶梯与 v2_balance_log 流水）。
+        //
+        // 这里按主题配置注入该值。缺键时默认开启：老配置文件（config/theme/ez.php）里没有
+        // 这个字段，而 ThemeService 只在配置文件不存在时才写默认值，所以默认必须在这里兜。
+        // 关闭时写回 'V2board' 而非留空，与编译默认值保持一致。
+        // 附带影响：同一标志还参与仪表盘「在线设备数」的显示条件
+        // （isXiaoV2board() && DASHBOARD_CONFIG.showOnlineDevicesLimit，后者编译默认为
+        // true）。后端 UserController 已下发 alive_ip 与 device_limit，数据齐备。
+        $ezWalletDeposit = (string)($theme_config['wallet_deposit_enable'] ?? '1') === '1';
+        $ezPanelType = $ezWalletDeposit ? 'Xiao-V2board' : 'V2board';
     @endphp
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -55,6 +72,16 @@
         @media (prefers-color-scheme: dark) { html { background-color: #171A1D; } }
     </style>
     <script>window.routerBase = "/";</script>
+    {{-- baseConfig.js 的读取顺序是 window.EZ_CONFIG[key] ?? 编译默认值，且 SITE_CONFIG /
+         DEFAULT_CONFIG 两个键走 window.settings 的专用分支、不看这里，所以只给 PANEL_TYPE
+         一个键是安全的。用 Object.assign 合并而非直接赋值：custom_html 在文档末尾注入，
+         若运维在那里自己写了 EZ_CONFIG，后写的仍然覆盖本处（显式配置优先）。
+         必须在 bundle 之前执行：下面的 script 都带 defer，本内联脚本先跑。 --}}
+    <script>
+        window.EZ_CONFIG = Object.assign({}, window.EZ_CONFIG || {}, {
+            PANEL_TYPE: @json($ezPanelType)
+        });
+    </script>
     <script>
         window.settings = {
             title: @json($title),

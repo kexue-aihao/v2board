@@ -18,6 +18,17 @@
       "default_value": "default"
     },
     {
+      "label": "余额充值入口",
+      "placeholder": "控制前台是否显示钱包充值入口",
+      "field_name": "wallet_deposit_enable",
+      "field_type": "select",
+      "select_options": {
+        "1": "开启",
+        "0": "关闭"
+      },
+      "default_value": "1"
+    },
+    {
       "label": "自定义页脚 HTML",
       "placeholder": "可以加入客服或统计代码",
       "field_name": "custom_html",

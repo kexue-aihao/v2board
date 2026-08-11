@@ -18,6 +18,17 @@
       "default_value": "default"
     },
     {
+      "label": "Balance top-up entry",
+      "placeholder": "Show the wallet top-up entry in the panel",
+      "field_name": "wallet_deposit_enable",
+      "field_type": "select",
+      "select_options": {
+        "1": "Enabled",
+        "0": "Disabled"
+      },
+      "default_value": "1"
+    },
+    {
       "label": "Custom HTML",
       "placeholder": "Optional footer HTML",
       "field_name": "custom_html",
