@@ -102,7 +102,6 @@
 | POST | /comm/arithmetic/verify | 无 | challenge_id、answer | 返回 correct、verified；关闭时直接返回 `{correct:true,verified:true}`；不返回正确答案 |
 | GET | /plan/fetch | 无 | 无 | Signature 首页套餐列表（show=1，按 sort 升序） |
 | POST | /telegram/webhook | access_token | access_token（=md5(telegram_bot_token)）及 Telegram 回调参数 | Telegram Webhook；仅接受 POST；access_token 校验失败返回 401 |
-
 | POST/GET | /payment/notify/{method}/{uuid} | 无 | 支付回调参数 | 支付平台异步通知。仅当回调验签、终态、支付尝试号、支付方式、网关流水、精确金额和币种全部匹配时才开通；缺少支付尝试的历史回调一律拒绝 |
 
 ### Telegram 免密码登录
@@ -419,10 +418,10 @@ IP 归属字段：
 | 节点分组 | /server/group/fetch、save、drop |
 | 节点路由 | /server/route/fetch、save、drop |
 | 节点管理 | /server/manage/getNodes、sort |
-| 协议节点 | /server/trojan/*、vmess/*、shadowsocks/*、tuic/*、hysteria/*、vless/*、anytls/*、v2node/* |
+| 协议节点 | 见下方「协议节点接口」表，共 8 种协议 × 4 个动作 |
 | 订单 | /order/fetch、update、assign、paid、cancel、detail |
 | 支付 | /payment/fetch、getPaymentMethods、getPaymentForm、save、drop、show、sort |
-| 统计 | /stat/* |
+| 统计 | /stat/getStat、getOverride、getOrder、getStatRecord、getRanking、getStatUser、getServerTodayRank、getServerLastRank、getUserTodayRank、getUserLastRank |
 | 公告 | /notice/fetch、save、update、drop、show |
 | 工单 | /ticket/fetch、reply、close |
 | 优惠券 | /coupon/fetch、generate、drop、show |
@@ -436,7 +435,39 @@ IP 归属字段：
 | 倒卖商审批 | /reseller/summary、accounts、stores、review-logs、accounts/review、stores/review、accounts/reset-password |
 | 倒卖商销售权限 | /reseller/templates、templates/save、payment-drivers、orders |
 
-协议节点的 save、update、drop、copy 均为 POST 请求。
+协议节点接口（save、update、drop、copy 四个动作全部为 POST，基础路径同为 /api/v1/{secure_path}）：
+
+| 协议 | 接口路径 | 控制器 |
+| --- | --- | --- |
+| VMess | /server/vmess/save、update、drop、copy | Admin\Server\VmessController |
+| VLESS | /server/vless/save、update、drop、copy | Admin\Server\VlessController |
+| Trojan | /server/trojan/save、update、drop、copy | Admin\Server\TrojanController |
+| Shadowsocks | /server/shadowsocks/save、update、drop、copy | Admin\Server\ShadowsocksController |
+| TUIC | /server/tuic/save、update、drop、copy | Admin\Server\TuicController |
+| Hysteria | /server/hysteria/save、update、drop、copy | Admin\Server\HysteriaController |
+| AnyTLS | /server/anytls/save、update、drop、copy | Admin\Server\AnyTLSController |
+| V2node | /server/v2node/save、update、drop、copy | Admin\Server\V2nodeController |
+
+协议节点没有各自的列表接口，节点清单统一由 GET /server/manage/getNodes 返回；V2node 对应节点侧的 /api/v2/server/config 配置接口（见第九章）。
+
+统计接口明细（全部为 GET，基础路径同为 /api/v1/{secure_path}）：
+
+| 方法 | 接口路径 | 请求参数 | 返回/说明 |
+| --- | --- | --- | --- |
+| GET | /stat/getOverride | 无 | 仪表盘概览。金额字段（整数分）：day_income、month_income、last_month_income 为订单 total_amount 之和并排除 status 0 与 2；commission_month_payout、commission_last_month_payout 为佣金流水 get_amount 之和，不做状态过滤。计数字段：online_user（最近 600 秒有心跳）、day_register_total、month_register_total、ticket_pending_total、commission_pending_total。流量字段（已乘 server_rate，单位字节）：day_traffic_total / upload / download 与 month_traffic_total / upload / download，v2_stat_user 表不存在时这六个字段返回 0 |
+| GET | /stat/getStat | 无 | getOverride 的别名，控制器直接转发，返回结构完全相同 |
+| GET | /stat/getOrder | 无 | 取最近 31 条日粒度记录展开为图表序列，每天 5 条：注册人数、收款金额、收款笔数、佣金金额(已发放)、佣金笔数(已发放)；金额已由分换算为元，结果按时间正序 |
+| GET | /stat/getStatRecord | type（必填，paid_total / commission_total / register_count）；可选 start_at、end_at | 指定指标在 [start_at, end_at) 内的日粒度曲线，按 record_at 升序。paid_total 与 commission_total 已除以 100（元），register_count 为原始笔数。type 不在白名单返回 422 |
+| GET | /stat/getRanking | type（必填，server_traffic_rank / user_consumption_rank / invite_rank）；可选 limit（1-100，默认 20）、start_at、end_at | 指定维度在同一时间窗内的排行 |
+| GET | /stat/getServerTodayRank | 无 | 今日节点流量 Top 15，字段 server_id、server_type、u、d、total、server_name，total 单位 GiB |
+| GET | /stat/getServerLastRank | 无 | 昨日节点流量 Top 15，字段同上 |
+| GET | /stat/getUserTodayRank | 无 | 今日用户消耗 Top 15，字段 user_id、email、u、d、total；total 已乘 server_rate 并换算为 GiB，同一用户多条记录已合并 |
+| GET | /stat/getUserLastRank | 无 | 昨日用户消耗 Top 15，字段同上 |
+| GET | /stat/getStatUser | user_id（必填，整数）；可选 current（默认 1）、pageSize（缺省或小于 10 时按 10 处理） | 指定用户的流量记录分页，按 record_at 倒序，返回 data 与 total |
+
+start_at 默认取 30 天前、end_at 默认取当前时间；满足 start_at <= 0、end_at <= start_at 或 end_at 超过当前时间 60 秒的请求返回 422。
+
+/system/getQueueMasters 由 Horizon 自带的 MasterSupervisorController@index 直接提供，只是挂在管理员密钥路径与 admin 中间件之下；未运行 Horizon 时该接口不可用，其余 /system/* 由本项目的 SystemController 提供。
 
 风控模块中：/risk/rule 的 save、show、sort、drop、recompute、manual-evaluate 为 POST；/risk/trace/fetch、/risk/trace/history 与 /risk/shared-ip/fetch、detail 为只读 GET；/risk/trace/token/lookup、/risk/trace/token/reveal 刻意使用 POST（而非 GET），以避免订阅 token 被拼进 query string 落入 nginx 访问日志、浏览器历史与 Referer。多账号同 IP 面板只读，数据来自 audit:ip-link 离线聚合出的 v2_ip_account_link 累积表。
 
