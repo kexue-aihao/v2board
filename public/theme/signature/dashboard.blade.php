@@ -93,6 +93,11 @@
         // 后端 UserController 已下发 alive_ip 与 device_limit，数据齐备。
         $signatureWalletDeposit = (string)($theme_config['wallet_deposit_enable'] ?? '1') === '1';
         $signaturePanelType = $signatureWalletDeposit ? 'Xiao-V2board' : 'V2board';
+
+        // 礼品卡兑换页与接口均已实现，但主题的编译默认配置把
+        // PROFILE_CONFIG.showGiftCardRedeem 设为了 false，导致入口与表单完全不渲染。
+        // 旧的主题配置文件没有此项时默认开启，保持与 V2Board 原生用户端一致。
+        $signatureGiftCardRedeem = (string)($theme_config['giftcard_redeem_enable'] ?? '1') === '1';
     @endphp
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -131,14 +136,29 @@
          必须在 bundle 之前执行：下面的 script 都带 defer，本内联脚本先跑。 --}}
     <script>
         (function () {
-            var forced = { PANEL_TYPE: @json($signaturePanelType) };
-            var value = Object.assign({}, window.EZ_CONFIG || {}, forced);
+            var forced = {
+                PANEL_TYPE: @json($signaturePanelType),
+                PROFILE_CONFIG: {
+                    showGiftCardRedeem: @json($signatureGiftCardRedeem)
+                }
+            };
+            function applyForcedConfig(next) {
+                var config = Object.assign({}, next || {});
+                config.PANEL_TYPE = forced.PANEL_TYPE;
+                config.PROFILE_CONFIG = Object.assign(
+                    {},
+                    config.PROFILE_CONFIG || {},
+                    forced.PROFILE_CONFIG
+                );
+                return config;
+            }
+            var value = applyForcedConfig(window.EZ_CONFIG);
             try {
                 Object.defineProperty(window, 'EZ_CONFIG', {
                     configurable: true,
                     get: function () { return value; },
                     set: function (next) {
-                        value = Object.assign({}, next || {}, forced);
+                        value = applyForcedConfig(next);
                     }
                 });
             } catch (e) {
