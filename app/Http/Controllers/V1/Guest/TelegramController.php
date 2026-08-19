@@ -5,7 +5,9 @@ namespace App\Http\Controllers\V1\Guest;
 use App\Http\Controllers\Controller;
 use App\Services\TelegramBindingService;
 use App\Services\TelegramService;
+use App\Utils\CacheKey;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class TelegramController extends Controller
 {
@@ -13,23 +15,29 @@ class TelegramController extends Controller
     protected $commands = [];
     protected $telegramService;
 
-    public function __construct(Request $request)
+    public function __construct()
     {
-        if ($request->input('access_token') !== md5(config('v2board.telegram_bot_token'))) {
-            abort(401);
-        }
-
         $this->telegramService = new TelegramService();
     }
 
     public function webhook(Request $request)
     {
+        if ($request->input('access_token') !== md5(config('v2board.telegram_bot_token'))) {
+            abort(401);
+        }
         $data = $request->input();
+        $updateId = $data['update_id'] ?? null;
+        $updateKey = null;
+        if ($updateId !== null && ctype_digit((string)$updateId)) {
+            $updateKey = CacheKey::get('TELEGRAM_UPDATE', (string)$updateId);
+            if (Cache::has($updateKey)) return response(['data' => true]);
+        }
         if ($this->handleBindingUpdate($data)) {
             return response(['data' => true]);
         }
         $this->formatMessage($data);
         $this->handle();
+        if ($updateKey !== null) Cache::put($updateKey, true, 86400);
         return response(['data' => true]);
     }
 
@@ -197,7 +205,9 @@ class TelegramController extends Controller
         $obj->command = $text[0];
         $obj->args = array_slice($text, 1);
         $obj->chat_id = $data['message']['chat']['id'];
+        $obj->telegram_user_id = $data['message']['from']['id'] ?? $obj->chat_id;
         $obj->message_id = $data['message']['message_id'];
+        $obj->update_id = $data['update_id'] ?? null;
         $obj->message_type = 'message';
         $obj->text = $data['message']['text'];
         $obj->is_private = $data['message']['chat']['type'] === 'private';

@@ -50,6 +50,7 @@ class CacheKey
         'TELEGRAM_BINDING' => 'Telegram binding',
         'TELEGRAM_GROUP_ADMINS' => '售后群管理员名单',
         'TELEGRAM_MEMBER_VERIFIED' => '售后群成员已验证',
+        'TELEGRAM_UPDATE' => 'Telegram 更新幂等',
         'RISK_RECOMPUTE_CURSOR' => '风险重算游标',
         'RISK_MANUAL_LOCK' => '风险手动评估锁',
         'RISK_MANUAL_CURSOR' => '风险手动评估游标',

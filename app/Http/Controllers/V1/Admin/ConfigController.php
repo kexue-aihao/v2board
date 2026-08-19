@@ -151,6 +151,16 @@ class ConfigController extends Controller
                 'email_encryption' => config('v2board.email_encryption'),
                 'email_from_address' => config('v2board.email_from_address')
             ],
+            'rewards' => [
+                'reward_enable' => (int)config('v2board.reward_enable', 1),
+                'reward_daily_game_limit' => (int)config('v2board.reward_daily_game_limit', 3),
+                'reward_dice_six_gb' => (int)config('v2board.reward_dice_six_gb', 10),
+                'reward_dice_win_face' => (int)config('v2board.reward_dice_win_face', 6),
+                'reward_slots_jackpot_rate' => (int)config('v2board.reward_slots_jackpot_rate', 100),
+                'reward_slots_triple_gb' => (int)config('v2board.reward_slots_triple_gb', 10),
+                'reward_poker_winner_gb' => (int)config('v2board.reward_poker_winner_gb', 5),
+                'reward_group_enable' => (int)config('v2board.reward_group_enable', 0)
+            ],
             'telegram' => [
                 'telegram_bot_enable' => config('v2board.telegram_bot_enable', 0),
                 'telegram_bot_token' => config('v2board.telegram_bot_token'),

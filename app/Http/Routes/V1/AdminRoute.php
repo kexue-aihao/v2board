@@ -132,6 +132,9 @@ class AdminRoute
             $router->get ('/user/subscribe-requests', 'V1\\Admin\\UserController@subscribeRequests');
             $router->get ('/user/risk', 'V1\\Admin\\UserController@subscriptionRisk');
             $router->post('/user/subscribe-audit/clear', 'V1\\Admin\\UserController@clearSubscribeAudit');
+            // Rewards and games
+            $router->get ('/reward/fetch', 'V1\\Admin\\RewardController@fetch');
+            $router->post('/reward/save', 'V1\\Admin\\RewardController@save');
             // Risk
             $router->get ('/risk/rule/fetch', 'V1\\Admin\\RiskRuleController@fetch');
             $router->post('/risk/rule/save', 'V1\\Admin\\RiskRuleController@save');

@@ -573,6 +573,7 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 | php artisan ip:clear-location-cache | 清理 IP 归属缓存 |
 | php artisan ip:backfill-subscribe-locations | 回填历史 IP 归属 |
 | php artisan subscription:risk | 计算已完成风险周期（--force 重算已评估周期） |
+| php artisan reward:prune-rooms | 关闭超时的 Telegram 娱乐房间 |
 | php artisan audit:ip-link | 手动聚合「IP + 账号 + UA」累积记录（选项 --full/--force/--prune-days/--dry-run） |
 | php artisan audit:clean | 手动按保留期清理订阅审计日志（选项 --days/--dry-run） |
 | php artisan token-history:reconcile | 手动补齐订阅凭证历史（选项 --dry-run） |

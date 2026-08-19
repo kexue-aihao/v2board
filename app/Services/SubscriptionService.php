@@ -137,6 +137,10 @@ class SubscriptionService
 
     public function reset(Subscription $subscription): Subscription
     {
+        $plan = Plan::find($subscription->plan_id);
+        if ($plan) {
+            $subscription->transfer_enable = (int)$plan->transfer_enable * 1073741824;
+        }
         $subscription->u = 0;
         $subscription->d = 0;
         $subscription->last_reset_at = time();

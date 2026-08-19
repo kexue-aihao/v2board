@@ -1,0 +1,55 @@
+<?php
+
+namespace App\Http\Controllers\V1\Admin;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Cache;
+
+class RewardController extends Controller
+{
+    public function fetch()
+    {
+        return response(['data' => $this->values()]);
+    }
+
+    public function save(Request $request)
+    {
+        $data = $request->validate([
+            'reward_enable' => 'required|in:0,1',
+            'reward_daily_game_limit' => 'required|integer|min:0|max:100',
+            'reward_dice_six_gb' => 'required|integer|min:1|max:10',
+            'reward_dice_win_face' => 'required|integer|min:1|max:6',
+            'reward_slots_jackpot_rate' => 'required|integer|min:1|max:10000',
+            'reward_slots_triple_gb' => 'required|integer|min:1|max:10',
+            'reward_poker_winner_gb' => 'required|integer|min:1|max:10',
+            'reward_group_enable' => 'required|in:0,1',
+        ]);
+        $config = config('v2board');
+        foreach ($data as $key => $value) $config[$key] = is_numeric($value) ? (int)$value : $value;
+        if (!File::put(base_path('config/v2board.php'), "<?php\n return " . var_export($config, true) . " ;")) abort(500, '保存奖励配置失败');
+        Artisan::call('config:cache');
+        if (Cache::has('WEBMANPID')) {
+            $pid = Cache::get('WEBMANPID');
+            Cache::forget('WEBMANPID');
+            @posix_kill($pid, 15);
+        }
+        return response(['data' => $this->values()]);
+    }
+
+    private function values(): array
+    {
+        return [
+            'reward_enable' => (int)config('v2board.reward_enable', 1),
+            'reward_daily_game_limit' => (int)config('v2board.reward_daily_game_limit', 3),
+            'reward_dice_six_gb' => (int)config('v2board.reward_dice_six_gb', 10),
+            'reward_dice_win_face' => (int)config('v2board.reward_dice_win_face', 6),
+            'reward_slots_jackpot_rate' => (int)config('v2board.reward_slots_jackpot_rate', 100),
+            'reward_slots_triple_gb' => (int)config('v2board.reward_slots_triple_gb', 10),
+            'reward_poker_winner_gb' => (int)config('v2board.reward_poker_winner_gb', 5),
+            'reward_group_enable' => (int)config('v2board.reward_group_enable', 0),
+        ];
+    }
+}

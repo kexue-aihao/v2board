@@ -80,6 +80,15 @@ class ConfigSave extends FormRequest
         'email_password' => '',
         'email_encryption' => '',
         'email_from_address' => '',
+        // rewards and games
+        'reward_enable' => 'in:0,1',
+        'reward_daily_game_limit' => 'integer|min:0|max:100',
+        'reward_dice_six_gb' => 'integer|min:1|max:10',
+        'reward_dice_win_face' => 'integer|min:1|max:6',
+        'reward_slots_jackpot_rate' => 'integer|min:1|max:10000',
+        'reward_slots_triple_gb' => 'integer|min:1|max:10',
+        'reward_poker_winner_gb' => 'integer|min:1|max:10',
+        'reward_group_enable' => 'in:0,1',
         // telegram
         'telegram_bot_enable' => 'in:0,1',
         'telegram_bot_token' => '',

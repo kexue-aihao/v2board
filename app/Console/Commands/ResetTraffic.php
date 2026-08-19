@@ -136,6 +136,7 @@ class ResetTraffic extends Command
             if ($shouldReset && (int)$subscription->last_reset_at < strtotime(date('Y-m-d'))) {
                 $subscription->u = 0;
                 $subscription->d = 0;
+                $subscription->transfer_enable = (int)$plan->transfer_enable * 1073741824;
                 $subscription->last_reset_at = time();
                 $subscription->save();
                 if ($subscription->is_primary) {

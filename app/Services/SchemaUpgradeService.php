@@ -27,6 +27,7 @@ class SchemaUpgradeService
         'balance_log_schema' => 'balance_log_schema_v1',
         'payment_attempt_schema' => 'payment_attempt_schema_v1',
         'order_client_ip_schema' => 'order_client_ip_schema_v1',
+        'traffic_reward_schema' => 'traffic_reward_schema_v1',
         'telegram_login_link_schema' => 'telegram_login_link_schema_v1'
     ];
 
@@ -120,6 +121,9 @@ class SchemaUpgradeService
                 return;
             case 'order_client_ip_schema':
                 $this->applyOrderClientIpSchema();
+                return;
+            case 'traffic_reward_schema':
+                $this->applyTrafficRewardSchema();
                 return;
             case 'telegram_login_link_schema':
                 $this->applyTelegramLoginLinkSchema();
@@ -1210,6 +1214,17 @@ class SchemaUpgradeService
     {
         $this->requireTable('v2_order');
         $this->ensureColumn('v2_order', 'client_ip', 'varchar(45) DEFAULT NULL');
+    }
+
+    private function applyTrafficRewardSchema(): void
+    {
+        $this->requireTable('v2_user');
+        $this->requireTable('v2_subscription');
+        DB::statement("CREATE TABLE IF NOT EXISTS v2_traffic_reward_log (id bigint(20) unsigned NOT NULL AUTO_INCREMENT, user_id int(11) NOT NULL, subscription_id bigint(20) NOT NULL, source varchar(24) NOT NULL, entrypoint varchar(24) NOT NULL DEFAULT 'web', reward_bytes bigint(20) unsigned NOT NULL, unique_key varchar(160) NOT NULL, metadata text DEFAULT NULL, created_at int(11) NOT NULL, updated_at int(11) NOT NULL, PRIMARY KEY (id), UNIQUE KEY unique_key (unique_key), KEY user_created (user_id, created_at), KEY subscription_created (subscription_id, created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        DB::statement("CREATE TABLE IF NOT EXISTS v2_daily_checkin (id bigint(20) unsigned NOT NULL AUTO_INCREMENT, user_id int(11) NOT NULL, subscription_id bigint(20) NOT NULL, checkin_date date NOT NULL, streak_days int(11) NOT NULL DEFAULT 1, reward_bytes bigint(20) unsigned NOT NULL, created_at int(11) NOT NULL, updated_at int(11) NOT NULL, PRIMARY KEY (id), UNIQUE KEY user_subscription_date (user_id, subscription_id, checkin_date), KEY subscription_date (subscription_id, checkin_date)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        DB::statement("CREATE TABLE IF NOT EXISTS v2_game_room (id bigint(20) unsigned NOT NULL AUTO_INCREMENT, chat_id varchar(64) NOT NULL, game varchar(24) NOT NULL, status varchar(16) NOT NULL DEFAULT 'open', players text DEFAULT NULL, result text DEFAULT NULL, expires_at int(11) DEFAULT NULL, created_at int(11) NOT NULL, updated_at int(11) NOT NULL, PRIMARY KEY (id), KEY chat_game_status (chat_id, game, status), KEY status_updated (status, updated_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $this->ensureColumn('v2_game_room', 'expires_at', 'int(11) DEFAULT NULL');
+        $this->ensureIndex('v2_game_room', 'expires_at', ['expires_at']);
     }
 
     private function applyPaymentAttemptSchema(): void

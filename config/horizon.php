@@ -3,8 +3,15 @@
 use Illuminate\Support\Str;
 use Linfo\Linfo;
 
-$lInfo = new Linfo();
-$parser = $lInfo->getParser();
+$maxHorizonProcesses = (int)env('HORIZON_MAX_PROCESSES', 128);
+if (PHP_OS_FAMILY !== 'Windows') {
+    $lInfo = new Linfo();
+    $parser = $lInfo->getParser();
+    $maxHorizonProcesses = min(
+        (int)ceil($parser->getRam()['total'] / 1024 / 1024 / 1024 * 6),
+        $maxHorizonProcesses
+    );
+}
 
 return [
 
@@ -182,10 +189,7 @@ return [
                 ],
                 'balance' => 'auto',
                 'minProcesses' => 1,
-                'maxProcesses' => min(
-                    (int)ceil($parser->getRam()['total'] / 1024 / 1024 / 1024 * 6),
-                    (int)env('HORIZON_MAX_PROCESSES', 128)
-                ),
+                'maxProcesses' => $maxHorizonProcesses,
                 'tries' => 1,
                 'balanceCooldown' => 3,
             ],
