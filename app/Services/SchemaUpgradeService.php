@@ -26,6 +26,7 @@ class SchemaUpgradeService
         'ip_account_link_schema' => 'ip_account_link_schema_v1',
         'balance_log_schema' => 'balance_log_schema_v1',
         'payment_attempt_schema' => 'payment_attempt_schema_v1',
+        'order_client_ip_schema' => 'order_client_ip_schema_v1',
         'telegram_login_link_schema' => 'telegram_login_link_schema_v1'
     ];
 
@@ -116,6 +117,9 @@ class SchemaUpgradeService
                 return;
             case 'payment_attempt_schema':
                 $this->applyPaymentAttemptSchema();
+                return;
+            case 'order_client_ip_schema':
+                $this->applyOrderClientIpSchema();
                 return;
             case 'telegram_login_link_schema':
                 $this->applyTelegramLoginLinkSchema();
@@ -1200,6 +1204,12 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_balance_log', 'type_created', ['type', 'created_at']);
         // 按来源反查（如「这张订单退过几次款」）。
         $this->ensureIndex('v2_balance_log', 'source', ['source_type', 'source_id']);
+    }
+
+    private function applyOrderClientIpSchema(): void
+    {
+        $this->requireTable('v2_order');
+        $this->ensureColumn('v2_order', 'client_ip', 'varchar(45) DEFAULT NULL');
     }
 
     private function applyPaymentAttemptSchema(): void

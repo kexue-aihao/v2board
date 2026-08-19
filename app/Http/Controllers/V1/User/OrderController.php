@@ -97,6 +97,7 @@ class OrderController extends Controller
             $order = new Order();
             $orderService = new OrderService($order);
             $order->user_id = $request->user['id'];
+            $order->client_ip = (string) $request->getClientIp();
             $order->plan_id = $request->input('plan_id');
             $order->period = 'deposit';
             $order->trade_no = Helper::generateOrderNo();
@@ -158,6 +159,7 @@ class OrderController extends Controller
         $order = new Order();
         $orderService = new OrderService($order);
         $order->user_id = $request->user['id'];
+        $order->client_ip = (string) $request->getClientIp();
         $order->plan_id = $plan->id;
         $order->period = $request->input('period');
         $order->trade_no = Helper::generateOrderNo();

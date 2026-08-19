@@ -3,9 +3,12 @@
 namespace App\Services;
 
 use App\Jobs\OrderHandleJob;
+use App\Models\Coupon;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentAttempt;
+use App\Models\Plan;
+use App\Models\User;
 use App\Utils\Helper;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -223,17 +226,68 @@ class PaymentAttemptService
             try {
                 $order = Order::where('trade_no', $transition['trade_no'])->first();
                 if ($order) {
-                    (new TelegramService())->sendMessageWithAdmin(sprintf(
-                        "Payment received: %s\nOrder: %s",
-                        $order->total_amount / 100,
-                        $order->trade_no
-                    ));
+                    $this->sendPaymentReceiptNotification($order);
                 }
             } catch (\Throwable $e) {
                 Log::error('Payment receipt notification failed');
             }
         }
         return true;
+    }
+
+    private function sendPaymentReceiptNotification(Order $order): void
+    {
+        $user = User::find($order->user_id);
+        $payment = Payment::find($order->payment_id);
+        $plan = $order->plan_id ? Plan::find($order->plan_id) : null;
+        $coupon = $order->coupon_id ? Coupon::find($order->coupon_id) : null;
+        $inviter = $order->invite_user_id ? User::find($order->invite_user_id) : null;
+        $todayIncome = Order::whereNotNull('paid_at')
+            ->where('paid_at', '>=', strtotime('today'))
+            ->sum('total_amount');
+        $siteUrl = (string) config('v2board.app_url', '');
+        $siteHost = parse_url($siteUrl, PHP_URL_HOST) ?: $siteUrl;
+
+        $message = sprintf(
+            "💰 成功收款 %s 元\n———————————————\n🌐 支付接口：%s\n🏦 支付渠道：%s\n📧 用户邮箱：%s\n📦 购买套餐：%s\n📅 套餐周期：%s\n🎫 优  惠  券：%s\n👥 邀  请  人：%s\n🆔 订  单  号：%s\n🌐 来源网址：%s\n📅 注册日期：%s\n📍 下单 IP：%s\n———————————————\n💵 今日总收入：%s 元",
+            number_format($order->total_amount / 100, 2, '.', ''),
+            $this->telegramValue($payment->name ?? '未知'),
+            $this->telegramValue($payment->payment ?? '未知'),
+            $this->telegramValue($user->email ?? '未知'),
+            $this->telegramValue($plan->name ?? ($order->plan_id ? '套餐已删除' : '余额充值')),
+            $this->periodLabel((string) $order->period),
+            $this->telegramValue($coupon->code ?? '无'),
+            $this->telegramValue($inviter->email ?? '无'),
+            $this->telegramValue($order->trade_no),
+            $this->telegramValue($siteHost ?: '未配置'),
+            $user ? date('Y-m-d H:i:s', (int) $user->created_at) : '未知',
+            $this->telegramValue($order->client_ip ?: '暂无记录'),
+            number_format($todayIncome / 100, 2, '.', '')
+        );
+
+        (new TelegramService())->sendMessageWithAdmin($message);
+    }
+
+    private function periodLabel(string $period): string
+    {
+        $labels = [
+            'month_price' => '月付',
+            'quarter_price' => '季付',
+            'half_year_price' => '半年付',
+            'year_price' => '年付',
+            'two_year_price' => '两年付',
+            'three_year_price' => '三年付',
+            'onetime_price' => '一次性',
+            'reset_price' => '流量重置包',
+            'deposit' => '余额充值',
+        ];
+
+        return $labels[$period] ?? $period;
+    }
+
+    private function telegramValue($value): string
+    {
+        return str_replace(['_', '*', '[', ']', '`'], ['\_', '\*', '\[', '\]', '\`'], (string) $value);
     }
 
     public function invalidateForPayment(int $paymentId, string $reason): int
