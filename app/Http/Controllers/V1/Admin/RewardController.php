@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class RewardController extends Controller
 {
@@ -32,22 +33,42 @@ class RewardController extends Controller
         if (!File::put(base_path('config/v2board.php'), "<?php\n return " . var_export($config, true) . " ;", LOCK_EX)) {
             abort(500, '保存奖励配置失败，请检查 config 目录写入权限');
         }
-        if (Artisan::call('config:cache') !== 0) {
-            abort(500, '奖励配置缓存失败，请检查 storage 与 bootstrap/cache 写入权限');
+        $cacheError = null;
+        try {
+            if (Artisan::call('config:cache') !== 0) {
+                $cacheError = 'config:cache returned a non-zero exit code';
+            }
+        } catch (\Throwable $exception) {
+            $cacheError = $exception->getMessage();
+        }
+        if ($cacheError !== null) {
+            Log::error('Reward configuration cache failed after file write.', [
+                'error' => $cacheError,
+                'path' => base_path('config/v2board.php'),
+            ]);
         }
 
         // PHP-FPM may not load ext-posix even when the Webman CLI does. Do not
         // turn a successful configuration write into a 500 solely because the
         // optional in-process reload signal is unavailable.
         $restarting = false;
-        if (Cache::has('WEBMANPID')) {
-            $pid = Cache::get('WEBMANPID');
-            Cache::forget('WEBMANPID');
-            $restarting = function_exists('posix_kill') && is_numeric($pid)
-                ? (bool) posix_kill((int) $pid, 15)
-                : false;
+        try {
+            if (Cache::has('WEBMANPID')) {
+                $pid = Cache::get('WEBMANPID');
+                Cache::forget('WEBMANPID');
+                $restarting = function_exists('posix_kill') && is_numeric($pid)
+                    ? (bool) posix_kill((int) $pid, 15)
+                    : false;
+            }
+        } catch (\Throwable $exception) {
+            Log::warning('Reward configuration saved but Webman reload failed.', [
+                'error' => $exception->getMessage(),
+            ]);
         }
-        return response(['data' => array_merge($this->values(), $data, ['restarting' => $restarting])]);
+        return response(['data' => array_merge($this->values(), $data, [
+            'restarting' => $restarting,
+            'config_cache_warning' => $cacheError !== null,
+        ])]);
     }
 
     private function values(): array
