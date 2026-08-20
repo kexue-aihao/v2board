@@ -1216,16 +1216,6 @@ class SchemaUpgradeService
         $this->ensureColumn('v2_order', 'client_ip', 'varchar(45) DEFAULT NULL');
     }
 
-    private function applyTrafficRewardSchema(): void
-    {
-        $this->requireTable('v2_user');
-        $this->requireTable('v2_subscription');
-        DB::statement("CREATE TABLE IF NOT EXISTS v2_traffic_reward_log (id bigint(20) unsigned NOT NULL AUTO_INCREMENT, user_id int(11) NOT NULL, subscription_id bigint(20) NOT NULL, source varchar(24) NOT NULL, entrypoint varchar(24) NOT NULL DEFAULT 'web', reward_bytes bigint(20) unsigned NOT NULL, unique_key varchar(160) NOT NULL, metadata text DEFAULT NULL, created_at int(11) NOT NULL, updated_at int(11) NOT NULL, PRIMARY KEY (id), UNIQUE KEY unique_key (unique_key), KEY user_created (user_id, created_at), KEY subscription_created (subscription_id, created_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-        DB::statement("CREATE TABLE IF NOT EXISTS v2_daily_checkin (id bigint(20) unsigned NOT NULL AUTO_INCREMENT, user_id int(11) NOT NULL, subscription_id bigint(20) NOT NULL, checkin_date date NOT NULL, streak_days int(11) NOT NULL DEFAULT 1, reward_bytes bigint(20) unsigned NOT NULL, created_at int(11) NOT NULL, updated_at int(11) NOT NULL, PRIMARY KEY (id), UNIQUE KEY user_subscription_date (user_id, subscription_id, checkin_date), KEY subscription_date (subscription_id, checkin_date)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-        DB::statement("CREATE TABLE IF NOT EXISTS v2_game_room (id bigint(20) unsigned NOT NULL AUTO_INCREMENT, chat_id varchar(64) NOT NULL, game varchar(24) NOT NULL, status varchar(16) NOT NULL DEFAULT 'open', players text DEFAULT NULL, result text DEFAULT NULL, expires_at int(11) DEFAULT NULL, created_at int(11) NOT NULL, updated_at int(11) NOT NULL, PRIMARY KEY (id), KEY chat_game_status (chat_id, game, status), KEY status_updated (status, updated_at)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-        $this->ensureColumn('v2_game_room', 'expires_at', 'int(11) DEFAULT NULL');
-        $this->ensureIndex('v2_game_room', 'expires_at', ['expires_at']);
-    }
 
     private function applyPaymentAttemptSchema(): void
     {
@@ -1384,5 +1374,57 @@ class SchemaUpgradeService
             }
         }
         return false;
+    }
+
+    private function applyTrafficRewardSchema(): void
+    {
+        $this->requireTable('v2_user');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_traffic_reward_log` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `subscription_id` bigint(20) NOT NULL,
+            `source` varchar(32) NOT NULL COMMENT 'checkin|game',
+            `entrypoint` varchar(32) NOT NULL COMMENT 'web|telegram|telegram_group',
+            `reward_bytes` bigint(20) NOT NULL DEFAULT '0',
+            `unique_key` varchar(128) NOT NULL,
+            `metadata` json DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `unique_key` (`unique_key`),
+            KEY `user_id` (`user_id`),
+            KEY `subscription_id` (`subscription_id`),
+            KEY `source_created` (`source`, `created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_daily_checkin` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `subscription_id` bigint(20) NOT NULL,
+            `checkin_date` date NOT NULL,
+            `reward_bytes` bigint(20) NOT NULL DEFAULT '0',
+            `streak_days` int(11) NOT NULL DEFAULT '0',
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `subscription_date` (`subscription_id`, `checkin_date`),
+            KEY `user_id` (`user_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_game_room` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `chat_id` varchar(64) NOT NULL,
+            `game` varchar(32) NOT NULL,
+            `status` varchar(16) NOT NULL DEFAULT 'open',
+            `players` json DEFAULT NULL,
+            `result` json DEFAULT NULL,
+            `expires_at` int(11) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `chat_game_status` (`chat_id`, `game`, `status`),
+            KEY `status_expires` (`status`, `expires_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     }
 }

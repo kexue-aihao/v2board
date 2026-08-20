@@ -22,7 +22,13 @@ class TelegramController extends Controller
 
     public function webhook(Request $request)
     {
-        if ($request->input('access_token') !== md5(config('v2board.telegram_bot_token'))) {
+        $secret = config('v2board.telegram_webhook_secret');
+        if ($secret !== null && $secret !== '') {
+            $headerSecret = (string)$request->header('X-Telegram-Bot-Api-Secret-Token', '');
+            if (!hash_equals($secret, $headerSecret)) {
+                abort(401);
+            }
+        } elseif ($request->input('access_token') !== md5(config('v2board.telegram_bot_token'))) {
             abort(401);
         }
         $data = $request->input();
@@ -32,12 +38,14 @@ class TelegramController extends Controller
             $updateKey = CacheKey::get('TELEGRAM_UPDATE', (string)$updateId);
             if (Cache::has($updateKey)) return response(['data' => true]);
         }
+        if ($updateKey !== null) {
+            Cache::put($updateKey, true, 86400);
+        }
         if ($this->handleBindingUpdate($data)) {
             return response(['data' => true]);
         }
         $this->formatMessage($data);
         $this->handle();
-        if ($updateKey !== null) Cache::put($updateKey, true, 86400);
         return response(['data' => true]);
     }
 
@@ -185,8 +193,9 @@ class TelegramController extends Controller
                     return;
                 }
             }
-        } catch (\Exception $e) {
-            $this->telegramService->sendMessage($msg->chat_id, $e->getMessage());
+        } catch (\Throwable $e) {
+            report($e);
+            $this->telegramService->sendMessage($msg->chat_id, '😵 处理命令时出现错误，请稍后重试。');
         }
     }
 

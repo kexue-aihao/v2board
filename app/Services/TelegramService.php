@@ -73,14 +73,14 @@ class TelegramService {
         return $this->request('getMe');
     }
 
-    public function setWebhook(string $url)
+    public function setWebhook(string $url, array $extra = [])
     {
         $commands = $this->discoverCommands(base_path('app/Plugins/Telegram/Commands'));
         $this->setMyCommands($commands);
-        return $this->request('setWebhook', [
+        return $this->request('setWebhook', array_merge([
             'url' => $url,
             'allowed_updates' => json_encode(['message', 'chat_join_request', 'chat_member'])
-        ]);
+        ], $extra));
     }
 
     public function getChatAdministrators($chatId)

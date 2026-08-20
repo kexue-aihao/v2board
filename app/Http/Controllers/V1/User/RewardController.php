@@ -23,13 +23,6 @@ class RewardController extends Controller
         return response(['data' => (new TrafficRewardService())->playDice(\App\Models\User::findOrFail($request->user['id']), 'web', $this->requestId($request))]);
     }
 
-    public function poker(Request $request)
-    {
-        $action = (string)$request->input('action', 'join');
-        if (!in_array($action, ['create', 'join', 'start'], true)) abort(422, 'Invalid poker action');
-        return response(['data' => (new TrafficRewardService())->playPoker(\App\Models\User::findOrFail($request->user['id']), (string)$request->input('chat_id', 'web'), $action, 'web')]);
-    }
-
     public function slots(Request $request)
     {
         return response(['data' => (new TrafficRewardService())->playSlots(\App\Models\User::findOrFail($request->user['id']), 'web', $this->requestId($request))]);

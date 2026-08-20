@@ -41,7 +41,6 @@ class UserRoute
             $router->post('/reward/checkin', 'V1\\User\\RewardController@checkin');
             $router->post('/game/dice/play', 'V1\\User\\RewardController@dice');
             $router->post('/game/slots/play', 'V1\\User\\RewardController@slots');
-            $router->post('/game/poker/play', 'V1\\User\\RewardController@poker');
             // Order
             $router->post('/order/save', 'V1\\User\\OrderController@save');
             $router->post('/order/checkout', 'V1\\User\\OrderController@checkout');

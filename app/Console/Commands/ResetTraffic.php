@@ -48,13 +48,18 @@ class ResetTraffic extends Command
     public function handle()
     {
         ini_set('memory_limit', -1);
-        Redis::setex('traffic_reset_lock', 300, 1);
-        if (Schema::hasTable('v2_subscription') && Subscription::exists()) {
-            $this->resetSubscriptions();
-            Redis::del('traffic_reset_lock');
-            return;
+        $lockToken = bin2hex(random_bytes(16));
+        $locked = Redis::set('traffic_reset_lock', $lockToken, 'EX', 300, 'NX');
+        if (!$locked) {
+            $this->warn('另一个重置进程正在运行，跳过');
+            return self::SUCCESS;
         }
-        $resetMethods = Plan::select(
+        try {
+            if (Schema::hasTable('v2_subscription') && Subscription::exists()) {
+                $this->resetSubscriptions();
+                return;
+            }
+            $resetMethods = Plan::select(
             DB::raw("GROUP_CONCAT(`id`) as plan_ids"),
             DB::raw("reset_traffic_method as method")
         )
@@ -82,9 +87,11 @@ class ResetTraffic extends Command
                         // year first day
                         case 3:
                             $this->resetByYearFirstDay($builder);
+                            break;
                         // year expire day
                         case 4:
                             $this->resetByExpireYear($builder);
+                            break;
                     }
                     break;
                 }
@@ -113,17 +120,23 @@ class ResetTraffic extends Command
                 }
             }
         }
-        Redis::del('traffic_reset_lock');
+        } finally {
+            $current = Redis::get('traffic_reset_lock');
+            if ($current === $lockToken) {
+                Redis::del('traffic_reset_lock');
+            }
+        }
     }
 
     private function resetSubscriptions(): void
     {
         $today = date('d');
         $lastDay = date('t');
-        foreach (Subscription::where('status', 'active')->where('expired_at', '>', time())->get() as $subscription) {
-            $plan = Plan::find($subscription->plan_id);
-            if (!$plan) continue;
-            $method = $plan->reset_traffic_method === null ? (int)config('v2board.reset_traffic_method', 0) : (int)$plan->reset_traffic_method;
+        Subscription::where('status', 'active')->where('expired_at', '>', time())->with('plan')->chunkById(100, function ($subscriptions) use ($today, $lastDay) {
+            foreach ($subscriptions as $subscription) {
+                $plan = $subscription->plan;
+                if (!$plan) continue;
+                $method = $plan->reset_traffic_method === null ? (int)config('v2board.reset_traffic_method', 0) : (int)$plan->reset_traffic_method;
             $shouldReset = $method === 0 && $today === '01';
             if ($method === 1) {
                 $expireDay = date('d', $subscription->expired_at);
@@ -140,10 +153,15 @@ class ResetTraffic extends Command
                 $subscription->last_reset_at = time();
                 $subscription->save();
                 if ($subscription->is_primary) {
-                    (new \App\Services\SubscriptionService())->ensurePrimary(\App\Models\User::find($subscription->user_id));
+                    $user = \App\Models\User::find($subscription->user_id);
+                    if ($user) {
+                        $user->transfer_enable = $subscription->transfer_enable;
+                        $user->save();
+                    }
                 }
             }
-        }
+            }
+        });
     }
 
     private function resetByExpireYear($builder): void

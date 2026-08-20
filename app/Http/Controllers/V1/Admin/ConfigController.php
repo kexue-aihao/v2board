@@ -60,10 +60,17 @@ class ConfigController extends Controller
 
     public function setTelegramWebhook(Request $request)
     {
-        $hookUrl = secure_url('/api/v1/guest/telegram/webhook?access_token=' . md5(config('v2board.telegram_bot_token', $request->input('telegram_bot_token'))));
-        $telegramService = new TelegramService($request->input('telegram_bot_token'));
+        $token = $request->input('telegram_bot_token', config('v2board.telegram_bot_token'));
+        $secretToken = bin2hex(random_bytes(32));
+        $hookUrl = secure_url('/api/v1/guest/telegram/webhook');
+        $telegramService = new TelegramService($token);
         $telegramService->getMe();
-        $telegramService->setWebhook($hookUrl);
+        $telegramService->setWebhook($hookUrl, ['secret_token' => $secretToken]);
+        $config = config('v2board');
+        $config['telegram_webhook_secret'] = $secretToken;
+        if (!\Illuminate\Support\Facades\File::put(base_path() . '/config/v2board.php', "<?php\n return " . var_export($config, true) . " ;", LOCK_EX)) {
+            abort(500, '保存Webhook密钥失败');
+        }
         return response([
             'data' => true
         ]);
@@ -135,7 +142,7 @@ class ConfigController extends Controller
             ],
             'server' => [
                 'server_api_url' => config('v2board.server_api_url'),
-                'server_token' => config('v2board.server_token'),
+                'server_token_configured' => !empty(config('v2board.server_token')),
                 'server_pull_interval' => config('v2board.server_pull_interval', 60),
                 'server_push_interval' => config('v2board.server_push_interval', 60),
                 'server_node_report_min_traffic' => config('v2board.server_node_report_min_traffic', 0),
@@ -163,7 +170,7 @@ class ConfigController extends Controller
             ],
             'telegram' => [
                 'telegram_bot_enable' => config('v2board.telegram_bot_enable', 0),
-                'telegram_bot_token' => config('v2board.telegram_bot_token'),
+                'telegram_bot_token_configured' => !empty(config('v2board.telegram_bot_token')),
                 'telegram_discuss_id' => config('v2board.telegram_discuss_id'),
                 'telegram_discuss_link' => config('v2board.telegram_discuss_link'),
                 'telegram_subscription_binding_enable' => (int)config('v2board.telegram_subscription_binding_enable', 0),
@@ -271,9 +278,18 @@ class ConfigController extends Controller
         $telegramDiscussId = array_key_exists('telegram_discuss_id', $data)
             ? trim((string)$data['telegram_discuss_id'])
             : $previousTelegramDiscussId;
-        $data = var_export($config, 1);
-        if (!File::put(base_path() . '/config/v2board.php', "<?php\n return $data ;")) {
+        $path = base_path() . '/config/v2board.php';
+        $tempPath = $path . '.tmp.' . bin2hex(random_bytes(8));
+        if (!File::put($tempPath, "<?php\n return " . var_export($config, 1) . " ;", LOCK_EX)) {
             abort(500, __('修改失败'));
+        }
+        @chmod($tempPath, 0644);
+        if (!@rename($tempPath, $path)) {
+            @unlink($tempPath);
+            abort(500, __('修改失败'));
+        }
+        if (function_exists('opcache_invalidate')) {
+            @opcache_invalidate($path, true);
         }
         if ($previousTelegramBindingEnabled === 1
             && ($telegramBindingEnabled === 0 || $telegramDiscussId !== $previousTelegramDiscussId)) {

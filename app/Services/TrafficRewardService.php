@@ -30,12 +30,16 @@ class TrafficRewardService
         if ($chatId !== null) $query->where('chat_id', (string)$chatId);
         $binding = $query->orderByDesc('updated_at')->first();
         if ($chatId !== null) return $binding ? User::find($binding->user_id) : null;
-        return $binding ? User::find($binding->user_id) : User::where('telegram_id', (string)$telegramUserId)->first();
+        return $binding ? User::find($binding->user_id) : null;
     }
 
     public function checkinStatus(User $user): array
     {
-        $subscription = $this->activePrimary($user);
+        try {
+            $subscription = $this->activePrimary($user);
+        } catch (RuntimeException) {
+            return ['checked_in' => false, 'reward_gb' => null, 'streak_days' => 0, 'expires_at' => null];
+        }
         $date = date('Y-m-d');
         $row = DailyCheckin::where('user_id', $user->id)->where('subscription_id', $subscription->id)->where('checkin_date', $date)->first();
         return ['checked_in' => (bool)$row, 'reward_gb' => $row ? (int)round($row->reward_bytes / self::GB) : null, 'streak_days' => $row ? (int)$row->streak_days : 0, 'expires_at' => $this->expiresAt($subscription)];
@@ -81,7 +85,9 @@ class TrafficRewardService
                 $symbol = random_int(1, 7);
                 return [$symbol, $symbol, $symbol];
             }
-            return [random_int(1, 7), random_int(1, 7), random_int(1, 7)];
+            $a = random_int(1, 7); $b = random_int(1, 7);
+                $c = $a === $b ? (($a % 7) + 1) : random_int(1, 7);
+                return [$a, $b, $c];
         }, $requestId);
     }
 
@@ -112,7 +118,7 @@ class TrafficRewardService
     private function grant(User $user, Subscription $subscription, int $bytes, string $type, string $source, string $uniqueKey, array $metadata): void
     {
         if ($bytes < self::MIN_GB * self::GB || $bytes > self::MAX_GB * self::GB) throw new RuntimeException('奖励流量超出范围');
-        $subscription->transfer_enable = (int)$subscription->transfer_enable + $bytes;
+        $subscription->transfer_enable = function_exists('bcadd') ? (int)bcadd((string)$subscription->transfer_enable, (string)$bytes) : (int)((float)$subscription->transfer_enable + $bytes);
         $subscription->save();
         if ($subscription->is_primary) {
             $user->transfer_enable = $subscription->transfer_enable;
@@ -152,10 +158,20 @@ class TrafficRewardService
             if ((int)config('v2board.reward_enable', 1) !== 1 || (int)config('v2board.reward_group_enable', 0) !== 1) throw new RuntimeException('群组娱乐已关闭');
             $user = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
             $subscription = $this->activePrimary($user);
-            $room = GameRoom::where('chat_id', (string)$chatId)->where('game', 'poker')->where('status', 'open')->lockForUpdate()->first();
+            $room = GameRoom::where('chat_id', (string)$chatId)->where('game', 'poker')->where('status', 'open')->where(function ($q) { $q->whereNull('expires_at')->orWhere('expires_at', '>', time()); })->lockForUpdate()->first();
             if (!$room) {
                 if ($action === 'start') throw new RuntimeException('没有可开始的开放牌局');
-                $room = GameRoom::create(['chat_id' => (string)$chatId, 'game' => 'poker', 'status' => 'open', 'players' => [], 'expires_at' => time() + 1800, 'created_at' => time(), 'updated_at' => time()]);
+                $lockKey = 'poker:create:' . $chatId;
+                $locked = \Illuminate\Support\Facades\Cache::lock($lockKey, 10)->get();
+                if (!$locked) throw new RuntimeException('牌局创建中，请稍后重试');
+                try {
+                    $room = GameRoom::where('chat_id', (string)$chatId)->where('game', 'poker')->where('status', 'open')->where(function ($q) { $q->whereNull('expires_at')->orWhere('expires_at', '>', time()); })->lockForUpdate()->first();
+                    if (!$room) {
+                        $room = GameRoom::create(['chat_id' => (string)$chatId, 'game' => 'poker', 'status' => 'open', 'players' => [], 'expires_at' => time() + 1800, 'created_at' => time(), 'updated_at' => time()]);
+                    }
+                } finally {
+                    \Illuminate\Support\Facades\Cache::lock($lockKey)->forceRelease();
+                }
             }
             $players = (array)$room->players;
             $ids = array_map('intval', array_column($players, 'user_id'));
@@ -171,7 +187,7 @@ class TrafficRewardService
                 $cards = [random_int(1, 13), random_int(1, 13), random_int(1, 13)];
                 sort($cards); $score = count(array_unique($cards)) === 1 ? 100 + $cards[0] : (count(array_unique($cards)) === 2 ? 50 + max($cards) : max($cards));
                 $hands[$player['user_id']] = ['cards' => $cards, 'score' => $score];
-                if ($score > $winnerScore) { $winnerScore = $score; $winner = (int)$player['user_id']; }
+                if ($score >= $winnerScore) { $winnerScore = $score; $winner = (int)$player['user_id']; }
             }
             $winnerPlayer = User::findOrFail($winner);
             $winnerSubscription = $this->activePrimary($winnerPlayer);

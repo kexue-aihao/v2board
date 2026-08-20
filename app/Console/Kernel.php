@@ -38,7 +38,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('check:ticket')->everyMinute();
         $schedule->command('check:renewal')->dailyAt('22:30');
         // reset
-        $schedule->command('reset:traffic')->daily();
+        $schedule->command('reset:traffic')->daily()->withoutOverlapping();
         $schedule->command('reset:log')->daily();
         // 每小时整点把订阅拉取日志增量聚合成「IP + 账号 + UA」累积记录。整点这个位置同时
         // 满足两件事：① 0:00 那次落在 audit:clean（0:40）之前，当天要被保留期删掉的原始行
