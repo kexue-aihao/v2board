@@ -1,1 +1,1 @@
-// Reward center is bundled directly into index.82dc6e81.js.
+// Reward center is implemented as the native Signature /reward navigation module.
