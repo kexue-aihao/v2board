@@ -9,6 +9,7 @@ use App\Models\TelegramSubscriptionBinding;
 use App\Models\TrafficRewardLog;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 
 class TrafficRewardService
@@ -26,11 +27,17 @@ class TrafficRewardService
 
     public function userForTelegram($telegramUserId, $chatId = null): ?User
     {
-        $query = TelegramSubscriptionBinding::where('telegram_user_id', (string)$telegramUserId)->where('status', 'active');
-        if ($chatId !== null) $query->where('chat_id', (string)$chatId);
-        $binding = $query->orderByDesc('updated_at')->first();
-        if ($chatId !== null) return $binding ? User::find($binding->user_id) : null;
-        return $binding ? User::find($binding->user_id) : null;
+        try {
+            if (Schema::hasTable('v2_telegram_subscription_binding')) {
+                $query = TelegramSubscriptionBinding::where('telegram_user_id', (string)$telegramUserId)->where('status', 'active');
+                if ($chatId !== null) $query->where('chat_id', (string)$chatId);
+                $binding = $query->orderByDesc('updated_at')->first();
+                if ($binding) return User::find($binding->user_id);
+            }
+        } catch (\Throwable) {
+            // table query failed, fall through to legacy telegram_id lookup
+        }
+        return User::where('telegram_id', (string)$telegramUserId)->first();
     }
 
     public function checkinStatus(User $user): array

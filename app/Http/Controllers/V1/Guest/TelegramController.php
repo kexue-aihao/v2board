@@ -195,7 +195,7 @@ class TelegramController extends Controller
             }
         } catch (\Throwable $e) {
             report($e);
-            $this->telegramService->sendMessage($msg->chat_id, '😵 处理命令时出现错误，请稍后重试。');
+            $this->telegramService->sendMessage($msg->chat_id, '😵 ' . $e->getMessage());
         }
     }
 
