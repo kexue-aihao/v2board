@@ -3,6 +3,7 @@
   "styles": [],
   "scripts": [
     "static/js/chunk-vendors.54b7378a.js",
-    "static/js/index.82dc6e81.js"
+    "static/js/index.82dc6e81.js",
+    "static/js/reward-center.js"
   ]
 }
