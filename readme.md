@@ -602,7 +602,7 @@ aaPanel 升级示例：
 
     PHP_BIN=/www/server/php/81/bin/php \
     PHP_INI=/www/server/php/81/etc/php.ini \
-    DEPLOY_BRANCH=dev bash update.sh
+    DEPLOY_BRANCH=debug bash update.sh
 
 update.sh 会执行 Git 拉取、Composer 安装、数据库升级、缓存清理、IP 缓存清理和 Webman 重启；不会每次自动执行历史 IP 回填和风险计算。
 

@@ -51,6 +51,30 @@ git show-ref --verify --quiet "refs/remotes/origin/$DEPLOY_BRANCH" || {
 }
 git reset --hard "origin/$DEPLOY_BRANCH"
 
+DEPLOY_REVISION="$(git rev-parse HEAD)"
+REMOTE_REVISION="$(git rev-parse "origin/$DEPLOY_BRANCH")"
+[ "$DEPLOY_REVISION" = "$REMOTE_REVISION" ] || {
+    echo "ERROR: Working tree revision does not match origin/$DEPLOY_BRANCH." >&2
+    exit 1
+}
+echo "Deployed revision: $DEPLOY_REVISION"
+
+# Verify the signature theme is using the current in-repo bundle. The async
+# chunk is content-addressed, so an old mapping means the site can keep
+# serving a cached reward implementation even after Git was updated.
+SIGNATURE_ASSET_DIR="$ROOT_DIR/public/theme/signature/assets/static/js"
+SIGNATURE_INDEX="$SIGNATURE_ASSET_DIR/index.82dc6e81.js"
+SIGNATURE_CHUNK_HASH="$(sed -n 's/.*2142:\"\([0-9a-f][0-9a-f]*\)\".*/\1/p' "$SIGNATURE_INDEX" | head -n 1)"
+[ -n "$SIGNATURE_CHUNK_HASH" ] && [ -f "$SIGNATURE_ASSET_DIR/2142.$SIGNATURE_CHUNK_HASH.js" ] || {
+    echo "ERROR: Signature theme reward chunk mapping is missing or points to a missing file." >&2
+    exit 1
+}
+if grep -Fq '2142:"6d6fa323"' "$SIGNATURE_INDEX" || grep -Fq 'signature-reward-center' "$SIGNATURE_INDEX"; then
+    echo "ERROR: Signature theme still contains the legacy reward asset mapping." >&2
+    exit 1
+fi
+echo "Signature reward bundle: 2142.$SIGNATURE_CHUNK_HASH.js"
+
 # The reseller page used to share its URL with public/reseller/. Remove only
 # the now-empty legacy asset directory so Nginx does not redirect /reseller
 # to a directory instead of the Laravel route.
