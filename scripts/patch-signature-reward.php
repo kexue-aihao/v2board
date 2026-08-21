@@ -59,8 +59,16 @@ if ($entry === false || $module === false) {
     fwrite(STDERR, "Unable to read Signature reward module.\n");
     exit(1);
 }
-$entry = preg_replace('/^\(function\(\)\{\"use strict\";var id=\"signature-reward-page\".*?\}\)\(\);/s', '', $entry, 1);
-$entry = $module . $entry;
+// 2026-08-21 修复黑屏：不要用脆弱正则剥离旧模块——旧模块内部有嵌套的 })();，
+// 非贪婪匹配会过早停下，残留破损代码导致 index.js SyntaxError，浏览器直接黑屏。
+// 改为定位 webpack entry 的特征前缀，丢弃其之前的全部内容（兼容任何脏状态）。
+$webpackMarker = '(()=>{var e={51406';
+$webpackPos = strpos($entry, $webpackMarker);
+if ($webpackPos === false) {
+    fwrite(STDERR, "Unable to locate webpack entry marker in Signature entry bundle.\n");
+    exit(1);
+}
+$entry = $module . substr($entry, $webpackPos);
 if (file_put_contents($entryPath, $entry, LOCK_EX) === false) {
     fwrite(STDERR, "Unable to write Signature entry bundle.\n");
     exit(1);
