@@ -45,11 +45,11 @@ class TrafficRewardService
         try {
             $subscription = $this->activePrimary($user);
         } catch (RuntimeException) {
-            return ['checked_in' => false, 'reward_gb' => null, 'streak_days' => 0, 'expires_at' => null];
+            return ['checked_in' => false, 'reward_gb' => null, 'streak_days' => 0, 'expires_at' => null, 'has_subscription' => false];
         }
         $date = date('Y-m-d');
         $row = DailyCheckin::where('user_id', $user->id)->where('subscription_id', $subscription->id)->where('checkin_date', $date)->first();
-        return ['checked_in' => (bool)$row, 'reward_gb' => $row ? (int)round($row->reward_bytes / self::GB) : null, 'streak_days' => $row ? (int)$row->streak_days : 0, 'expires_at' => $this->expiresAt($subscription)];
+        return ['checked_in' => (bool)$row, 'reward_gb' => $row ? (int)round($row->reward_bytes / self::GB) : null, 'streak_days' => $row ? (int)$row->streak_days : 0, 'expires_at' => $this->expiresAt($subscription), 'has_subscription' => true];
     }
 
     public function checkin(User $user, string $source = 'web'): array

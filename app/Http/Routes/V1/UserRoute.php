@@ -36,6 +36,7 @@ class UserRoute
             $router->get ('/getActiveSession', 'V1\\User\\UserController@getActiveSession');
             $router->post('/removeActiveSession', 'V1\\User\\UserController@removeActiveSession');
             // Rewards and games
+            $router->get ('/reward/checkin/status', 'V1\\User\\RewardController@checkinStatus');
             $router->get ('/reward/checkin-status', 'V1\\User\\RewardController@checkinStatus');
             $router->get ('/reward/history', 'V1\\User\\RewardController@history');
             $router->post('/reward/checkin', 'V1\\User\\RewardController@checkin');

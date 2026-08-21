@@ -68,6 +68,8 @@ if ($webpackPos === false) {
     fwrite(STDERR, "Unable to locate webpack entry marker in Signature entry bundle.\n");
     exit(1);
 }
+// The reward module must be the only prelude. Older deployments may contain
+// one or more copied versions before the webpack runtime.
 $entry = $module . substr($entry, $webpackPos);
 if (file_put_contents($entryPath, $entry, LOCK_EX) === false) {
     fwrite(STDERR, "Unable to write Signature entry bundle.\n");
