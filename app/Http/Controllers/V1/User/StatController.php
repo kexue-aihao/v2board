@@ -43,7 +43,7 @@ class StatController extends Controller
                 return [
                     'u' => 0,
                     'd' => (int)$row->reward_bytes,
-                    'record_at' => (int)$row->created_at->timestamp,
+                    'record_at' => (int)$row->getRawOriginal('created_at'),
                     'user_id' => (int)$row->user_id,
                     'server_rate' => 1,
                     'record_type' => 'reward',
