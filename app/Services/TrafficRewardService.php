@@ -110,10 +110,6 @@ class TrafficRewardService
             $key = 'game:' . $game . ':' . $subscription->id . ':' . $day . ':' . ($requestId !== '' ? $requestId : bin2hex(random_bytes(8)));
             $existing = TrafficRewardLog::where('unique_key', $key)->first();
             if ($existing) return ['game' => $game, 'result' => (array)($existing->metadata['result'] ?? []), 'reward_gb' => (int)($existing->metadata['gb'] ?? 0), 'reward_bytes' => (int)$existing->reward_bytes, 'expires_at' => $this->expiresAt($subscription)];
-            $limit = max(0, (int)config('v2board.reward_daily_game_limit', 3));
-            if ($limit > 0 && TrafficRewardLog::where('user_id', $user->id)->where('source', 'game')->whereBetween('created_at', [strtotime($day), strtotime($day . ' +1 day') - 1])->count() >= $limit) {
-                throw new RuntimeException('今日游戏次数已用完');
-            }
             $result = $resultFactory();
             $rewardGb = $this->gameReward($game, $result);
             $bytes = $rewardGb * self::GB;
