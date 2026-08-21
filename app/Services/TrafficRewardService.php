@@ -17,12 +17,27 @@ class TrafficRewardService
     public const GB = 1073741824;
     public const MIN_GB = 1;
     public const MAX_GB = 10;
+    public const MAX_GAME_GB = 100;
 
     public static function normalizeRewardGb($value, int $fallback = 1): int
     {
         $value = filter_var($value, FILTER_VALIDATE_INT);
         if ($value === false) $value = $fallback;
         return min(self::MAX_GB, max(self::MIN_GB, (int)$value));
+    }
+
+    private static function normalizeGameGb($value, int $fallback = 1): int
+    {
+        $value = filter_var($value, FILTER_VALIDATE_INT);
+        if ($value === false) $value = $fallback;
+        return min(self::MAX_GB, max(self::MIN_GB, (int)$value));
+    }
+
+    private static function normalizeOdds($value, int $fallback = 1): int
+    {
+        $value = filter_var($value, FILTER_VALIDATE_INT);
+        if ($value === false) $value = $fallback;
+        return min(10, max(1, (int)$value));
     }
 
     public function userForTelegram($telegramUserId, $chatId = null): ?User
@@ -110,17 +125,18 @@ class TrafficRewardService
             $key = 'game:' . $game . ':' . $subscription->id . ':' . $day . ':' . ($requestId !== '' ? $requestId : bin2hex(random_bytes(8)));
             $existing = TrafficRewardLog::where('unique_key', $key)->first();
             if ($existing) return ['game' => $game, 'result' => (array)($existing->metadata['result'] ?? []), 'reward_gb' => (int)($existing->metadata['gb'] ?? 0), 'reward_bytes' => (int)$existing->reward_bytes, 'expires_at' => $this->expiresAt($subscription)];
+            $this->assertGameDailyLimit($user->id, $game, $day);
             $result = $resultFactory();
             $rewardGb = $this->gameReward($game, $result);
             $bytes = $rewardGb * self::GB;
-            $this->grant($user, $subscription, $bytes, 'game', $source, $key, ['game' => $game, 'result' => $result, 'gb' => $rewardGb]);
+            $this->grant($user, $subscription, $bytes, 'game', $source, $key, ['game' => $game, 'result' => $result, 'gb' => $rewardGb], self::MAX_GAME_GB);
             return ['game' => $game, 'result' => $result, 'reward_gb' => $rewardGb, 'reward_bytes' => $bytes, 'expires_at' => $this->expiresAt($subscription)];
         });
     }
 
-    private function grant(User $user, Subscription $subscription, int $bytes, string $type, string $source, string $uniqueKey, array $metadata): void
+    private function grant(User $user, Subscription $subscription, int $bytes, string $type, string $source, string $uniqueKey, array $metadata, int $maxGb = self::MAX_GB): void
     {
-        if ($bytes < self::MIN_GB * self::GB || $bytes > self::MAX_GB * self::GB) throw new RuntimeException('奖励流量超出范围');
+        if ($bytes < self::MIN_GB * self::GB || $bytes > $maxGb * self::GB) throw new RuntimeException('奖励流量超出范围');
         $subscription->transfer_enable = function_exists('bcadd') ? (int)bcadd((string)$subscription->transfer_enable, (string)$bytes) : (int)((float)$subscription->transfer_enable + $bytes);
         $subscription->save();
         if ($subscription->is_primary) {
@@ -150,9 +166,25 @@ class TrafficRewardService
 
     private function gameReward(string $game, $result): int
     {
-        if ($game === 'dice') return ((int)$result === min(6, max(1, (int)config('v2board.reward_dice_win_face', 6))) ? self::normalizeRewardGb(config('v2board.reward_dice_six_gb', 10), 10) : 1);
-        if (is_array($result) && count(array_unique($result)) === 1) return self::normalizeRewardGb(config('v2board.reward_slots_triple_gb', 10), 10);
-        return 1;
+        $bet = self::normalizeGameGb(config('v2board.reward_' . $game . '_bet_gb', 1));
+        $odds = self::normalizeOdds(config('v2board.reward_' . $game . '_odds', 1));
+        $won = $game === 'dice'
+            ? (int)$result === min(6, max(1, (int)config('v2board.reward_dice_win_face', 6)))
+            : is_array($result) && count(array_unique($result)) === 1;
+        return min(self::MAX_GAME_GB, $bet * ($won ? $odds : 1));
+    }
+
+    private function assertGameDailyLimit(int $userId, string $game, string $day): void
+    {
+        $limit = max(0, (int)config('v2board.reward_' . $game . '_daily_limit', 0));
+        if ($limit === 0) return;
+        $prefix = 'game:' . $game . ':';
+        $count = TrafficRewardLog::where('user_id', $userId)
+            ->where('source', 'game')
+            ->where('unique_key', 'like', $prefix . '%')
+            ->whereBetween('created_at', [strtotime($day), strtotime($day . ' +1 day') - 1])
+            ->count();
+        if ($count >= $limit) throw new RuntimeException('今日' . ($game === 'dice' ? '骰子' : '老虎机') . '次数已用完');
     }
 
     public function playPoker(User $user, string $chatId, string $action = 'join', string $source = 'telegram_group'): array
@@ -194,12 +226,27 @@ class TrafficRewardService
             }
             $winnerPlayer = User::findOrFail($winner);
             $winnerSubscription = $this->activePrimary($winnerPlayer);
-            $gb = self::normalizeRewardGb(config('v2board.reward_poker_winner_gb', 5), 5);
+            $this->assertPokerDailyLimit($winnerPlayer->id, date('Y-m-d'));
+            $bet = self::normalizeGameGb(config('v2board.reward_poker_bet_gb', 1));
+            $odds = self::normalizeOdds(config('v2board.reward_poker_odds', 5), 5);
+            $gb = min(self::MAX_GAME_GB, $bet * $odds);
             $key = 'poker:' . $room->id . ':' . $winner . ':' . bin2hex(random_bytes(8));
-            $this->grant($winnerPlayer, $winnerSubscription, $gb * self::GB, 'game', $source, $key, ['game' => 'poker', 'room_id' => $room->id, 'hands' => $hands, 'gb' => $gb]);
+            $this->grant($winnerPlayer, $winnerSubscription, $gb * self::GB, 'game', $source, $key, ['game' => 'poker', 'room_id' => $room->id, 'hands' => $hands, 'gb' => $gb], self::MAX_GAME_GB);
             $room->status = 'settled'; $room->result = ['winner' => $winner, 'hands' => $hands]; $room->save();
             return ['status' => 'settled', 'room_id' => $room->id, 'winner_user_id' => $winner, 'reward_gb' => $gb];
         });
+    }
+
+    private function assertPokerDailyLimit(int $userId, string $day): void
+    {
+        $limit = max(0, (int)config('v2board.reward_poker_daily_limit', 0));
+        if ($limit === 0) return;
+        $count = TrafficRewardLog::where('user_id', $userId)
+            ->where('source', 'game')
+            ->where('unique_key', 'like', 'poker:%')
+            ->whereBetween('created_at', [strtotime($day), strtotime($day . ' +1 day') - 1])
+            ->count();
+        if ($count >= $limit) throw new RuntimeException('今日炸金花次数已用完');
     }
 
     private function expiresAt(Subscription $subscription): ?int
