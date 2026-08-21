@@ -23,7 +23,6 @@ deploy_download_composer
 deploy_install_composer
 deploy_patch_adapterman
 deploy_php scripts/patch-admin-reward.php
-deploy_php scripts/patch-signature-reward.php
 deploy_check_mmdb
 
 deploy_php artisan v2board:install
