@@ -33,11 +33,11 @@ class TrafficRewardService
         return min(self::MAX_GB, max(self::MIN_GB, (int)$value));
     }
 
-    private static function normalizeOdds($value, int $fallback = 1): int
+    private static function normalizeProbability($value, int $fallback = 100): int
     {
         $value = filter_var($value, FILTER_VALIDATE_INT);
         if ($value === false) $value = $fallback;
-        return min(10, max(1, (int)$value));
+        return min(100, max(0, (int)$value));
     }
 
     public function userForTelegram($telegramUserId, $chatId = null): ?User
@@ -167,11 +167,12 @@ class TrafficRewardService
     private function gameReward(string $game, $result): int
     {
         $bet = self::normalizeGameGb(config('v2board.reward_' . $game . '_bet_gb', 1));
-        $odds = self::normalizeOdds(config('v2board.reward_' . $game . '_odds', 1));
-        $won = $game === 'dice'
+        $probability = self::normalizeProbability(config('v2board.reward_' . $game . '_odds', $game === 'poker' ? 5 : 10), $game === 'poker' ? 5 : 10);
+        $matched = $game === 'dice'
             ? (int)$result === min(6, max(1, (int)config('v2board.reward_dice_win_face', 6)))
             : is_array($result) && count(array_unique($result)) === 1;
-        return min(self::MAX_GAME_GB, $bet * ($won ? $odds : 1));
+        $won = $matched && ($probability >= 100 || ($probability > 0 && random_int(1, 100) <= $probability));
+        return $won ? min(self::MAX_GAME_GB, $bet) : self::MIN_GB;
     }
 
     private function assertGameDailyLimit(int $userId, string $game, string $day): void
@@ -228,8 +229,9 @@ class TrafficRewardService
             $winnerSubscription = $this->activePrimary($winnerPlayer);
             $this->assertPokerDailyLimit($winnerPlayer->id, date('Y-m-d'));
             $bet = self::normalizeGameGb(config('v2board.reward_poker_bet_gb', 1));
-            $odds = self::normalizeOdds(config('v2board.reward_poker_odds', 5), 5);
-            $gb = min(self::MAX_GAME_GB, $bet * $odds);
+            $probability = self::normalizeProbability(config('v2board.reward_poker_odds', 5), 5);
+            $won = $probability >= 100 || ($probability > 0 && random_int(1, 100) <= $probability);
+            $gb = $won ? min(self::MAX_GAME_GB, $bet) : self::MIN_GB;
             $key = 'poker:' . $room->id . ':' . $winner . ':' . bin2hex(random_bytes(8));
             $this->grant($winnerPlayer, $winnerSubscription, $gb * self::GB, 'game', $source, $key, ['game' => 'poker', 'room_id' => $room->id, 'hands' => $hands, 'gb' => $gb], self::MAX_GAME_GB);
             $room->status = 'settled'; $room->result = ['winner' => $winner, 'hands' => $hands]; $room->save();

@@ -22,15 +22,15 @@ class RewardController extends Controller
             'reward_enable' => 'required|in:0,1',
             'reward_dice_daily_limit' => 'required|integer|min:0|max:100',
             'reward_dice_bet_gb' => 'required|integer|min:1|max:10',
-            'reward_dice_odds' => 'required|integer|min:1|max:10',
+            'reward_dice_odds' => 'required|integer|min:0|max:100',
             'reward_dice_win_face' => 'required|integer|min:1|max:6',
             'reward_slots_daily_limit' => 'required|integer|min:0|max:100',
             'reward_slots_bet_gb' => 'required|integer|min:1|max:10',
-            'reward_slots_odds' => 'required|integer|min:1|max:10',
+            'reward_slots_odds' => 'required|integer|min:0|max:100',
             'reward_slots_jackpot_rate' => 'required|integer|min:1|max:10000',
             'reward_poker_daily_limit' => 'required|integer|min:0|max:100',
             'reward_poker_bet_gb' => 'required|integer|min:1|max:10',
-            'reward_poker_odds' => 'required|integer|min:1|max:10',
+            'reward_poker_odds' => 'required|integer|min:0|max:100',
             'reward_group_enable' => 'required|in:0,1',
         ]);
         $config = config('v2board');
