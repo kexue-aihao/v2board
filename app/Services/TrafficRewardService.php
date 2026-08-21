@@ -17,7 +17,7 @@ class TrafficRewardService
     public const GB = 1073741824;
     public const MIN_GB = 1;
     public const MAX_GB = 10;
-    public const MAX_GAME_GB = 100;
+    public const MAX_GAME_GB = 1000;
 
     public static function normalizeRewardGb($value, int $fallback = 1): int
     {
@@ -127,10 +127,9 @@ class TrafficRewardService
             if ($existing) return ['game' => $game, 'result' => (array)($existing->metadata['result'] ?? []), 'reward_gb' => (int)($existing->metadata['gb'] ?? 0), 'reward_bytes' => (int)$existing->reward_bytes, 'expires_at' => $this->expiresAt($subscription)];
             $this->assertGameDailyLimit($user->id, $game, $day);
             $result = $resultFactory();
-            $rewardGb = $this->gameReward($game, $result);
-            $bytes = $rewardGb * self::GB;
-            $this->grant($user, $subscription, $bytes, 'game', $source, $key, ['game' => $game, 'result' => $result, 'gb' => $rewardGb], self::MAX_GAME_GB);
-            return ['game' => $game, 'result' => $result, 'reward_gb' => $rewardGb, 'reward_bytes' => $bytes, 'expires_at' => $this->expiresAt($subscription)];
+            $settlement = $this->gameSettlement($game, $result);
+            $netBytes = $this->settleWager($user, $subscription, $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, ['game' => $game, 'result' => $result, 'won' => $settlement['won']]);
+            return ['game' => $game, 'result' => $result, 'won' => $settlement['won'], 'reward_gb' => $settlement['payout_gb'], 'reward_bytes' => $netBytes, 'bet_gb' => $settlement['bet_gb'], 'payout_gb' => $settlement['payout_gb'], 'expires_at' => $this->expiresAt($subscription)];
         });
     }
 
@@ -164,15 +163,40 @@ class TrafficRewardService
         return min(365, (int)$previous->streak_days + 1);
     }
 
-    private function gameReward(string $game, $result): int
+    private function gameSettlement(string $game, $result): array
     {
         $bet = self::normalizeGameGb(config('v2board.reward_' . $game . '_bet_gb', 1));
         $probability = self::normalizeProbability(config('v2board.reward_' . $game . '_odds', $game === 'poker' ? 5 : 10), $game === 'poker' ? 5 : 10);
         $matched = $game === 'dice'
             ? (int)$result === min(6, max(1, (int)config('v2board.reward_dice_win_face', 6)))
-            : is_array($result) && count(array_unique($result)) === 1;
+            : ($game === 'poker' ? (bool)$result : is_array($result) && count(array_unique($result)) === 1);
         $won = $matched && ($probability >= 100 || ($probability > 0 && random_int(1, 100) <= $probability));
-        return $won ? min(self::MAX_GAME_GB, $bet) : self::MIN_GB;
+        return ['bet_gb' => $bet, 'payout_gb' => $won ? min(self::MAX_GAME_GB, $bet * $probability) : 0, 'won' => $won];
+    }
+
+    private function settleWager(User $user, Subscription $subscription, int $betGb, int $payoutGb, string $type, string $source, string $uniqueKey, array $metadata): int
+    {
+        $betBytes = $betGb * self::GB;
+        $payoutBytes = $payoutGb * self::GB;
+        $usedBytes = (int)$subscription->u + (int)$subscription->d;
+        $availableBytes = (int)$subscription->transfer_enable - $usedBytes;
+        if ($availableBytes < $betBytes) throw new RuntimeException('剩余流量不足，无法下注');
+        $netBytes = $payoutBytes - $betBytes;
+        $newTransferEnable = (int)$subscription->transfer_enable + $netBytes;
+        if ($newTransferEnable < $usedBytes) throw new RuntimeException('剩余流量不足，无法完成结算');
+        $subscription->transfer_enable = $newTransferEnable;
+        $subscription->save();
+        if ($subscription->is_primary) {
+            $user->transfer_enable = $subscription->transfer_enable;
+            $user->save();
+        }
+        TrafficRewardLog::create([
+            'user_id' => $user->id, 'subscription_id' => $subscription->id, 'source' => $type,
+            'entrypoint' => $source, 'reward_bytes' => $netBytes, 'unique_key' => $uniqueKey,
+            'metadata' => array_merge($metadata, ['bet_gb' => $betGb, 'payout_gb' => $payoutGb, 'gb' => $payoutGb, 'bet_bytes' => $betBytes, 'payout_bytes' => $payoutBytes, 'net_bytes' => $netBytes]),
+            'created_at' => time(), 'updated_at' => time(),
+        ]);
+        return $netBytes;
     }
 
     private function assertGameDailyLimit(int $userId, string $game, string $day): void
@@ -225,17 +249,27 @@ class TrafficRewardService
                 $hands[$player['user_id']] = ['cards' => $cards, 'score' => $score];
                 if ($score >= $winnerScore) { $winnerScore = $score; $winner = (int)$player['user_id']; }
             }
-            $winnerPlayer = User::findOrFail($winner);
-            $winnerSubscription = $this->activePrimary($winnerPlayer);
-            $this->assertPokerDailyLimit($winnerPlayer->id, date('Y-m-d'));
-            $bet = self::normalizeGameGb(config('v2board.reward_poker_bet_gb', 1));
-            $probability = self::normalizeProbability(config('v2board.reward_poker_odds', 5), 5);
-            $won = $probability >= 100 || ($probability > 0 && random_int(1, 100) <= $probability);
-            $gb = $won ? min(self::MAX_GAME_GB, $bet) : self::MIN_GB;
-            $key = 'poker:' . $room->id . ':' . $winner . ':' . bin2hex(random_bytes(8));
-            $this->grant($winnerPlayer, $winnerSubscription, $gb * self::GB, 'game', $source, $key, ['game' => 'poker', 'room_id' => $room->id, 'hands' => $hands, 'gb' => $gb], self::MAX_GAME_GB);
+            $playerIds = array_map('intval', array_column($players, 'user_id'));
+            $playerUsers = User::whereIn('id', $playerIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+            $playerSubscriptions = [];
+            foreach ($playerIds as $playerId) {
+                if (!$playerUsers->has($playerId)) throw new RuntimeException('牌局中存在无效玩家');
+                $playerSubscriptions[$playerId] = $this->activePrimary($playerUsers->get($playerId));
+                $this->assertPokerDailyLimit($playerId, date('Y-m-d'));
+            }
+            $winnerSettlement = null;
+            $winnerNetBytes = 0;
+            foreach ($playerIds as $playerId) {
+                $settlement = $this->gameSettlement('poker', $playerId === $winner);
+                $key = 'poker:' . $room->id . ':' . $playerId . ':' . bin2hex(random_bytes(8));
+                $netBytes = $this->settleWager($playerUsers->get($playerId), $playerSubscriptions[$playerId], $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, ['game' => 'poker', 'room_id' => $room->id, 'hands' => $hands, 'winner_user_id' => $winner, 'won' => $settlement['won']]);
+                if ($playerId === $winner) {
+                    $winnerSettlement = $settlement;
+                    $winnerNetBytes = $netBytes;
+                }
+            }
             $room->status = 'settled'; $room->result = ['winner' => $winner, 'hands' => $hands]; $room->save();
-            return ['status' => 'settled', 'room_id' => $room->id, 'winner_user_id' => $winner, 'reward_gb' => $gb];
+            return ['status' => 'settled', 'room_id' => $room->id, 'winner_user_id' => $winner, 'won' => $winnerSettlement['won'], 'reward_gb' => $winnerSettlement['payout_gb'], 'reward_bytes' => $winnerNetBytes, 'bet_gb' => $winnerSettlement['bet_gb'], 'payout_gb' => $winnerSettlement['payout_gb']];
         });
     }
 

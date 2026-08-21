@@ -39,7 +39,7 @@ class StatController extends Controller
             ->get()
             ->map(function ($row) {
                 $metadata = (array)$row->metadata;
-                $label = $row->source === 'checkin' ? '每日签到' : (($metadata['game'] ?? '') === 'slots' ? '老虎机奖励' : '骰子奖励');
+                $label = $row->source === 'checkin' ? '每日签到' : (($metadata['game'] ?? '') === 'slots' ? '老虎机娱乐' : (($metadata['game'] ?? '') === 'poker' ? '炸金花娱乐' : '骰子娱乐'));
                 return [
                     'u' => 0,
                     'd' => (int)$row->reward_bytes,
