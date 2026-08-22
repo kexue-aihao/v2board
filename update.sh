@@ -64,7 +64,7 @@ echo "Deployed revision: $DEPLOY_REVISION"
 # serving a cached reward implementation even after Git was updated.
 SIGNATURE_ASSET_DIR="$ROOT_DIR/public/theme/signature/assets/static/js"
 SIGNATURE_INDEX="$SIGNATURE_ASSET_DIR/index.82dc6e81.js"
-SIGNATURE_CHUNK_HASH="$(sed -n 's/.*2142:\"\([0-9a-f][0-9a-f]*\)\".*/\1/p' "$SIGNATURE_INDEX" | head -n 1)"
+SIGNATURE_CHUNK_HASH="$(grep -o '2142:\"[0-9a-f][0-9a-f]*\"' "$SIGNATURE_INDEX" | head -n 1 | sed -n 's/.*:\"\([0-9a-f][0-9a-f]*\)\"/\1/p')"
 [ -n "$SIGNATURE_CHUNK_HASH" ] && [ -f "$SIGNATURE_ASSET_DIR/2142.$SIGNATURE_CHUNK_HASH.js" ] || {
     echo "ERROR: Signature theme reward chunk mapping is missing or points to a missing file." >&2
     exit 1

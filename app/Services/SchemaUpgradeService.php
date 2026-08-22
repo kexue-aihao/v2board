@@ -1426,5 +1426,17 @@ class SchemaUpgradeService
             KEY `chat_game_status` (`chat_id`, `game`, `status`),
             KEY `status_expires` (`status`, `expires_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_user_game_setting` (
+            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `game` varchar(32) NOT NULL,
+            `bet_gb` int(11) NOT NULL DEFAULT '1',
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `user_game` (`user_id`, `game`),
+            KEY `user_id` (`user_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     }
 }

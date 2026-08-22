@@ -14,6 +14,25 @@ class RewardController extends Controller
         return response(['data' => (new TrafficRewardService())->checkinStatus(\App\Models\User::findOrFail($request->user['id']))]);
     }
 
+    public function settings(Request $request)
+    {
+        return response(['data' => (new TrafficRewardService())->gameSettings(\App\Models\User::findOrFail($request->user['id']))]);
+    }
+
+    public function saveSettings(Request $request)
+    {
+        try {
+            $data = $request->validate([
+                'dice_bet_gb' => 'required|integer|min:1|max:10',
+                'slots_bet_gb' => 'required|integer|min:1|max:10',
+                'poker_bet_gb' => 'required|integer|min:1|max:10',
+            ]);
+            return response(['data' => (new TrafficRewardService())->saveGameSettings(\App\Models\User::findOrFail($request->user['id']), $data)]);
+        } catch (RuntimeException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+    }
+
     public function checkin(Request $request)
     {
         return $this->runReward(function () use ($request) {

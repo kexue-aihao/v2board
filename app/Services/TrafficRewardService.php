@@ -7,6 +7,7 @@ use App\Models\GameRoom;
 use App\Models\Subscription;
 use App\Models\TelegramSubscriptionBinding;
 use App\Models\TrafficRewardLog;
+use App\Models\UserGameSetting;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -67,6 +68,30 @@ class TrafficRewardService
         return ['checked_in' => (bool)$row, 'reward_gb' => $row ? (int)round($row->reward_bytes / self::GB) : null, 'streak_days' => $row ? (int)$row->streak_days : 0, 'expires_at' => $this->expiresAt($subscription)];
     }
 
+    public function gameSettings(User $user): array
+    {
+        $settings = UserGameSetting::where('user_id', $user->id)->pluck('bet_gb', 'game');
+        return [
+            'dice_bet_gb' => self::normalizeGameGb($settings['dice'] ?? 1),
+            'slots_bet_gb' => self::normalizeGameGb($settings['slots'] ?? 1),
+            'poker_bet_gb' => self::normalizeGameGb($settings['poker'] ?? 1),
+        ];
+    }
+
+    public function saveGameSettings(User $user, array $values): array
+    {
+        return DB::transaction(function () use ($user, $values) {
+            $user = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
+            foreach (['dice', 'slots', 'poker'] as $game) {
+                UserGameSetting::updateOrCreate(
+                    ['user_id' => $user->id, 'game' => $game],
+                    ['bet_gb' => self::normalizeGameGb($values[$game . '_bet_gb'] ?? 1), 'updated_at' => time()]
+                );
+            }
+            return $this->gameSettings($user);
+        });
+    }
+
     public function checkin(User $user, string $source = 'web'): array
     {
         return DB::transaction(function () use ($user, $source) {
@@ -124,10 +149,22 @@ class TrafficRewardService
             if ($requestId !== '' && !preg_match('/^[A-Za-z0-9._:-]{8,100}$/', $requestId)) throw new RuntimeException('请求标识格式无效');
             $key = 'game:' . $game . ':' . $subscription->id . ':' . $day . ':' . ($requestId !== '' ? $requestId : bin2hex(random_bytes(8)));
             $existing = TrafficRewardLog::where('unique_key', $key)->first();
-            if ($existing) return ['game' => $game, 'result' => (array)($existing->metadata['result'] ?? []), 'reward_gb' => (int)($existing->metadata['gb'] ?? 0), 'reward_bytes' => (int)$existing->reward_bytes, 'expires_at' => $this->expiresAt($subscription)];
+            if ($existing) {
+                $metadata = (array)$existing->metadata;
+                return [
+                    'game' => $game,
+                    'result' => (array)($metadata['result'] ?? []),
+                    'won' => (bool)($metadata['won'] ?? false),
+                    'reward_gb' => (int)($metadata['payout_gb'] ?? $metadata['gb'] ?? 0),
+                    'reward_bytes' => (int)$existing->reward_bytes,
+                    'bet_gb' => (int)($metadata['bet_gb'] ?? self::MIN_GB),
+                    'payout_gb' => (int)($metadata['payout_gb'] ?? $metadata['gb'] ?? 0),
+                    'expires_at' => $this->expiresAt($subscription),
+                ];
+            }
             $this->assertGameDailyLimit($user->id, $game, $day);
             $result = $resultFactory();
-            $settlement = $this->gameSettlement($game, $result);
+            $settlement = $this->gameSettlement($game, $result, $user);
             $netBytes = $this->settleWager($user, $subscription, $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, ['game' => $game, 'result' => $result, 'won' => $settlement['won']]);
             return ['game' => $game, 'result' => $result, 'won' => $settlement['won'], 'reward_gb' => $settlement['payout_gb'], 'reward_bytes' => $netBytes, 'bet_gb' => $settlement['bet_gb'], 'payout_gb' => $settlement['payout_gb'], 'expires_at' => $this->expiresAt($subscription)];
         });
@@ -163,15 +200,21 @@ class TrafficRewardService
         return min(365, (int)$previous->streak_days + 1);
     }
 
-    private function gameSettlement(string $game, $result): array
+    private function gameSettlement(string $game, $result, ?User $user = null): array
     {
-        $bet = self::normalizeGameGb(config('v2board.reward_' . $game . '_bet_gb', 1));
+        $bet = $user ? $this->userGameBetGb($user, $game) : self::MIN_GB;
         $probability = self::normalizeProbability(config('v2board.reward_' . $game . '_odds', $game === 'poker' ? 5 : 10), $game === 'poker' ? 5 : 10);
         $matched = $game === 'dice'
             ? (int)$result === min(6, max(1, (int)config('v2board.reward_dice_win_face', 6)))
             : ($game === 'poker' ? (bool)$result : is_array($result) && count(array_unique($result)) === 1);
         $won = $matched && ($probability >= 100 || ($probability > 0 && random_int(1, 100) <= $probability));
         return ['bet_gb' => $bet, 'payout_gb' => $won ? min(self::MAX_GAME_GB, $bet * $probability) : 0, 'won' => $won];
+    }
+
+    private function userGameBetGb(User $user, string $game): int
+    {
+        $value = UserGameSetting::where('user_id', $user->id)->where('game', $game)->value('bet_gb');
+        return self::normalizeGameGb($value ?? 1);
     }
 
     private function settleWager(User $user, Subscription $subscription, int $betGb, int $payoutGb, string $type, string $source, string $uniqueKey, array $metadata): int
@@ -260,7 +303,7 @@ class TrafficRewardService
             $winnerSettlement = null;
             $winnerNetBytes = 0;
             foreach ($playerIds as $playerId) {
-                $settlement = $this->gameSettlement('poker', $playerId === $winner);
+                $settlement = $this->gameSettlement('poker', $playerId === $winner, $playerUsers->get($playerId));
                 $key = 'poker:' . $room->id . ':' . $playerId . ':' . bin2hex(random_bytes(8));
                 $netBytes = $this->settleWager($playerUsers->get($playerId), $playerSubscriptions[$playerId], $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, ['game' => 'poker', 'room_id' => $room->id, 'hands' => $hands, 'winner_user_id' => $winner, 'won' => $settlement['won']]);
                 if ($playerId === $winner) {

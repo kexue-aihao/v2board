@@ -161,15 +161,12 @@ class ConfigController extends Controller
             'rewards' => [
                 'reward_enable' => (int)config('v2board.reward_enable', 1),
                 'reward_dice_daily_limit' => (int)config('v2board.reward_dice_daily_limit', 0),
-                'reward_dice_bet_gb' => (int)config('v2board.reward_dice_bet_gb', 1),
                 'reward_dice_odds' => (int)config('v2board.reward_dice_odds', 10),
                 'reward_dice_win_face' => (int)config('v2board.reward_dice_win_face', 6),
                 'reward_slots_daily_limit' => (int)config('v2board.reward_slots_daily_limit', 0),
-                'reward_slots_bet_gb' => (int)config('v2board.reward_slots_bet_gb', 1),
                 'reward_slots_odds' => (int)config('v2board.reward_slots_odds', 10),
                 'reward_slots_jackpot_rate' => (int)config('v2board.reward_slots_jackpot_rate', 100),
                 'reward_poker_daily_limit' => (int)config('v2board.reward_poker_daily_limit', 0),
-                'reward_poker_bet_gb' => (int)config('v2board.reward_poker_bet_gb', 1),
                 'reward_poker_odds' => (int)config('v2board.reward_poker_odds', 5),
                 'reward_group_enable' => (int)config('v2board.reward_group_enable', 0)
             ],
