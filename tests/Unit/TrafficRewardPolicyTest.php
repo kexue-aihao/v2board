@@ -37,4 +37,14 @@ class TrafficRewardPolicyTest extends TestCase
             TrafficRewardService::splitTrafficChange(0)
         );
     }
+
+    public function testGameWagersUseTheDedicatedMaximum(): void
+    {
+        $service = new \ReflectionClass(TrafficRewardService::class);
+        $method = $service->getMethod('normalizeGameGb');
+        $method->setAccessible(true);
+
+        $this->assertSame(100, $method->invoke(null, 100));
+        $this->assertSame(TrafficRewardService::MAX_GAME_GB, $method->invoke(null, 5000));
+    }
 }

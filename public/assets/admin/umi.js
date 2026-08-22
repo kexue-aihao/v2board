@@ -46319,11 +46319,16 @@
                     title: "\u65e5\u671f",
                     dataIndex: "record_at",
                     key: "record_at",
-                    render: e=>d()(1e3 * e).format("YYYY-MM-DD")
+                    render: e=>d()(1e3 * e).format("YYYY-MM-DD HH:mm:ss")
+                }, {
+                    title: "\u7c7b\u578b",
+                    dataIndex: "reward_label",
+                    key: "reward_label",
+                    render: e=>e || "\u6d41\u91cf\u4f7f\u7528"
                 }, {
                     title: "\u4e0a\u884c",
                     dataIndex: "u",
-                    key: "d",
+                    key: "u",
                     align: "right",
                     render: e=>Object(p["b"])(e)
                 }, {
@@ -46337,6 +46342,22 @@
                     dataIndex: "server_rate",
                     key: "server_rate",
                     align: "right"
+                }, {
+                    title: "\u589e\u52a0\u6d41\u91cf",
+                    dataIndex: "increase_bytes",
+                    key: "increase_bytes",
+                    align: "right",
+                    render: e=>Object(p["b"])(e || 0)
+                }, {
+                    title: "\u6263\u9664\u6d41\u91cf",
+                    dataIndex: "deducted_bytes",
+                    key: "deducted_bytes",
+                    align: "right",
+                    render: e=>Object(p["b"])(e || 0)
+                }, {
+                    title: "\u8be6\u60c5",
+                    dataIndex: "reward_detail",
+                    key: "reward_detail"
                 }];
                 return u.a.createElement(u.a.Fragment, null, u.a.cloneElement(this.props.children, {
                     onClick: ()=>this.show()
@@ -46364,6 +46385,10 @@
                     }),
                     columns: l,
                     dataSource: n,
+                    rowKey: "record_key",
+                    scroll: {
+                        x: 1200
+                    },
                     onChange: e=>{
                         this.setState({
                             pagination: e

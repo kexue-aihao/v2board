@@ -19,6 +19,7 @@ use App\Models\StatUser;
 use App\Models\Ticket;
 use App\Models\User;
 use App\Services\StatisticalService;
+use App\Services\TrafficRewardService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -355,17 +356,104 @@ class StatController extends Controller
         $request->validate([
             'user_id' => 'required|integer'
         ]);
-        $current = $request->input('current') ? $request->input('current') : 1;
-        $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
-        $builder = StatUser::orderBy('record_at', 'DESC')->where('user_id', $request->input('user_id'));
+        $userId = (int)$request->input('user_id');
+        $current = max(1, (int)$request->input('current', 1));
+        $pageSize = max(10, min(100, (int)$request->input('pageSize', 10)));
 
+        $traffic = DB::table('v2_stat_user')
+            ->where('user_id', $userId)
+            ->selectRaw("CONCAT('traffic:', id) AS record_key")
+            ->addSelect([
+                'record_at',
+                'u',
+                'd',
+                'server_rate',
+                DB::raw("'traffic' AS record_type"),
+                DB::raw('NULL AS source'),
+                DB::raw('0 AS reward_bytes'),
+                DB::raw('NULL AS metadata'),
+            ]);
+
+        if (Schema::hasTable('v2_traffic_reward_log')) {
+            $rewards = DB::table('v2_traffic_reward_log')
+                ->where('user_id', $userId)
+                ->selectRaw("CONCAT('reward:', id) AS record_key")
+                ->addSelect([
+                    DB::raw('created_at AS record_at'),
+                    DB::raw('0 AS u'),
+                    DB::raw('0 AS d'),
+                    DB::raw('1 AS server_rate'),
+                    DB::raw("'reward' AS record_type"),
+                    'source',
+                    'reward_bytes',
+                    'metadata',
+                ]);
+            $traffic->unionAll($rewards);
+        }
+
+        $builder = DB::query()
+            ->fromSub($traffic, 'traffic_records')
+            ->orderByDesc('record_at')
+            ->orderByDesc('record_key');
         $total = $builder->count();
-        $records = $builder->forPage($current, $pageSize)
-            ->get();
+        $records = $builder->forPage($current, $pageSize)->get()
+            ->map(function ($row) {
+                $row->increase_bytes = 0;
+                $row->deducted_bytes = (int)round(((int)$row->u + (int)$row->d) * (float)$row->server_rate);
+                $row->reward_label = '流量使用';
+                $row->reward_detail = '节点流量按倍率扣除';
+
+                if ($row->record_type !== 'reward') {
+                    return $row;
+                }
+
+                $metadata = is_string($row->metadata)
+                    ? (json_decode($row->metadata, true) ?: [])
+                    : (array)$row->metadata;
+                $change = TrafficRewardService::splitTrafficChange((int)$row->reward_bytes);
+                $row->increase_bytes = $change['increase_bytes'];
+                $row->deducted_bytes = $change['deducted_bytes'];
+                $row->reward_label = $this->rewardLogLabel((string)$row->source, $metadata);
+                $row->reward_detail = $this->rewardLogDetail((string)$row->source, $metadata, (int)$row->reward_bytes);
+                return $row;
+            });
         return [
             'data' => $records,
             'total' => $total
         ];
+    }
+
+    private function rewardLogLabel(string $source, array $metadata): string
+    {
+        if ($source === 'checkin') {
+            return '每日签到';
+        }
+
+        return [
+            'dice' => '骰子娱乐',
+            'slots' => '老虎机娱乐',
+            'poker' => '炸金花娱乐',
+        ][$metadata['game'] ?? ''] ?? '游戏娱乐';
+    }
+
+    private function rewardLogDetail(string $source, array $metadata, int $rewardBytes): string
+    {
+        if ($source === 'checkin') {
+            $gb = $metadata['gb'] ?? round($rewardBytes / TrafficRewardService::GB, 2);
+            return "签到奖励 {$gb} GB";
+        }
+
+        $result = $metadata['result'] ?? null;
+        if (is_array($result)) {
+            $result = implode(' | ', $result);
+        } elseif ($result === null && isset($metadata['hands'])) {
+            $result = '群组牌局';
+        }
+        $outcome = !empty($metadata['won']) ? '中奖' : '未中奖';
+        $betGb = $metadata['bet_gb'] ?? 0;
+        $payoutGb = $metadata['payout_gb'] ?? 0;
+        $resultText = $result === null || $result === '' ? '' : "结果 {$result}；";
+        return "{$resultText}{$outcome}；押注 {$betGb} GB；派彩 {$payoutGb} GB";
     }
 
 }

@@ -39,7 +39,7 @@ class TrafficRewardService
     {
         $value = filter_var($value, FILTER_VALIDATE_INT);
         if ($value === false) $value = $fallback;
-        return min(self::MAX_GB, max(self::MIN_GB, (int)$value));
+        return min(self::MAX_GAME_GB, max(self::MIN_GB, (int)$value));
     }
 
     private static function normalizeProbability($value, int $fallback = 100): int
