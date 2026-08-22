@@ -97,9 +97,10 @@ deploy_check_mmdb
 
 if [ "${LEGACY_DB_UPDATE:-0}" = "1" ]; then
     deploy_php artisan v2board:update --legacy
-else
-    deploy_php artisan v2board:update
 fi
+# Always run the idempotent schema migrations. Legacy mode only prepares
+# historical installations; it does not include newer reward schema changes.
+deploy_php artisan v2board:update
 deploy_php artisan optimize:clear
 deploy_php artisan ip:clear-location-cache
 deploy_php artisan horizon:terminate || true

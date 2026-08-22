@@ -27,6 +27,14 @@ class TrafficRewardService
         return min(self::MAX_GB, max(self::MIN_GB, (int)$value));
     }
 
+    public static function splitTrafficChange(int $bytes): array
+    {
+        return [
+            'increase_bytes' => max(0, $bytes),
+            'deducted_bytes' => max(0, -$bytes),
+        ];
+    }
+
     private static function normalizeGameGb($value, int $fallback = 1): int
     {
         $value = filter_var($value, FILTER_VALIDATE_INT);

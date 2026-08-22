@@ -28,6 +28,7 @@ class SchemaUpgradeService
         'payment_attempt_schema' => 'payment_attempt_schema_v1',
         'order_client_ip_schema' => 'order_client_ip_schema_v1',
         'traffic_reward_schema' => 'traffic_reward_schema_v1',
+        'traffic_reward_signed_bytes_schema' => 'traffic_reward_signed_bytes_schema_v1',
         'telegram_login_link_schema' => 'telegram_login_link_schema_v1'
     ];
 
@@ -124,6 +125,9 @@ class SchemaUpgradeService
                 return;
             case 'traffic_reward_schema':
                 $this->applyTrafficRewardSchema();
+                return;
+            case 'traffic_reward_signed_bytes_schema':
+                $this->applyTrafficRewardSignedBytesSchema();
                 return;
             case 'telegram_login_link_schema':
                 $this->applyTelegramLoginLinkSchema();
@@ -1438,5 +1442,24 @@ class SchemaUpgradeService
             UNIQUE KEY `user_game` (`user_id`, `game`),
             KEY `user_id` (`user_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    }
+
+    private function applyTrafficRewardSignedBytesSchema(): void
+    {
+        $this->requireTable('v2_traffic_reward_log');
+
+        $column = DB::selectOne("SHOW COLUMNS FROM `v2_traffic_reward_log` LIKE 'reward_bytes'");
+        if (!$column) {
+            throw new RuntimeException('Required column v2_traffic_reward_log.reward_bytes is missing.');
+        }
+
+        if (stripos((string)$column->Type, 'unsigned') !== false) {
+            DB::statement("ALTER TABLE `v2_traffic_reward_log` MODIFY `reward_bytes` bigint(20) NOT NULL DEFAULT '0'");
+        }
+
+        $column = DB::selectOne("SHOW COLUMNS FROM `v2_traffic_reward_log` LIKE 'reward_bytes'");
+        if (!$column || stripos((string)$column->Type, 'unsigned') !== false) {
+            throw new RuntimeException('v2_traffic_reward_log.reward_bytes must be a signed BIGINT.');
+        }
     }
 }

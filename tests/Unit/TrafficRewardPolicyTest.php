@@ -21,4 +21,20 @@ class TrafficRewardPolicyTest extends TestCase
         $this->assertSame(5, TrafficRewardService::normalizeRewardGb('5'));
         $this->assertSame(3, TrafficRewardService::normalizeRewardGb('invalid', 3));
     }
+
+    public function testTrafficChangesAreSplitIntoIncreaseAndDeduction(): void
+    {
+        $this->assertSame(
+            ['increase_bytes' => TrafficRewardService::GB, 'deducted_bytes' => 0],
+            TrafficRewardService::splitTrafficChange(TrafficRewardService::GB)
+        );
+        $this->assertSame(
+            ['increase_bytes' => 0, 'deducted_bytes' => TrafficRewardService::GB],
+            TrafficRewardService::splitTrafficChange(-TrafficRewardService::GB)
+        );
+        $this->assertSame(
+            ['increase_bytes' => 0, 'deducted_bytes' => 0],
+            TrafficRewardService::splitTrafficChange(0)
+        );
+    }
 }
