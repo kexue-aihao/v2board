@@ -158,6 +158,41 @@ class TelegramRewardServiceTest extends TestCase
         $this->assertStringContainsString('骰子点数：6', $telegram->messages[0]['text']);
     }
 
+    public function testGroupPokerUsesTheBoundSubscriptionAndPublishesJoinState(): void
+    {
+        DB::table('v2_user')->insert(['id' => 6, 'telegram_id' => null, 'banned' => 0, 'is_admin' => 0]);
+        $telegram = new FailingCallbackTelegramService();
+        $rewards = new GroupPokerRewardService(User::findOrFail(6));
+        $service = new TelegramRewardService($telegram, $rewards);
+
+        $service->playGroupPoker(-100123, 10006);
+
+        $this->assertSame([6, '-100123', 'join', 'telegram_group', 60], $rewards->pokerArguments);
+        $this->assertCount(1, $telegram->messages);
+        $this->assertStringContainsString('当前玩家：2 人', $telegram->messages[0]['text']);
+    }
+
+    public function testGroupPokerStartPublishesTheSettlementResult(): void
+    {
+        DB::table('v2_user')->insert(['id' => 7, 'telegram_id' => null, 'banned' => 0, 'is_admin' => 0]);
+        $telegram = new FailingCallbackTelegramService();
+        $rewards = new GroupPokerRewardService(User::findOrFail(7));
+        $rewards->pokerResult = [
+            'status' => 'settled',
+            'winner_user_id' => 7,
+            'won' => true,
+            'payout_gb' => 2,
+            'net_bytes' => 2 * TrafficRewardService::GB,
+        ];
+        $service = new TelegramRewardService($telegram, $rewards);
+
+        $service->playGroupPoker(-100123, 10007, true);
+
+        $this->assertSame([7, '-100123', 'start', 'telegram_group', 60], $rewards->pokerArguments);
+        $this->assertStringContainsString('炸金花牌局已结算', $telegram->messages[0]['text']);
+        $this->assertStringContainsString('获胜用户：7', $telegram->messages[0]['text']);
+    }
+
     public function testExplicitTelegramTokenOverridesTheSavedConfiguration(): void
     {
         config(['v2board.telegram_bot_token' => 'saved-token']);
@@ -196,7 +231,7 @@ class FailingCallbackTelegramService extends TelegramService
 class CallbackRewardService extends TrafficRewardService
 {
     public $dicePlays = 0;
-    private $user;
+    protected $user;
 
     public function __construct(User $user)
     {
@@ -223,5 +258,22 @@ class CallbackRewardService extends TrafficRewardService
             'payout_gb' => 2,
             'net_bytes' => 2 * TrafficRewardService::GB,
         ];
+    }
+}
+
+class GroupPokerRewardService extends CallbackRewardService
+{
+    public $pokerArguments = [];
+    public $pokerResult = ['status' => 'open', 'room_id' => 1, 'players' => 2];
+
+    public function telegramBindingContext($telegramUserId, $chatId = null): ?array
+    {
+        return ['user' => $this->user, 'subscription_id' => 60, 'is_admin' => false];
+    }
+
+    public function playPoker(User $user, string $chatId, string $action = 'join', string $source = 'telegram_group', ?int $subscriptionId = null): array
+    {
+        $this->pokerArguments = [$user->id, $chatId, $action, $source, $subscriptionId];
+        return $this->pokerResult;
     }
 }

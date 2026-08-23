@@ -537,6 +537,8 @@ class TrafficRewardService
     {
         return DB::transaction(function () use ($user, $chatId, $action, $source, $subscriptionId) {
             if ((int)config('v2board.reward_enable', 1) !== 1 || (int)config('v2board.reward_group_enable', 0) !== 1) throw new RuntimeException('群组娱乐已关闭');
+            $action = strtolower(trim($action));
+            if (!in_array($action, ['join', 'start'], true)) throw new RuntimeException('牌局操作无效');
             $user = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
             $subscription = $this->activeSubscription($user, $subscriptionId);
             $this->assertGameEnabled('poker');
@@ -558,6 +560,7 @@ class TrafficRewardService
             $players = (array)$room->players;
             $ids = array_map('intval', array_column($players, 'user_id'));
             if (!in_array((int)$user->id, $ids, true)) {
+                if ($action === 'start') throw new RuntimeException('请先发送 /poker 加入牌局');
                 if (count($players) >= 6) throw new RuntimeException('牌局人数已满');
                 $players[] = ['user_id' => (int)$user->id, 'subscription_id' => (int)$subscription->id];
                 $room->players = $players; $room->save();

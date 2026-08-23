@@ -118,6 +118,38 @@ class TelegramRewardService
         ), [[$this->button('返回娱乐中心', 'rw:m')]]);
     }
 
+    public function playGroupPoker(int $chatId, $telegramUserId, bool $start = false): void
+    {
+        if ($chatId === 0) throw new RuntimeException('群组标识无效');
+
+        $context = $this->boundContext($telegramUserId);
+        $result = $this->rewards->playPoker(
+            $context['user'],
+            (string)$chatId,
+            $start ? 'start' : 'join',
+            'telegram_group',
+            $context['subscription_id']
+        );
+
+        if (($result['status'] ?? '') === 'open') {
+            $this->send($chatId, sprintf(
+                "炸金花牌局已加入\n当前玩家：%d 人\n其他玩家发送 /poker 加入，任意已加入玩家发送 /poker start 开始。",
+                (int)($result['players'] ?? 0)
+            ));
+            return;
+        }
+
+        $net = (int)($result['net_bytes'] ?? 0);
+        $this->send($chatId, sprintf(
+            "炸金花牌局已结算\n获胜用户：%d\n%s\n获胜方赔付：%s GB\n获胜方净变化：%s%s GB",
+            (int)($result['winner_user_id'] ?? 0),
+            !empty($result['won']) ? '获胜方中奖' : '获胜方未中奖',
+            $this->number($result['payout_gb'] ?? 0),
+            $net >= 0 ? '+' : '-',
+            $this->number(abs($net) / TrafficRewardService::GB)
+        ));
+    }
+
     public function setBet(int $chatId, $telegramUserId, string $game, int $bet): void
     {
         if (!in_array($bet, self::BET_OPTIONS, true)) throw new RuntimeException('赌注选项无效');

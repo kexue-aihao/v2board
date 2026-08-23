@@ -11,7 +11,21 @@ class Poker extends Telegram
 
     public function handle($message, $match = [])
     {
-        if (!$message->is_private) { $this->telegramService->sendMessage($message->chat_id, '请在私聊机器人中使用娱乐功能。'); return; }
-        (new TelegramRewardService($this->telegramService))->showGame($message->chat_id, $message->telegram_user_id, 'poker');
+        $rewards = new TelegramRewardService($this->telegramService);
+        if ($message->is_private) {
+            $rewards->showGame($message->chat_id, $message->telegram_user_id, 'poker');
+            return;
+        }
+        if (!in_array((string)($message->chat_type ?? ''), ['group', 'supergroup'], true)) {
+            $this->telegramService->sendMessage($message->chat_id, '请在私聊或群组中使用炸金花。');
+            return;
+        }
+
+        $action = strtolower(trim((string)($message->args[0] ?? '')));
+        if ($action !== '' && $action !== 'start') {
+            $this->telegramService->sendMessage($message->chat_id, '群组用法：/poker 加入牌局，/poker start 开始牌局。');
+            return;
+        }
+        $rewards->playGroupPoker($message->chat_id, $message->telegram_user_id, $action === 'start');
     }
 }
