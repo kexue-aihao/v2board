@@ -99,6 +99,7 @@ fi
 # historical installations; it does not include newer reward schema changes.
 deploy_php artisan v2board:update
 deploy_php artisan optimize:clear
+deploy_php scripts/refresh-telegram-webhook.php
 deploy_php artisan ip:clear-location-cache
 deploy_php artisan horizon:terminate || true
 deploy_start_webman

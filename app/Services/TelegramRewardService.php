@@ -206,20 +206,31 @@ class TelegramRewardService
         $from = (array)($callback['from'] ?? []);
         $chatId = (int)($chat['id'] ?? 0);
         $telegramUserId = (string)($from['id'] ?? '');
-        $answered = false;
         try {
             if (($chat['type'] ?? '') !== 'private' || $chatId <= 0 || $telegramUserId === '') {
                 throw new RuntimeException('请在私聊中使用娱乐功能');
             }
-            $this->telegram->answerCallbackQuery($queryId);
-            $answered = true;
+        } catch (\Throwable $e) {
+            $this->callbackFailure($queryId, $chatId, $e);
+            return;
+        }
+
+        // Telegram acknowledgement improves button responsiveness, but a transient
+        // acknowledgement failure must not discard an already delivered callback.
+        try { $this->telegram->answerCallbackQuery($queryId); } catch (\Throwable $ignored) {}
+
+        try {
             $this->dispatchCallback($chatId, $telegramUserId, (string)($callback['data'] ?? ''), (int)($callback['message']['message_id'] ?? 0));
         } catch (\Throwable $e) {
-            if (!$answered) {
-                try { $this->telegram->answerCallbackQuery($queryId, '操作未完成', true); } catch (\Throwable $ignored) {}
-            }
-            if ($chatId > 0) $this->send($chatId, '操作失败：' . $this->safeMessage($e));
+            $this->callbackFailure($queryId, $chatId, $e);
         }
+    }
+
+    private function callbackFailure(string $queryId, int $chatId, \Throwable $e): void
+    {
+        try { $this->telegram->answerCallbackQuery($queryId, '操作未完成', true); } catch (\Throwable $ignored) {}
+        if ($chatId <= 0) return;
+        try { $this->send($chatId, '操作失败：' . $this->safeMessage($e)); } catch (\Throwable $ignored) {}
     }
 
     private function dispatchCallback(int $chatId, string $telegramUserId, string $data, int $messageId): void

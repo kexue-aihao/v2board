@@ -3,6 +3,9 @@
 namespace Tests\Unit;
 
 use App\Services\TelegramRewardService;
+use App\Services\TelegramService;
+use App\Services\TrafficRewardService;
+use App\Models\User;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -136,11 +139,89 @@ class TelegramRewardServiceTest extends TestCase
         $this->boundContext(10004);
     }
 
+    public function testCallbackContinuesWhenTelegramAcknowledgementFails(): void
+    {
+        DB::table('v2_user')->insert(['id' => 5, 'telegram_id' => null, 'banned' => 0, 'is_admin' => 0]);
+        $telegram = new FailingCallbackTelegramService();
+        $rewards = new CallbackRewardService(User::findOrFail(5));
+        $service = new TelegramRewardService($telegram, $rewards);
+
+        $service->handleCallback([
+            'id' => 'callback-id',
+            'from' => ['id' => 10005],
+            'message' => ['message_id' => 77, 'chat' => ['id' => 10005, 'type' => 'private']],
+            'data' => 'rw:go:d',
+        ]);
+
+        $this->assertSame(1, $rewards->dicePlays);
+        $this->assertCount(1, $telegram->messages);
+        $this->assertStringContainsString('骰子点数：6', $telegram->messages[0]['text']);
+    }
+
+    public function testExplicitTelegramTokenOverridesTheSavedConfiguration(): void
+    {
+        config(['v2board.telegram_bot_token' => 'saved-token']);
+        $service = new TelegramService('replacement-token');
+        $property = (new \ReflectionClass($service))->getProperty('api');
+        $property->setAccessible(true);
+
+        $this->assertSame('https://api.telegram.org/botreplacement-token/', $property->getValue($service));
+    }
+
     private function boundContext(int $telegramUserId): array
     {
         $service = new TelegramRewardService();
         $method = (new \ReflectionClass($service))->getMethod('boundContext');
         $method->setAccessible(true);
         return $method->invoke($service, $telegramUserId);
+    }
+}
+
+class FailingCallbackTelegramService extends TelegramService
+{
+    public $messages = [];
+
+    public function answerCallbackQuery(string $callbackQueryId, string $text = '', bool $showAlert = false)
+    {
+        throw new RuntimeException('callback acknowledgement failed');
+    }
+
+    public function sendMessage(int $chatId, string $text, string $parseMode = '', ?array $replyMarkup = null)
+    {
+        $this->messages[] = compact('chatId', 'text', 'parseMode', 'replyMarkup');
+        return (object)['ok' => true];
+    }
+}
+
+class CallbackRewardService extends TrafficRewardService
+{
+    public $dicePlays = 0;
+    private $user;
+
+    public function __construct(User $user)
+    {
+        $this->user = $user;
+    }
+
+    public function telegramBindingContext($telegramUserId, $chatId = null): ?array
+    {
+        return ['user' => $this->user, 'subscription_id' => 50, 'is_admin' => false];
+    }
+
+    public function gameRules(): array
+    {
+        return ['dice' => ['enabled' => true]];
+    }
+
+    public function playDice(User $user, string $source = 'web', ?string $requestId = null, ?int $subscriptionId = null): array
+    {
+        $this->dicePlays++;
+        return [
+            'result' => 6,
+            'won' => true,
+            'bet_gb' => 1,
+            'payout_gb' => 2,
+            'net_bytes' => 2 * TrafficRewardService::GB,
+        ];
     }
 }
