@@ -12,7 +12,9 @@ use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class TrafficRewardService
@@ -122,11 +124,42 @@ class TrafficRewardService
         if ($dailyLimit !== null) $runtimeConfig['v2board.reward_' . $game . '_daily_limit'] = $config['reward_' . $game . '_daily_limit'];
         config($runtimeConfig);
         try {
-            Artisan::call('config:cache');
+            if (Artisan::call('config:cache') !== 0) {
+                Log::error('Reward configuration cache failed after Telegram rule write.', [
+                    'game' => $game,
+                    'path' => base_path('config/v2board.php'),
+                ]);
+                throw new RuntimeException('游戏规则已写入，但配置缓存刷新失败，请检查 bootstrap/cache 与 config 目录权限');
+            }
         } catch (\Throwable $exception) {
+            if ($exception instanceof RuntimeException) throw $exception;
             throw new RuntimeException('游戏规则已写入，但配置缓存刷新失败：' . $exception->getMessage());
         }
         return $this->gameRules();
+    }
+
+    /**
+     * Configuration is cached in each long-lived Webman worker.  Persisting
+     * config/v2board.php and rebuilding bootstrap/cache/config.php does not
+     * update workers that are already serving requests, so signal the master
+     * after a Telegram rule save has sent its confirmation message.
+     */
+    public function reloadWebman(): bool
+    {
+        try {
+            if (!Cache::has('WEBMANPID') || !function_exists('posix_kill')) return false;
+
+            $pid = Cache::get('WEBMANPID');
+            if (!is_numeric($pid) || (int)$pid <= 0) return false;
+
+            Cache::forget('WEBMANPID');
+            return (bool)posix_kill((int)$pid, 15);
+        } catch (\Throwable $exception) {
+            Log::warning('Reward configuration saved but Webman reload failed.', [
+                'error' => $exception->getMessage(),
+            ]);
+            return false;
+        }
     }
 
     public function gameRules(): array

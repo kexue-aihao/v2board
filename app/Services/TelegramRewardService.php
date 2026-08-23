@@ -189,14 +189,20 @@ class TelegramRewardService
             $state['daily_limit'] ?? 0
         );
         Cache::forget($this->stateKey($token));
-        $this->send($chatId, sprintf(
-            "%s规则已保存\n状态：%s\n每日次数：%s\n条件后中奖概率：%s%%\n赔付倍率：%sx",
-            $this->label($state['game']),
-            $state['enabled'] ? '已启用' : '已停用',
-            $this->dailyLimit($state['daily_limit'] ?? 0),
-            $state['probability'],
-            $state['multiplier']
-        ), [[$this->button('返回管理员规则', 'rw:a')]]);
+        try {
+            $this->send($chatId, sprintf(
+                "%s规则已保存\n状态：%s\n每日次数：%s\n条件后中奖概率：%s%%\n赔付倍率：%sx",
+                $this->label($state['game']),
+                $state['enabled'] ? '已启用' : '已停用',
+                $this->dailyLimit($state['daily_limit'] ?? 0),
+                $state['probability'],
+                $state['multiplier']
+            ), [[$this->button('返回管理员规则', 'rw:a')]]);
+        } finally {
+            // Send the confirmation before restarting Webman so the callback
+            // request is not terminated before Telegram receives the result.
+            $this->rewards->reloadWebman();
+        }
     }
 
     public function handleCallback(array $callback): void

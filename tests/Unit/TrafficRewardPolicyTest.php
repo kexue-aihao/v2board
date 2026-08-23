@@ -94,6 +94,11 @@ class TrafficRewardPolicyTest extends TestCase
         $this->assertSame(20, $method->invoke($service, 'dice')['daily_limit']);
     }
 
+    public function testWebmanReloadIsOptionalWhenNoMasterPidIsPublished(): void
+    {
+        $this->assertFalse((new TrafficRewardService())->reloadWebman());
+    }
+
     public function testProbabilityUsesBasisPointsForTwoDecimalPrecision(): void
     {
         $reflection = new \ReflectionClass(TrafficRewardService::class);
