@@ -370,6 +370,7 @@ class StatController extends Controller
                 'server_rate',
                 DB::raw("'traffic' AS record_type"),
                 DB::raw('NULL AS source'),
+                DB::raw('NULL AS entrypoint'),
                 DB::raw('0 AS reward_bytes'),
                 DB::raw('NULL AS metadata'),
             ]);
@@ -385,6 +386,7 @@ class StatController extends Controller
                     DB::raw('1 AS server_rate'),
                     DB::raw("'reward' AS record_type"),
                     'source',
+                    'entrypoint',
                     'reward_bytes',
                     'metadata',
                 ]);
@@ -415,6 +417,12 @@ class StatController extends Controller
                 $row->deducted_bytes = $change['deducted_bytes'];
                 $row->reward_label = $this->rewardLogLabel((string)$row->source, $metadata);
                 $row->reward_detail = $this->rewardLogDetail((string)$row->source, $metadata, (int)$row->reward_bytes);
+                $row->entrypoint = (string)($row->entrypoint ?: ($metadata['entrypoint'] ?? ''));
+                $row->bet_gb = $metadata['bet_gb'] ?? null;
+                $row->payout_gb = $metadata['payout_gb'] ?? ($metadata['reward_gb'] ?? null);
+                $row->win_probability = $metadata['win_probability'] ?? null;
+                $row->payout_multiplier = $metadata['payout_multiplier'] ?? null;
+                $row->net_bytes = (int)($metadata['net_bytes'] ?? $row->reward_bytes);
                 return $row;
             });
         return [
@@ -439,8 +447,10 @@ class StatController extends Controller
     private function rewardLogDetail(string $source, array $metadata, int $rewardBytes): string
     {
         if ($source === 'checkin') {
-            $gb = $metadata['gb'] ?? round($rewardBytes / TrafficRewardService::GB, 2);
-            return "签到奖励 {$gb} GB";
+            $gb = $metadata['reward_gb'] ?? $metadata['gb'] ?? round($rewardBytes / TrafficRewardService::GB, 2);
+            $entrypoint = $metadata['entrypoint'] ?? '';
+            $netGb = round((int)($metadata['net_bytes'] ?? $rewardBytes) / TrafficRewardService::GB, 2);
+            return "签到奖励 {$gb} GB；入口 {$entrypoint}；净变化 {$netGb} GB";
         }
 
         $result = $metadata['result'] ?? null;
@@ -453,7 +463,11 @@ class StatController extends Controller
         $betGb = $metadata['bet_gb'] ?? 0;
         $payoutGb = $metadata['payout_gb'] ?? 0;
         $resultText = $result === null || $result === '' ? '' : "结果 {$result}；";
-        return "{$resultText}{$outcome}；押注 {$betGb} GB；派彩 {$payoutGb} GB";
+        $entrypoint = $metadata['entrypoint'] ?? '';
+        $probability = $metadata['win_probability'] ?? '-';
+        $multiplier = $metadata['payout_multiplier'] ?? '-';
+        $netGb = round((int)($metadata['net_bytes'] ?? $rewardBytes) / TrafficRewardService::GB, 2);
+        return "{$resultText}{$outcome}；入口 {$entrypoint}；押注 {$betGb} GB；概率 {$probability}%；倍率 {$multiplier}；返还 {$payoutGb} GB；净变化 {$netGb} GB";
     }
 
 }

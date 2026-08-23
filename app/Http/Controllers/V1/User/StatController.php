@@ -42,7 +42,7 @@ class StatController extends Controller
             ->get()
             ->map(function ($row) {
                 $metadata = (array)$row->metadata;
-                $label = $row->source === 'checkin' ? '每日签到' : (($metadata['game'] ?? '') === 'slots' ? '老虎机娱乐' : (($metadata['game'] ?? '') === 'poker' ? '炸金花娱乐' : '骰子娱乐'));
+                $label = $this->rewardLabel((string)$row->source, $metadata);
                 $change = TrafficRewardService::splitTrafficChange((int)$row->reward_bytes);
                 return [
                     'u' => 0,
@@ -53,10 +53,39 @@ class StatController extends Controller
                     'record_type' => 'reward',
                     'reward_label' => $label,
                     'reward_bytes' => (int)$row->reward_bytes,
+                    'entrypoint' => (string)($row->entrypoint ?: ($metadata['entrypoint'] ?? '')),
+                    'reward_metadata' => $metadata,
+                    'reward_detail' => $this->rewardDetail((string)$row->source, $metadata, (int)$row->reward_bytes),
+                    'bet_gb' => $metadata['bet_gb'] ?? null,
+                    'payout_gb' => $metadata['payout_gb'] ?? ($metadata['reward_gb'] ?? null),
+                    'win_probability' => $metadata['win_probability'] ?? null,
+                    'payout_multiplier' => $metadata['payout_multiplier'] ?? null,
+                    'net_bytes' => (int)($metadata['net_bytes'] ?? $row->reward_bytes),
                     'increase_bytes' => $change['increase_bytes'],
                     'deducted_bytes' => $change['deducted_bytes'],
                 ];
             });
         return response(['data' => $traffic->concat($rewards)->sortByDesc('record_at')->values()]);
+    }
+
+    private function rewardLabel(string $source, array $metadata): string
+    {
+        if ($source === 'checkin') return '每日签到';
+        return ['dice' => '骰子娱乐', 'slots' => '老虎机娱乐', 'poker' => '炸金花娱乐'][$metadata['game'] ?? ''] ?? '游戏娱乐';
+    }
+
+    private function rewardDetail(string $source, array $metadata, int $rewardBytes): string
+    {
+        $entrypoint = (string)($metadata['entrypoint'] ?? '');
+        $netBytes = (int)($metadata['net_bytes'] ?? $rewardBytes);
+        $netGb = round($netBytes / TrafficRewardService::GB, 2);
+        if ($source === 'checkin') {
+            $rewardGb = $metadata['reward_gb'] ?? round($rewardBytes / TrafficRewardService::GB, 2);
+            return "签到奖励 {$rewardGb} GB；入口 {$entrypoint}；净变化 {$netGb} GB";
+        }
+        $result = $metadata['result'] ?? (isset($metadata['hands']) ? '群组牌局' : '');
+        if (is_array($result)) $result = implode(' | ', $result);
+        $outcome = !empty($metadata['won']) ? '中奖' : '未中奖';
+        return "{$outcome}；入口 {$entrypoint}；结果 {$result}；押注 " . ($metadata['bet_gb'] ?? 0) . " GB；概率 " . ($metadata['win_probability'] ?? '-') . "%；倍率 " . ($metadata['payout_multiplier'] ?? '-') . "；返还 " . ($metadata['payout_gb'] ?? 0) . " GB；净变化 {$netGb} GB";
     }
 }
