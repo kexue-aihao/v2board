@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Subscription;
-use App\Models\TelegramSubscriptionBinding;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schema;
@@ -11,8 +10,9 @@ use RuntimeException;
 
 /**
  * Telegram's reward adapter. This is intentionally separate from
- * TrafficRewardService: Telegram identity is authorized exclusively through
- * a live subscription binding, never through the retired user.telegram_id.
+ * TrafficRewardService: Telegram identity is authorized through a live
+ * subscription binding. Legacy /bind users are bridged only after their
+ * existing Telegram identity and active primary subscription are verified.
  */
 class TelegramRewardService
 {
@@ -284,20 +284,28 @@ class TelegramRewardService
 
     private function boundContext($telegramUserId): array
     {
-        if (!Schema::hasTable('v2_telegram_subscription_binding')) {
-            throw new RuntimeException('订阅绑定服务尚未就绪');
-        }
-        $binding = TelegramSubscriptionBinding::where('telegram_user_id', (string)$telegramUserId)
-            ->where('status', 'active')->latest('updated_at')->first();
-        if (!$binding) throw new RuntimeException('请先在网站绑定有效订阅');
-        $user = User::find($binding->user_id);
-        $subscription = Subscription::where('id', $binding->subscription_id)
-            ->where('user_id', $binding->user_id)->first();
-        $tokenHash = $subscription ? hash('sha256', strtolower(trim((string)$subscription->token))) : '';
-        if (!$user || $user->banned || !$subscription || !$this->activeSubscription($subscription)
-            || !hash_equals((string)$binding->subscription_token_hash, $tokenHash)) {
-            throw new RuntimeException('绑定的订阅已失效，请重新绑定');
-        }
+        $context = Schema::hasTable('v2_telegram_subscription_binding')
+            ? $this->rewards->telegramBindingContext($telegramUserId)
+            : null;
+        if ($context && empty($context['user']->banned)) return $context;
+
+        $legacyContext = $this->legacyBoundContext($telegramUserId);
+        if ($legacyContext) return $legacyContext;
+
+        throw new RuntimeException('请先在网站绑定有效订阅');
+    }
+
+    private function legacyBoundContext($telegramUserId): ?array
+    {
+        $telegramUserId = trim((string)$telegramUserId);
+        if ($telegramUserId === '' || !ctype_digit($telegramUserId)) return null;
+
+        $user = User::where('telegram_id', $telegramUserId)->first();
+        if (!$user || $user->banned) return null;
+
+        $subscription = (new SubscriptionService())->primary($user);
+        if (!$subscription || !$this->activeSubscription($subscription)) return null;
+
         return [
             'user' => $user,
             'subscription_id' => (int)$subscription->id,

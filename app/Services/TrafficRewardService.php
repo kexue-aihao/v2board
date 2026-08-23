@@ -181,7 +181,8 @@ class TrafficRewardService
         $subscription = Subscription::find($binding->subscription_id);
         if (!$subscription || (int)$subscription->user_id !== (int)$binding->user_id || $subscription->status !== 'active' || ($subscription->expired_at !== null && $subscription->expired_at <= time())) return null;
         $user = User::find($subscription->user_id);
-        if (!$user) return null;
+        $tokenHash = hash('sha256', strtolower(trim((string)$subscription->token)));
+        if (!$user || $user->banned || !hash_equals((string)$binding->subscription_token_hash, $tokenHash)) return null;
         return [
             'user' => $user,
             'subscription_id' => (int)$subscription->id,
