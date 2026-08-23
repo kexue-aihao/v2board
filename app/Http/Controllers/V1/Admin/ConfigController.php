@@ -162,19 +162,19 @@ class ConfigController extends Controller
                 'reward_enable' => (int)config('v2board.reward_enable', 1),
                 'reward_dice_daily_limit' => (int)config('v2board.reward_dice_daily_limit', 0),
                 'reward_dice_enable' => (int)config('v2board.reward_dice_enable', config('v2board.reward_enable', 1)),
-                'reward_dice_win_probability' => (int)config('v2board.reward_dice_win_probability', config('v2board.reward_dice_odds', 10)),
+                'reward_dice_win_probability' => number_format((float)config('v2board.reward_dice_win_probability', config('v2board.reward_dice_odds', 10)), 2, '.', ''),
                 'reward_dice_payout_multiplier' => number_format((float)config('v2board.reward_dice_payout_multiplier', 1), 2, '.', ''),
                 'reward_dice_odds' => (int)config('v2board.reward_dice_odds', 10),
                 'reward_dice_win_face' => (int)config('v2board.reward_dice_win_face', 6),
                 'reward_slots_daily_limit' => (int)config('v2board.reward_slots_daily_limit', 0),
                 'reward_slots_enable' => (int)config('v2board.reward_slots_enable', config('v2board.reward_enable', 1)),
-                'reward_slots_win_probability' => (int)config('v2board.reward_slots_win_probability', config('v2board.reward_slots_odds', 10)),
+                'reward_slots_win_probability' => number_format((float)config('v2board.reward_slots_win_probability', config('v2board.reward_slots_odds', 10)), 2, '.', ''),
                 'reward_slots_payout_multiplier' => number_format((float)config('v2board.reward_slots_payout_multiplier', 1), 2, '.', ''),
                 'reward_slots_odds' => (int)config('v2board.reward_slots_odds', 10),
                 'reward_slots_jackpot_rate' => (int)config('v2board.reward_slots_jackpot_rate', 100),
                 'reward_poker_daily_limit' => (int)config('v2board.reward_poker_daily_limit', 0),
                 'reward_poker_enable' => (int)config('v2board.reward_poker_enable', config('v2board.reward_enable', 1)),
-                'reward_poker_win_probability' => (int)config('v2board.reward_poker_win_probability', config('v2board.reward_poker_odds', 5)),
+                'reward_poker_win_probability' => number_format((float)config('v2board.reward_poker_win_probability', config('v2board.reward_poker_odds', 5)), 2, '.', ''),
                 'reward_poker_payout_multiplier' => number_format((float)config('v2board.reward_poker_payout_multiplier', 1), 2, '.', ''),
                 'reward_poker_odds' => (int)config('v2board.reward_poker_odds', 5),
                 'reward_group_enable' => (int)config('v2board.reward_group_enable', 0)
@@ -280,6 +280,9 @@ class ConfigController extends Controller
                 $data[$probability] = $data[$legacyOdds];
             }
             unset($data[$legacyOdds]);
+            if (array_key_exists($probability, $data)) {
+                $data[$probability] = number_format((float)$data[$probability], 2, '.', '');
+            }
             if (array_key_exists('reward_' . $game . '_payout_multiplier', $data)) {
                 $data['reward_' . $game . '_payout_multiplier'] = number_format((float)$data['reward_' . $game . '_payout_multiplier'], 2, '.', '');
             }

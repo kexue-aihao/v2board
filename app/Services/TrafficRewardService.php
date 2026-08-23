@@ -44,11 +44,23 @@ class TrafficRewardService
         return min(self::MAX_GAME_GB, max(self::MIN_GB, (int)$value));
     }
 
-    private static function normalizeProbability($value, int $fallback = 100): int
+    private static function normalizeProbability($value, $fallback = 100): int
     {
-        $value = filter_var($value, FILTER_VALIDATE_INT);
-        if ($value === false) $value = $fallback;
-        return min(100, max(0, (int)$value));
+        if (!is_numeric($value)) $value = $fallback;
+        return min(10000, max(0, (int)round((float)$value * 100)));
+    }
+
+    private static function formatProbability(int $basisPoints): string
+    {
+        return number_format($basisPoints / 100, 2, '.', '');
+    }
+
+    private static function validProbability($value): bool
+    {
+        return is_numeric($value)
+            && preg_match('/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?$/', trim((string)$value)) === 1
+            && (float)$value >= 0
+            && (float)$value <= 100;
     }
 
     private static function normalizeMultiplier($value, string $fallback = '1.00'): string
@@ -77,11 +89,10 @@ class TrafficRewardService
             throw new RuntimeException('不支持的游戏项目');
         }
 
-        $validatedProbability = filter_var($probability, FILTER_VALIDATE_INT);
-        if ($validatedProbability === false || $validatedProbability < 0 || $validatedProbability > 100 || !is_numeric($multiplier) || (float)$multiplier < 1 || (float)$multiplier > 1000) {
+        if (!self::validProbability($probability) || !is_numeric($multiplier) || (float)$multiplier < 1 || (float)$multiplier > 1000) {
             throw new RuntimeException('游戏规则参数无效');
         }
-        $probability = (int)$validatedProbability;
+        $probability = self::formatProbability(self::normalizeProbability($probability));
         $multiplier = self::normalizeMultiplier($multiplier);
         $config = (array)config('v2board', []);
         $config['reward_' . $game . '_win_probability'] = $probability;
@@ -318,7 +329,7 @@ class TrafficRewardService
                     'bet_gb' => (int)($metadata['bet_gb'] ?? self::MIN_GB),
                     'payout_gb' => (float)($metadata['payout_gb'] ?? 0),
                     'net_bytes' => (int)($metadata['net_bytes'] ?? $existing->reward_bytes),
-                    'win_probability' => (int)($metadata['win_probability'] ?? $this->gameRule($game)['win_probability']),
+                    'win_probability' => self::formatProbability(self::normalizeProbability($metadata['win_probability'] ?? $this->gameRule($game)['win_probability'])),
                     'payout_multiplier' => (string)($metadata['payout_multiplier'] ?? $this->gameRule($game)['payout_multiplier']),
                     'expires_at' => $this->expiresAt($subscription),
                 ];
@@ -327,7 +338,7 @@ class TrafficRewardService
             $rule = $this->gameRule($game);
             $result = $resultFactory($rule);
             $settlement = $this->gameSettlement($game, $result, $user);
-            $netBytes = $this->settleWager($user, $subscription, $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, ['game' => $game, 'result' => $result, 'won' => $settlement['won'], 'win_probability' => $settlement['win_probability'], 'payout_multiplier' => $settlement['payout_multiplier']]);
+            $netBytes = $this->settleWager($user, $subscription, $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, ['game' => $game, 'result' => $result, 'won' => $settlement['won'], 'trigger_matched' => $settlement['trigger_matched'], 'probability_scope' => $settlement['probability_scope'], 'win_probability' => $settlement['win_probability'], 'payout_multiplier' => $settlement['payout_multiplier']]);
             return ['game' => $game, 'result' => $result, 'won' => $settlement['won'], 'payout_gb' => $settlement['payout_gb'], 'net_bytes' => $netBytes, 'reward_gb' => $settlement['payout_gb'], 'reward_bytes' => $netBytes, 'bet_gb' => $settlement['bet_gb'], 'win_probability' => $settlement['win_probability'], 'payout_multiplier' => $settlement['payout_multiplier'], 'expires_at' => $this->expiresAt($subscription)];
         });
     }
@@ -375,19 +386,22 @@ class TrafficRewardService
         return min(365, (int)$previous->streak_days + 1);
     }
 
-    private function gameSettlement(string $game, $result, ?User $user = null): array
+    private function gameSettlement(string $game, $result, ?User $user = null, ?string $probabilityScope = null): array
     {
         $bet = $user ? $this->userGameBetGb($user, $game) : self::MIN_GB;
         $rule = $this->gameRule($game);
         $matched = $game === 'dice'
             ? (int)$result === min(6, max(1, (int)config('v2board.reward_dice_win_face', 6)))
             : ($game === 'poker' ? (bool)$result : is_array($result) && count(array_unique($result)) === 1);
-        $won = $matched && $this->chanceHit($rule['win_probability']);
+        $won = $matched && $this->chanceHit($rule['win_probability_basis_points']);
         $payoutGb = $won ? $bet * (float)$rule['payout_multiplier'] : 0;
+        $probabilityScope = $probabilityScope ?? ($game === 'poker' ? 'per_round' : 'after_trigger');
         return [
             'bet_gb' => $bet,
             'payout_gb' => $payoutGb,
             'won' => $won,
+            'trigger_matched' => $matched,
+            'probability_scope' => $probabilityScope,
             'win_probability' => $rule['win_probability'],
             'payout_multiplier' => $rule['payout_multiplier'],
         ];
@@ -405,7 +419,8 @@ class TrafficRewardService
         return [
             'enabled' => (int)config('v2board.reward_' . $game . '_enable', config('v2board.reward_enable', 1)) === 1,
             'daily_limit' => max(0, min(100, (int)config('v2board.reward_' . $game . '_daily_limit', 0))),
-            'win_probability' => self::normalizeProbability($probability, $defaults[$game]),
+            'win_probability' => self::formatProbability(self::normalizeProbability($probability, $defaults[$game])),
+            'win_probability_basis_points' => self::normalizeProbability($probability, $defaults[$game]),
             'payout_multiplier' => self::normalizeMultiplier(config('v2board.reward_' . $game . '_payout_multiplier', '1.00')),
         ];
     }
@@ -415,9 +430,10 @@ class TrafficRewardService
         if (!$this->gameRule($game)['enabled']) throw new RuntimeException('该游戏当前未启用');
     }
 
-    private function chanceHit(int $probability): bool
+    private function chanceHit(int $probabilityBasisPoints): bool
     {
-        return $probability >= 100 || ($probability > 0 && random_int(1, 100) <= $probability);
+        return $probabilityBasisPoints >= 10000
+            || ($probabilityBasisPoints > 0 && random_int(1, 10000) <= $probabilityBasisPoints);
     }
 
     private function assertGameRuleAdministrator(User $actor, ?int $subscriptionId = null): void
@@ -533,9 +549,9 @@ class TrafficRewardService
             $winnerSettlement = null;
             $winnerNetBytes = 0;
             foreach ($playerIds as $playerId) {
-                $settlement = $this->gameSettlement('poker', $playerId === $winner, $playerUsers->get($playerId));
+                $settlement = $this->gameSettlement('poker', $playerId === $winner, $playerUsers->get($playerId), 'after_win');
                 $key = 'poker:' . $room->id . ':' . $playerId . ':' . bin2hex(random_bytes(8));
-                $netBytes = $this->settleWager($playerUsers->get($playerId), $playerSubscriptions[$playerId], $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, ['game' => 'poker', 'room_id' => $room->id, 'hands' => $hands, 'winner_user_id' => $winner, 'won' => $settlement['won'], 'win_probability' => $settlement['win_probability'], 'payout_multiplier' => $settlement['payout_multiplier']]);
+                $netBytes = $this->settleWager($playerUsers->get($playerId), $playerSubscriptions[$playerId], $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, ['game' => 'poker', 'room_id' => $room->id, 'hands' => $hands, 'winner_user_id' => $winner, 'won' => $settlement['won'], 'trigger_matched' => $settlement['trigger_matched'], 'probability_scope' => $settlement['probability_scope'], 'win_probability' => $settlement['win_probability'], 'payout_multiplier' => $settlement['payout_multiplier']]);
                 if ($playerId === $winner) {
                     $winnerSettlement = $settlement;
                     $winnerNetBytes = $netBytes;

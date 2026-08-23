@@ -20,7 +20,7 @@ class TelegramRewardService
 
     private const BET_OPTIONS = [1, 5, 10, 50, 100, 500, 1000];
     private const DAILY_LIMIT_OPTIONS = [0, 1, 3, 5, 10, 20, 50, 100];
-    private const PROBABILITY_OPTIONS = [0, 1, 5, 10, 25, 50, 75, 100];
+    private const PROBABILITY_OPTIONS = ['0.00', '0.01', '0.10', '0.50', '1.00', '5.00', '10.00', '25.00', '50.00', '75.00', '100.00'];
     private const MULTIPLIER_OPTIONS = ['1', '1.5', '2', '3', '5', '10'];
 
     private $telegram;
@@ -151,7 +151,7 @@ class TelegramRewardService
     {
         $state = $this->state($telegramUserId, $token, true);
         if ($field === 'p') {
-            $value = filter_var($value, FILTER_VALIDATE_INT);
+            $value = is_numeric($value) ? number_format((float)$value, 2, '.', '') : '';
             if (!in_array($value, self::PROBABILITY_OPTIONS, true)) throw new RuntimeException('中奖概率选项无效');
             $state['probability'] = $value;
         } elseif ($field === 'x') {
@@ -190,7 +190,7 @@ class TelegramRewardService
         );
         Cache::forget($this->stateKey($token));
         $this->send($chatId, sprintf(
-            "%s规则已保存\n状态：%s\n每日次数：%s\n中奖概率：%d%%\n赔付倍率：%sx",
+            "%s规则已保存\n状态：%s\n每日次数：%s\n条件后中奖概率：%s%%\n赔付倍率：%sx",
             $this->label($state['game']),
             $state['enabled'] ? '已启用' : '已停用',
             $this->dailyLimit($state['daily_limit'] ?? 0),
@@ -237,7 +237,7 @@ class TelegramRewardService
             $this->setBet($chatId, $telegramUserId, $match[1], (int)$match[2]);
             return;
         }
-        if (preg_match('/^rw:([pxnl]):([A-Za-z0-9_-]{8,16}):([0-9.]{1,4})$/', $data, $match)) {
+        if (preg_match('/^rw:([pxnl]):([A-Za-z0-9_-]{8,16}):([0-9.]{1,6})$/', $data, $match)) {
             $this->updateRuleState($chatId, $telegramUserId, $match[2], $match[1], $match[3]);
             return;
         }
@@ -268,14 +268,15 @@ class TelegramRewardService
             $limitButtons[] = $this->button($option === 0 ? '不限' : $option . '次', 'rw:l:' . $token . ':' . $option);
         }
         $this->send($chatId, sprintf(
-            "%s规则\n状态：%s\n每日次数：%s\n中奖概率：%d%%\n赔付倍率：%sx\n请选择新的值后保存。",
+            "%s规则\n状态：%s\n每日次数：%s\n条件后中奖概率：%s%%\n赔付倍率：%sx\n骰子和老虎机需先满足触发条件；单人炸金花直接判定，群组炸金花需先胜出。",
             $this->label($state['game']), $state['enabled'] ? '已启用' : '已停用', $this->dailyLimit($state['daily_limit'] ?? 0), $state['probability'], $state['multiplier']
         ), [
             [$this->button($state['enabled'] ? '停用项目' : '启用项目', 'rw:n:' . $token . ':' . ($state['enabled'] ? '0' : '1'))],
             array_slice($limitButtons, 0, 4),
             array_slice($limitButtons, 4),
             array_slice($probabilityButtons, 0, 4),
-            array_slice($probabilityButtons, 4),
+            array_slice($probabilityButtons, 4, 4),
+            array_slice($probabilityButtons, 8),
             $multiplierButtons,
             [$this->button('保存规则', 'rw:s:' . $token), $this->button('取消', 'rw:a')],
         ]);
@@ -335,7 +336,7 @@ class TelegramRewardService
             'game' => $game,
             'enabled' => (bool)($rule['enabled'] ?? true),
             'daily_limit' => (int)($rule['daily_limit'] ?? 0),
-            'probability' => (int)$rule['win_probability'],
+            'probability' => (string)$rule['win_probability'],
             'multiplier' => (string)$rule['payout_multiplier'],
         ]);
         return $token;

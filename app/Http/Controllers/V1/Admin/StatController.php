@@ -465,9 +465,11 @@ class StatController extends Controller
         $resultText = $result === null || $result === '' ? '' : "结果 {$result}；";
         $entrypoint = $metadata['entrypoint'] ?? '';
         $probability = $metadata['win_probability'] ?? '-';
+        $probabilityScope = $metadata['probability_scope'] ?? (in_array($metadata['game'] ?? '', ['dice', 'slots'], true) ? 'after_trigger' : 'per_round');
+        $probabilityLabel = $probabilityScope === 'after_win' ? '胜出后概率' : ($probabilityScope === 'after_trigger' ? '触发后概率' : '单局概率');
         $multiplier = $metadata['payout_multiplier'] ?? '-';
         $netGb = round((int)($metadata['net_bytes'] ?? $rewardBytes) / TrafficRewardService::GB, 2);
-        return "{$resultText}{$outcome}；入口 {$entrypoint}；押注 {$betGb} GB；概率 {$probability}%；倍率 {$multiplier}；返还 {$payoutGb} GB；净变化 {$netGb} GB";
+        return "{$resultText}{$outcome}；入口 {$entrypoint}；押注 {$betGb} GB；{$probabilityLabel} {$probability}%；倍率 {$multiplier}；返还 {$payoutGb} GB；净变化 {$netGb} GB";
     }
 
 }

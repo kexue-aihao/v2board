@@ -90,6 +90,8 @@ class StatController extends Controller
         $result = $metadata['result'] ?? (isset($metadata['hands']) ? '群组牌局' : '');
         if (is_array($result)) $result = implode(' | ', $result);
         $outcome = !empty($metadata['won']) ? '中奖' : '未中奖';
-        return "{$outcome}；入口 {$entrypoint}；结果 {$result}；押注 " . ($metadata['bet_gb'] ?? 0) . " GB；概率 " . ($metadata['win_probability'] ?? '-') . "%；倍率 " . ($metadata['payout_multiplier'] ?? '-') . "；返还 " . ($metadata['payout_gb'] ?? 0) . " GB；净变化 {$netGb} GB";
+        $probabilityScope = $metadata['probability_scope'] ?? (in_array($metadata['game'] ?? '', ['dice', 'slots'], true) ? 'after_trigger' : 'per_round');
+        $probabilityLabel = $probabilityScope === 'after_win' ? '胜出后概率' : ($probabilityScope === 'after_trigger' ? '触发后概率' : '单局概率');
+        return "{$outcome}；入口 {$entrypoint}；结果 {$result}；押注 " . ($metadata['bet_gb'] ?? 0) . " GB；{$probabilityLabel} " . ($metadata['win_probability'] ?? '-') . "%；倍率 " . ($metadata['payout_multiplier'] ?? '-') . "；返还 " . ($metadata['payout_gb'] ?? 0) . " GB；净变化 {$netGb} GB";
     }
 }
