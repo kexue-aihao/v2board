@@ -138,6 +138,21 @@ class TrafficRewardPolicyTest extends TestCase
         $this->assertTrue($method->invoke($service, 'dice', 6)['won']);
     }
 
+    public function testDiceGuessDeterminesTheTriggerForTelegramGames(): void
+    {
+        config([
+            'v2board.reward_dice_win_probability' => '100.00',
+            'v2board.reward_dice_payout_multiplier' => '1.00',
+            'v2board.reward_dice_win_face' => 6,
+        ]);
+        $service = new TrafficRewardService();
+        $method = (new \ReflectionClass($service))->getMethod('gameSettlement');
+        $method->setAccessible(true);
+
+        $this->assertTrue($method->invoke($service, 'dice', 2, null, null, 2)['won']);
+        $this->assertFalse($method->invoke($service, 'dice', 2, null, null, 3)['won']);
+    }
+
     public function testGroupPokerProbabilityIsAppliedOnlyAfterWinningTheHand(): void
     {
         config([

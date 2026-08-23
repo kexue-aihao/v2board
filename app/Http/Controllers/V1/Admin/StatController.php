@@ -462,6 +462,9 @@ class StatController extends Controller
         $outcome = !empty($metadata['won']) ? '中奖' : '未中奖';
         $betGb = $metadata['bet_gb'] ?? 0;
         $payoutGb = $metadata['payout_gb'] ?? 0;
+        $guessText = ($metadata['game'] ?? '') === 'dice' && array_key_exists('guess', $metadata)
+            ? '猜测 ' . (int)$metadata['guess'] . ' 点；'
+            : '';
         $resultText = $result === null || $result === '' ? '' : "结果 {$result}；";
         $entrypoint = $metadata['entrypoint'] ?? '';
         $probability = $metadata['win_probability'] ?? '-';
@@ -469,7 +472,7 @@ class StatController extends Controller
         $probabilityLabel = $probabilityScope === 'after_win' ? '胜出后概率' : ($probabilityScope === 'after_trigger' ? '触发后概率' : '单局概率');
         $multiplier = $metadata['payout_multiplier'] ?? '-';
         $netGb = round((int)($metadata['net_bytes'] ?? $rewardBytes) / TrafficRewardService::GB, 2);
-        return "{$resultText}{$outcome}；入口 {$entrypoint}；押注 {$betGb} GB；{$probabilityLabel} {$probability}%；倍率 {$multiplier}；返还 {$payoutGb} GB；净变化 {$netGb} GB";
+        return "{$guessText}{$resultText}{$outcome}；入口 {$entrypoint}；押注 {$betGb} GB；{$probabilityLabel} {$probability}%；倍率 {$multiplier}；返还 {$payoutGb} GB；净变化 {$netGb} GB";
     }
 
 }

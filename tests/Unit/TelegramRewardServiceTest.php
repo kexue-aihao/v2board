@@ -150,11 +150,13 @@ class TelegramRewardServiceTest extends TestCase
             'id' => 'callback-id',
             'from' => ['id' => 10005],
             'message' => ['message_id' => 77, 'chat' => ['id' => 10005, 'type' => 'private']],
-            'data' => 'rw:go:d',
+            'data' => 'rw:dg:2',
         ]);
 
         $this->assertSame(1, $rewards->dicePlays);
+        $this->assertSame(2, $rewards->diceGuess);
         $this->assertCount(1, $telegram->messages);
+        $this->assertStringContainsString('猜测点数：2', $telegram->messages[0]['text']);
         $this->assertStringContainsString('骰子点数：6', $telegram->messages[0]['text']);
     }
 
@@ -206,7 +208,7 @@ class TelegramRewardServiceTest extends TestCase
         $service = new TelegramRewardService($telegram, $rewards);
 
         $service->showGame(-100123, 10008, 'dice');
-        $callbackData = $telegram->messages[0]['replyMarkup']['inline_keyboard'][0][0]['callback_data'];
+        $callbackData = $telegram->messages[0]['replyMarkup']['inline_keyboard'][0][1]['callback_data'];
 
         $service->handleCallback([
             'id' => 'group-callback-id',
@@ -219,6 +221,8 @@ class TelegramRewardServiceTest extends TestCase
         $this->assertSame('telegram_group', $rewards->diceSource);
         $this->assertSame(50, $rewards->diceSubscriptionId);
         $this->assertSame('telegram-callback--100123-88', $rewards->diceRequestId);
+        $this->assertSame(2, $rewards->diceGuess);
+        $this->assertStringContainsString('猜测点数：2', $telegram->messages[1]['text']);
         $this->assertStringContainsString('骰子点数：6', $telegram->messages[1]['text']);
 
         $service->handleCallback([
@@ -241,9 +245,12 @@ class TelegramRewardServiceTest extends TestCase
 
         $service->showGame(-100123, 10009, 'dice');
 
-        $this->assertStringContainsString('骰子为 5 点', $telegram->messages[0]['text']);
+        $this->assertStringContainsString('选择 1-6 猜测点数', $telegram->messages[0]['text']);
         $this->assertStringContainsString('12.34%', $telegram->messages[0]['text']);
         $this->assertStringContainsString('中奖赔付：7.5 GB', $telegram->messages[0]['text']);
+        $buttons = $telegram->messages[0]['replyMarkup']['inline_keyboard'];
+        $this->assertSame(['1', '2', '3'], array_column($buttons[0], 'text'));
+        $this->assertSame(['4', '5', '6'], array_column($buttons[1], 'text'));
     }
 
     public function testGroupMenuPokerButtonJoinsTheMultiplayerRoom(): void
@@ -308,6 +315,7 @@ class CallbackRewardService extends TrafficRewardService
     public $diceSource;
     public $diceSubscriptionId;
     public $diceRequestId;
+    public $diceGuess;
     protected $user;
 
     public function __construct(User $user)
@@ -334,14 +342,16 @@ class CallbackRewardService extends TrafficRewardService
         return ['dice_bet_gb' => 5, 'slots_bet_gb' => 1, 'poker_bet_gb' => 1];
     }
 
-    public function playDice(User $user, string $source = 'web', ?string $requestId = null, ?int $subscriptionId = null): array
+    public function playDice(User $user, string $source = 'web', ?string $requestId = null, ?int $subscriptionId = null, ?int $guess = null): array
     {
         $this->dicePlays++;
         $this->diceSource = $source;
         $this->diceSubscriptionId = $subscriptionId;
         $this->diceRequestId = $requestId;
+        $this->diceGuess = $guess;
         return [
             'result' => 6,
+            'guess' => $guess,
             'won' => true,
             'bet_gb' => 1,
             'payout_gb' => 2,

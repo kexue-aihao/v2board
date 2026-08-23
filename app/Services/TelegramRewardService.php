@@ -61,9 +61,17 @@ class TelegramRewardService
         $settings = $this->rewards->gameSettings($context['user']);
         $bet = (int)$settings[$game . '_bet_gb'];
         $actionSuffix = $this->gameActionSuffix($chatId, $telegramUserId, $game);
-        $this->send($chatId, sprintf("%s\n%s", $this->label($game), $this->gameRulesText($game, $bet)), array_merge([
-            [$this->button('开始', 'rw:go:' . $this->code($game) . $actionSuffix), $this->button('设置赌注', 'rw:b:' . $this->code($game) . $actionSuffix)],
-        ], [
+        $buttons = $game === 'dice'
+            ? [
+                [$this->button('1', 'rw:dg:1' . $actionSuffix), $this->button('2', 'rw:dg:2' . $actionSuffix), $this->button('3', 'rw:dg:3' . $actionSuffix)],
+                [$this->button('4', 'rw:dg:4' . $actionSuffix), $this->button('5', 'rw:dg:5' . $actionSuffix), $this->button('6', 'rw:dg:6' . $actionSuffix)],
+                [$this->button('设置赌注', 'rw:b:d' . $actionSuffix)],
+            ]
+            : [[
+                $this->button('开始', 'rw:go:' . $this->code($game) . $actionSuffix),
+                $this->button('设置赌注', 'rw:b:' . $this->code($game) . $actionSuffix),
+            ]];
+        $this->send($chatId, sprintf("%s\n%s", $this->label($game), $this->gameRulesText($game, $bet)), array_merge($buttons, [
             [$this->button('返回娱乐中心', 'rw:m')],
         ]));
     }
@@ -98,7 +106,7 @@ class TelegramRewardService
         ), [[$this->button('返回娱乐中心', 'rw:m')]]);
     }
 
-    public function play(int $chatId, $telegramUserId, string $game, string $requestId): void
+    public function play(int $chatId, $telegramUserId, string $game, string $requestId, ?int $diceGuess = null): void
     {
         $this->assertGroupAvailable($chatId);
         $context = $this->boundContext($telegramUserId);
@@ -106,8 +114,9 @@ class TelegramRewardService
         $this->assertGameEnabled($game);
         $entrypoint = $this->entrypoint($chatId);
         if ($game === 'dice') {
-            $result = $this->rewards->playDice($context['user'], $entrypoint, $requestId, $context['subscription_id']);
-            $headline = '骰子点数：' . (int)$result['result'];
+            if ($diceGuess === null) throw new RuntimeException('请选择猜测点数');
+            $result = $this->rewards->playDice($context['user'], $entrypoint, $requestId, $context['subscription_id'], $diceGuess);
+            $headline = '猜测点数：' . (int)($result['guess'] ?? $diceGuess) . "\n骰子点数：" . (int)$result['result'];
         } elseif ($game === 'slots') {
             $result = $this->rewards->playSlots($context['user'], $entrypoint, $requestId, $context['subscription_id']);
             $headline = '老虎机结果：' . implode(' | ', (array)$result['result']);
@@ -125,6 +134,13 @@ class TelegramRewardService
             $net >= 0 ? '+' : '-',
             $this->number(abs($net) / TrafficRewardService::GB)
         ), [[$this->button('返回娱乐中心', 'rw:m')]]);
+    }
+
+    public function playDiceWithGuess(int $chatId, $telegramUserId, int $guess, ?string $requestId = null): void
+    {
+        if ($guess < 1 || $guess > 6) throw new RuntimeException('猜测点数必须为 1-6');
+        $requestId = $requestId ?: 'telegram-command-' . $chatId . '-' . $telegramUserId . '-' . bin2hex(random_bytes(6));
+        $this->play($chatId, $telegramUserId, 'dice', $requestId, $guess);
     }
 
     public function playGroupPoker(int $chatId, $telegramUserId, bool $start = false): void
@@ -312,6 +328,16 @@ class TelegramRewardService
             $this->setBet($chatId, $telegramUserId, $match[1], (int)$match[2]);
             return;
         }
+        if (preg_match('/^rw:dg:([1-6])(?::([A-Za-z0-9_-]{8,16}))?$/', $data, $match)) {
+            $this->assertGameActionOwner($chatId, $telegramUserId, 'd', $match[2] ?? '');
+            $this->playDiceWithGuess(
+                $chatId,
+                $telegramUserId,
+                (int)$match[1],
+                'telegram-callback-' . $chatId . '-' . $messageId
+            );
+            return;
+        }
         if (preg_match('/^rw:([pxnl]):([A-Za-z0-9_-]{8,16}):([0-9.]{1,6})$/', $data, $match)) {
             $this->updateRuleState($chatId, $telegramUserId, $match[2], $match[1], $match[3]);
             return;
@@ -322,6 +348,10 @@ class TelegramRewardService
         }
         if (preg_match('/^rw:go:([dsp])(?::([A-Za-z0-9_-]{8,16}))?$/', $data, $match)) {
             $this->assertGameActionOwner($chatId, $telegramUserId, $match[1], $match[2] ?? '');
+            if ($match[1] === 'd') {
+                $this->showGame($chatId, $telegramUserId, 'dice');
+                return;
+            }
             $this->play($chatId, $telegramUserId, $match[1], 'telegram-callback-' . $chatId . '-' . $messageId);
             return;
         }
@@ -474,11 +504,9 @@ class TelegramRewardService
         $limitLine = '每日次数：' . $this->dailyLimit($dailyLimit) . '。';
 
         if ($game === 'dice') {
-            $face = min(6, max(1, (int)config('v2board.reward_dice_win_face', 6)));
             return sprintf(
-                "游戏规则\n%s\n触发条件：骰子为 %d 点；触发后中奖概率：%s%%，单局最终中奖概率约 %s%%。\n%s\n未中奖扣除当前赌注。",
+                "游戏规则\n%s\n选择 1-6 猜测点数；实际骰子与猜测一致时，进入中奖概率判定。触发后中奖概率：%s%%，单局最终中奖概率约 %s%%。\n%s\n未中奖扣除当前赌注。",
                 $betLine,
-                $face,
                 $probability,
                 $this->number((float)$probability / 6),
                 $limitLine
