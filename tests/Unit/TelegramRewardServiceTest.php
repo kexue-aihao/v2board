@@ -160,6 +160,7 @@ class TelegramRewardServiceTest extends TestCase
 
     public function testGroupPokerUsesTheBoundSubscriptionAndPublishesJoinState(): void
     {
+        config(['v2board.reward_group_enable' => 1]);
         DB::table('v2_user')->insert(['id' => 6, 'telegram_id' => null, 'banned' => 0, 'is_admin' => 0]);
         $telegram = new FailingCallbackTelegramService();
         $rewards = new GroupPokerRewardService(User::findOrFail(6));
@@ -170,10 +171,12 @@ class TelegramRewardServiceTest extends TestCase
         $this->assertSame([6, '-100123', 'join', 'telegram_group', 60], $rewards->pokerArguments);
         $this->assertCount(1, $telegram->messages);
         $this->assertStringContainsString('当前玩家：2 人', $telegram->messages[0]['text']);
+        $this->assertStringContainsString('游戏规则', $telegram->messages[0]['text']);
     }
 
     public function testGroupPokerStartPublishesTheSettlementResult(): void
     {
+        config(['v2board.reward_group_enable' => 1]);
         DB::table('v2_user')->insert(['id' => 7, 'telegram_id' => null, 'banned' => 0, 'is_admin' => 0]);
         $telegram = new FailingCallbackTelegramService();
         $rewards = new GroupPokerRewardService(User::findOrFail(7));
@@ -190,7 +193,78 @@ class TelegramRewardServiceTest extends TestCase
 
         $this->assertSame([7, '-100123', 'start', 'telegram_group', 60], $rewards->pokerArguments);
         $this->assertStringContainsString('炸金花牌局已结算', $telegram->messages[0]['text']);
+        $this->assertStringContainsString('游戏规则', $telegram->messages[0]['text']);
         $this->assertStringContainsString('获胜用户：7', $telegram->messages[0]['text']);
+    }
+
+    public function testGroupCallbacksSettleTheClickingUsersBoundSubscription(): void
+    {
+        config(['v2board.reward_group_enable' => 1]);
+        DB::table('v2_user')->insert(['id' => 8, 'telegram_id' => null, 'banned' => 0, 'is_admin' => 0]);
+        $telegram = new FailingCallbackTelegramService();
+        $rewards = new CallbackRewardService(User::findOrFail(8));
+        $service = new TelegramRewardService($telegram, $rewards);
+
+        $service->showGame(-100123, 10008, 'dice');
+        $callbackData = $telegram->messages[0]['replyMarkup']['inline_keyboard'][0][0]['callback_data'];
+
+        $service->handleCallback([
+            'id' => 'group-callback-id',
+            'from' => ['id' => 10008],
+            'message' => ['message_id' => 88, 'chat' => ['id' => -100123, 'type' => 'supergroup']],
+            'data' => $callbackData,
+        ]);
+
+        $this->assertSame(1, $rewards->dicePlays);
+        $this->assertSame('telegram_group', $rewards->diceSource);
+        $this->assertSame(50, $rewards->diceSubscriptionId);
+        $this->assertSame('telegram-callback--100123-88', $rewards->diceRequestId);
+        $this->assertStringContainsString('骰子点数：6', $telegram->messages[1]['text']);
+
+        $service->handleCallback([
+            'id' => 'other-member-callback-id',
+            'from' => ['id' => 10010],
+            'message' => ['message_id' => 88, 'chat' => ['id' => -100123, 'type' => 'supergroup']],
+            'data' => $callbackData,
+        ]);
+
+        $this->assertSame(1, $rewards->dicePlays);
+        $this->assertStringContainsString('仅限创建者操作', $telegram->messages[2]['text']);
+    }
+
+    public function testGroupGameScreenIncludesConfiguredRules(): void
+    {
+        config(['v2board.reward_group_enable' => 1, 'v2board.reward_dice_win_face' => 5]);
+        DB::table('v2_user')->insert(['id' => 9, 'telegram_id' => null, 'banned' => 0, 'is_admin' => 0]);
+        $telegram = new FailingCallbackTelegramService();
+        $service = new TelegramRewardService($telegram, new CallbackRewardService(User::findOrFail(9)));
+
+        $service->showGame(-100123, 10009, 'dice');
+
+        $this->assertStringContainsString('骰子为 5 点', $telegram->messages[0]['text']);
+        $this->assertStringContainsString('12.34%', $telegram->messages[0]['text']);
+        $this->assertStringContainsString('中奖赔付：7.5 GB', $telegram->messages[0]['text']);
+    }
+
+    public function testGroupMenuPokerButtonJoinsTheMultiplayerRoom(): void
+    {
+        config(['v2board.reward_group_enable' => 1]);
+        DB::table('v2_user')->insert(['id' => 10, 'telegram_id' => null, 'banned' => 0, 'is_admin' => 0]);
+        $telegram = new FailingCallbackTelegramService();
+        $rewards = new GroupPokerRewardService(User::findOrFail(10));
+        $service = new TelegramRewardService($telegram, $rewards);
+
+        $service->showMenu(-100123, 10010);
+        $service->handleCallback([
+            'id' => 'poker-menu-callback-id',
+            'from' => ['id' => 10010],
+            'message' => ['message_id' => 90, 'chat' => ['id' => -100123, 'type' => 'group']],
+            'data' => 'rw:g:p',
+        ]);
+
+        $this->assertSame([10, '-100123', 'join', 'telegram_group', 60], $rewards->pokerArguments);
+        $this->assertSame('群组炸金花', $telegram->messages[0]['replyMarkup']['inline_keyboard'][1][1]['text']);
+        $this->assertStringContainsString('炸金花牌局已加入', $telegram->messages[1]['text']);
     }
 
     public function testExplicitTelegramTokenOverridesTheSavedConfiguration(): void
@@ -231,6 +305,9 @@ class FailingCallbackTelegramService extends TelegramService
 class CallbackRewardService extends TrafficRewardService
 {
     public $dicePlays = 0;
+    public $diceSource;
+    public $diceSubscriptionId;
+    public $diceRequestId;
     protected $user;
 
     public function __construct(User $user)
@@ -245,12 +322,24 @@ class CallbackRewardService extends TrafficRewardService
 
     public function gameRules(): array
     {
-        return ['dice' => ['enabled' => true]];
+        return [
+            'dice' => ['enabled' => true, 'daily_limit' => 3, 'win_probability' => '12.34', 'payout_multiplier' => '1.50'],
+            'slots' => ['enabled' => true, 'daily_limit' => 0, 'win_probability' => '10.00', 'payout_multiplier' => '1.00'],
+            'poker' => ['enabled' => true, 'daily_limit' => 5, 'win_probability' => '5.00', 'payout_multiplier' => '2.00'],
+        ];
+    }
+
+    public function gameSettings(User $user): array
+    {
+        return ['dice_bet_gb' => 5, 'slots_bet_gb' => 1, 'poker_bet_gb' => 1];
     }
 
     public function playDice(User $user, string $source = 'web', ?string $requestId = null, ?int $subscriptionId = null): array
     {
         $this->dicePlays++;
+        $this->diceSource = $source;
+        $this->diceSubscriptionId = $subscriptionId;
+        $this->diceRequestId = $requestId;
         return [
             'result' => 6,
             'won' => true,

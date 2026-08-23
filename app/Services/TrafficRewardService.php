@@ -524,11 +524,18 @@ class TrafficRewardService
         $limit = max(0, (int)config('v2board.reward_' . $game . '_daily_limit', 0));
         if ($limit === 0) return;
         $prefix = 'game:' . $game . ':';
-        $count = TrafficRewardLog::where('user_id', $userId)
+        $query = TrafficRewardLog::where('user_id', $userId)
             ->where('source', 'game')
-            ->where('unique_key', 'like', $prefix . '%')
-            ->whereBetween('created_at', [strtotime($day), strtotime($day . ' +1 day') - 1])
-            ->count();
+            ->whereBetween('created_at', [strtotime($day), strtotime($day . ' +1 day') - 1]);
+        if ($game === 'poker') {
+            $query->where(function ($query) use ($prefix) {
+                $query->where('unique_key', 'like', $prefix . '%')
+                    ->orWhere('unique_key', 'like', 'poker:%');
+            });
+        } else {
+            $query->where('unique_key', 'like', $prefix . '%');
+        }
+        $count = $query->count();
         $labels = ['dice' => '骰子', 'slots' => '老虎机', 'poker' => '炸金花'];
         if ($count >= $limit) throw new RuntimeException('今日' . ($labels[$game] ?? '游戏') . '次数已用完');
     }
@@ -601,14 +608,7 @@ class TrafficRewardService
 
     private function assertPokerDailyLimit(int $userId, string $day): void
     {
-        $limit = max(0, (int)config('v2board.reward_poker_daily_limit', 0));
-        if ($limit === 0) return;
-        $count = TrafficRewardLog::where('user_id', $userId)
-            ->where('source', 'game')
-            ->where('unique_key', 'like', 'poker:%')
-            ->whereBetween('created_at', [strtotime($day), strtotime($day . ' +1 day') - 1])
-            ->count();
-        if ($count >= $limit) throw new RuntimeException('今日炸金花次数已用完');
+        $this->assertGameDailyLimit($userId, 'poker', $day);
     }
 
     private function expiresAt(Subscription $subscription): ?int

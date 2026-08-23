@@ -12,7 +12,7 @@ class Start extends Telegram
 
     public function handle($message, $match = [])
     {
-        if (!$message->is_private) return;
+        if (!in_array((string)($message->chat_type ?? ''), ['private', 'group', 'supergroup'], true)) return;
         (new TelegramRewardService($this->telegramService))->showMenu($message->chat_id, $message->telegram_user_id);
     }
 }

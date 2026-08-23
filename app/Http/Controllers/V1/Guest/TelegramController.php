@@ -214,6 +214,11 @@ class TelegramController extends Controller
     {
         if (!isset($data['message'])) return;
         if (!isset($data['message']['text'])) return;
+        $chatType = (string)($data['message']['chat']['type'] ?? '');
+        if (in_array($chatType, ['group', 'supergroup'], true)
+            && (isset($data['message']['sender_chat']) || empty($data['message']['from']['id']))) {
+            return;
+        }
         $obj = new \StdClass();
         $text = explode(' ', $data['message']['text']);
         $obj->command = $text[0];
@@ -224,7 +229,7 @@ class TelegramController extends Controller
         $obj->update_id = $data['update_id'] ?? null;
         $obj->message_type = 'message';
         $obj->text = $data['message']['text'];
-        $obj->chat_type = (string)($data['message']['chat']['type'] ?? '');
+        $obj->chat_type = $chatType;
         $obj->is_private = $obj->chat_type === 'private';
         if (isset($data['message']['reply_to_message']['text'])) {
             $obj->message_type = 'reply_message';
