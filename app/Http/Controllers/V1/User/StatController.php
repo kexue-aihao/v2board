@@ -45,8 +45,12 @@ class StatController extends Controller
                 $label = $this->rewardLabel((string)$row->source, $metadata);
                 $change = TrafficRewardService::splitTrafficChange((int)$row->reward_bytes);
                 return [
-                    'u' => 0,
-                    'd' => 0,
+                    // Signature's restored stock traffic table only renders
+                    // u/d. Mirror the signed ledger change here so check-in
+                    // and game records remain visible without altering theme
+                    // assets or injecting a reward-specific view.
+                    'u' => $change['increase_bytes'],
+                    'd' => $change['deducted_bytes'],
                     'record_at' => (int)$row->getRawOriginal('created_at'),
                     'user_id' => (int)$row->user_id,
                     'server_rate' => 1,

@@ -47,4 +47,50 @@ class TrafficRewardPolicyTest extends TestCase
         $this->assertSame(100, $method->invoke(null, 100));
         $this->assertSame(TrafficRewardService::MAX_GAME_GB, $method->invoke(null, 5000));
     }
+
+    public function testGameProbabilityAndPayoutMultiplierAreIndependent(): void
+    {
+        config([
+            'v2board.reward_dice_win_probability' => 100,
+            'v2board.reward_dice_payout_multiplier' => '1.50',
+            'v2board.reward_dice_win_face' => 6,
+        ]);
+        $service = new TrafficRewardService();
+        $method = (new \ReflectionClass($service))->getMethod('gameSettlement');
+        $method->setAccessible(true);
+
+        $settlement = $method->invoke($service, 'dice', 6);
+
+        $this->assertTrue($settlement['won']);
+        $this->assertSame(1.5, $settlement['payout_gb']);
+        $this->assertSame('1.50', $settlement['payout_multiplier']);
+        $this->assertSame(100, $settlement['win_probability']);
+    }
+
+    public function testLossDoesNotReceiveABaseReward(): void
+    {
+        config([
+            'v2board.reward_dice_win_probability' => 0,
+            'v2board.reward_dice_payout_multiplier' => '100.00',
+            'v2board.reward_dice_win_face' => 6,
+        ]);
+        $service = new TrafficRewardService();
+        $method = (new \ReflectionClass($service))->getMethod('gameSettlement');
+        $method->setAccessible(true);
+
+        $settlement = $method->invoke($service, 'dice', 6);
+
+        $this->assertFalse($settlement['won']);
+        $this->assertSame(0, $settlement['payout_gb']);
+    }
+
+    public function testGameRulesExposeThePerGameDailyLimit(): void
+    {
+        config(['v2board.reward_dice_daily_limit' => 20]);
+        $service = new TrafficRewardService();
+        $method = (new \ReflectionClass($service))->getMethod('gameRule');
+        $method->setAccessible(true);
+
+        $this->assertSame(20, $method->invoke($service, 'dice')['daily_limit']);
+    }
 }

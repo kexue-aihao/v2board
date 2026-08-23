@@ -59,25 +59,22 @@ REMOTE_REVISION="$(git rev-parse "origin/$DEPLOY_BRANCH")"
 }
 echo "Deployed revision: $DEPLOY_REVISION"
 
-# Verify the signature theme is using the current in-repo bundle. The async
-# chunk is content-addressed, so an old mapping means the site can keep
-# serving a cached reward implementation even after Git was updated.
+# The Signature theme no longer hosts reward operations. Keep the deployment
+# check focused on the actual requirement: a valid entry bundle with no
+# leftover reward-page injection. Reward operations are handled by Telegram
+# and the API, so requiring the former async reward chunk would block a valid
+# deployment after the theme rollback.
 SIGNATURE_ASSET_DIR="$ROOT_DIR/public/theme/signature/assets/static/js"
 SIGNATURE_INDEX="$(find "$SIGNATURE_ASSET_DIR" -maxdepth 1 -type f -name 'index.*.js' -print | sort | head -n 1)"
 [ -n "$SIGNATURE_INDEX" ] || {
     echo "ERROR: Signature theme entry bundle is missing." >&2
     exit 1
 }
-SIGNATURE_CHUNK_HASH="$(grep -o '2142:\"[0-9a-f][0-9a-f]*\"' "$SIGNATURE_INDEX" | head -n 1 | sed -n 's/.*:\"\([0-9a-f][0-9a-f]*\)\"/\1/p')"
-[ -n "$SIGNATURE_CHUNK_HASH" ] && [ -f "$SIGNATURE_ASSET_DIR/2142.$SIGNATURE_CHUNK_HASH.js" ] || {
-    echo "ERROR: Signature theme reward chunk mapping is missing or points to a missing file." >&2
-    exit 1
-}
-if grep -Fq '2142:"6d6fa323"' "$SIGNATURE_INDEX" || grep -Fq 'signature-reward-center' "$SIGNATURE_INDEX"; then
-    echo "ERROR: Signature theme still contains the legacy reward asset mapping." >&2
+if grep -Fq 'signature-reward-page' "$SIGNATURE_INDEX" || grep -Fq 'signature-reward-center' "$SIGNATURE_INDEX"; then
+    echo "ERROR: Signature theme still contains reward-page injection code." >&2
     exit 1
 fi
-echo "Signature reward bundle: 2142.$SIGNATURE_CHUNK_HASH.js"
+echo "Signature theme entry verified: $(basename "$SIGNATURE_INDEX")"
 
 # The reseller page used to share its URL with public/reseller/. Remove only
 # the now-empty legacy asset directory so Nginx does not redirect /reseller

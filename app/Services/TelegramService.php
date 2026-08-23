@@ -14,15 +14,28 @@ class TelegramService {
         $this->api = 'https://api.telegram.org/bot' . config('v2board.telegram_bot_token', $token) . '/';
     }
 
-    public function sendMessage(int $chatId, string $text, string $parseMode = '')
+    public function sendMessage(int $chatId, string $text, string $parseMode = '', ?array $replyMarkup = null)
     {
         if ($parseMode === 'markdown') {
             $text = str_replace('_', '\_', $text);
         }
-        $this->request('sendMessage', [
+        $params = [
             'chat_id' => $chatId,
             'text' => $text,
             'parse_mode' => $parseMode
+        ];
+        if ($replyMarkup !== null) {
+            $params['reply_markup'] = json_encode($replyMarkup, JSON_UNESCAPED_UNICODE);
+        }
+        return $this->request('sendMessage', $params);
+    }
+
+    public function answerCallbackQuery(string $callbackQueryId, string $text = '', bool $showAlert = false)
+    {
+        return $this->request('answerCallbackQuery', [
+            'callback_query_id' => $callbackQueryId,
+            'text' => $text,
+            'show_alert' => $showAlert ? 'true' : 'false',
         ]);
     }
 
@@ -79,7 +92,7 @@ class TelegramService {
         $this->setMyCommands($commands);
         return $this->request('setWebhook', array_merge([
             'url' => $url,
-            'allowed_updates' => json_encode(['message', 'chat_join_request', 'chat_member'])
+            'allowed_updates' => json_encode(['message', 'callback_query', 'chat_join_request', 'chat_member'])
         ], $extra));
     }
 

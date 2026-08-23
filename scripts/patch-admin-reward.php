@@ -45,7 +45,9 @@ JS;
 
 $modulePath = __DIR__ . '/admin-reward-module.js';
 $moduleSource = file_get_contents($modulePath);
-if ($moduleSource === false || strpos($moduleSource, 'rewardpage: function') === false) {
+if ($moduleSource === false
+    || strpos($moduleSource, 'rewardpage: function') === false
+    || preg_match('/\}\)\s*$/', trim($moduleSource))) {
     fwrite(STDERR, "Admin reward module source is invalid.\n");
     exit(1);
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\V1\Guest;
 
 use App\Http\Controllers\Controller;
 use App\Services\TelegramBindingService;
+use App\Services\TelegramRewardService;
 use App\Services\TelegramService;
 use App\Utils\CacheKey;
 use Illuminate\Http\Request;
@@ -42,6 +43,10 @@ class TelegramController extends Controller
             Cache::put($updateKey, true, 86400);
         }
         if ($this->handleBindingUpdate($data)) {
+            return response(['data' => true]);
+        }
+        if (isset($data['callback_query'])) {
+            (new TelegramRewardService($this->telegramService))->handleCallback((array)$data['callback_query']);
             return response(['data' => true]);
         }
         $this->formatMessage($data);

@@ -70,7 +70,7 @@ class TrafficRewardService
         return $this->gameRules();
     }
 
-    public function saveGameRuleForAdministrator(User $actor, string $game, $probability, $multiplier, ?int $subscriptionId = null, $enabled = null): array
+    public function saveGameRuleForAdministrator(User $actor, string $game, $probability, $multiplier, ?int $subscriptionId = null, $enabled = null, $dailyLimit = null): array
     {
         $this->assertGameRuleAdministrator($actor, $subscriptionId);
         if (!in_array($game, ['dice', 'slots', 'poker'], true)) {
@@ -92,6 +92,13 @@ class TrafficRewardService
             }
             $config['reward_' . $game . '_enable'] = (int)(bool)$enabled;
         }
+        if ($dailyLimit !== null) {
+            $dailyLimit = filter_var($dailyLimit, FILTER_VALIDATE_INT);
+            if ($dailyLimit === false || $dailyLimit < 0 || $dailyLimit > 100) {
+                throw new RuntimeException('每日次数限制无效');
+            }
+            $config['reward_' . $game . '_daily_limit'] = (int)$dailyLimit;
+        }
 
         if (!File::put(base_path('config/v2board.php'), "<?php\n return " . var_export($config, true) . " ;", LOCK_EX)) {
             throw new RuntimeException('保存游戏规则失败，请检查 config 目录写入权限');
@@ -101,6 +108,7 @@ class TrafficRewardService
             'v2board.reward_' . $game . '_payout_multiplier' => $multiplier,
         ];
         if ($enabled !== null) $runtimeConfig['v2board.reward_' . $game . '_enable'] = $config['reward_' . $game . '_enable'];
+        if ($dailyLimit !== null) $runtimeConfig['v2board.reward_' . $game . '_daily_limit'] = $config['reward_' . $game . '_daily_limit'];
         config($runtimeConfig);
         try {
             Artisan::call('config:cache');
@@ -125,10 +133,10 @@ class TrafficRewardService
         return $this->gameRulesForAdministrator($context['user'], $context['subscription_id']);
     }
 
-    public function saveGameRuleForTelegramAdministrator($telegramUserId, $chatId, string $game, $probability, $multiplier, $enabled = null): array
+    public function saveGameRuleForTelegramAdministrator($telegramUserId, $chatId, string $game, $probability, $multiplier, $enabled = null, $dailyLimit = null): array
     {
         $context = $this->requiredTelegramAdministrator($telegramUserId, $chatId);
-        return $this->saveGameRuleForAdministrator($context['user'], $game, $probability, $multiplier, $context['subscription_id'], $enabled);
+        return $this->saveGameRuleForAdministrator($context['user'], $game, $probability, $multiplier, $context['subscription_id'], $enabled, $dailyLimit);
     }
 
     public function userForTelegram($telegramUserId, $chatId = null): ?User
@@ -278,6 +286,15 @@ class TrafficRewardService
         }, $requestId, $subscriptionId);
     }
 
+    public function playPokerSolo(User $user, string $source = 'web', ?string $requestId = null, ?int $subscriptionId = null): array
+    {
+        return $this->playSingle($user, 'poker', $source, function () {
+            $cards = [random_int(1, 13), random_int(1, 13), random_int(1, 13)];
+            sort($cards);
+            return $cards;
+        }, $requestId, $subscriptionId);
+    }
+
     private function playSingle(User $user, string $game, string $source, callable $resultFactory, ?string $requestId = null, ?int $subscriptionId = null): array
     {
         return DB::transaction(function () use ($user, $game, $source, $resultFactory, $requestId, $subscriptionId) {
@@ -387,6 +404,7 @@ class TrafficRewardService
             : config('v2board.' . $legacyKey, $defaults[$game]);
         return [
             'enabled' => (int)config('v2board.reward_' . $game . '_enable', config('v2board.reward_enable', 1)) === 1,
+            'daily_limit' => max(0, min(100, (int)config('v2board.reward_' . $game . '_daily_limit', 0))),
             'win_probability' => self::normalizeProbability($probability, $defaults[$game]),
             'payout_multiplier' => self::normalizeMultiplier(config('v2board.reward_' . $game . '_payout_multiplier', '1.00')),
         ];
@@ -461,7 +479,8 @@ class TrafficRewardService
             ->where('unique_key', 'like', $prefix . '%')
             ->whereBetween('created_at', [strtotime($day), strtotime($day . ' +1 day') - 1])
             ->count();
-        if ($count >= $limit) throw new RuntimeException('今日' . ($game === 'dice' ? '骰子' : '老虎机') . '次数已用完');
+        $labels = ['dice' => '骰子', 'slots' => '老虎机', 'poker' => '炸金花'];
+        if ($count >= $limit) throw new RuntimeException('今日' . ($labels[$game] ?? '游戏') . '次数已用完');
     }
 
     public function playPoker(User $user, string $chatId, string $action = 'join', string $source = 'telegram_group', ?int $subscriptionId = null): array
