@@ -13,9 +13,11 @@ class IpLocationCache extends Model
 
     protected $casts = [
         'ip_version' => 'integer',
+        'asn' => 'integer',
         'latitude' => 'float',
         'longitude' => 'float',
         'resolved_at' => 'timestamp',
+        'expires_at' => 'timestamp',
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp'
     ];

@@ -542,7 +542,10 @@ class UserController extends Controller
 
         $records->each(function ($record) use ($subscriptions, $serverNames, $locationService) {
             $record['subscription_name'] = optional(optional($subscriptions->get($record->subscription_id))->plan)->name;
-            $record['node_name'] = $serverNames[$record->node_type . '-' . $record->node_id] ?? null;
+            $snapshot = trim((string)$record->node_name_snapshot);
+            $record['node_name'] = $snapshot !== ''
+                ? $snapshot
+                : ($serverNames[$record->node_type . '-' . $record->node_id] ?? null);
             $record['ip_location'] = $locationService->lookup($record->ip);
         });
         return $records;

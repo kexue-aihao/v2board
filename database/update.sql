@@ -980,14 +980,21 @@ CREATE TABLE IF NOT EXISTS `v2_ip_location_cache` (
     `latitude` decimal(10,6) DEFAULT NULL,
     `longitude` decimal(10,6) DEFAULT NULL,
     `source` varchar(64) NOT NULL DEFAULT '',
+    `source_version` varchar(96) NOT NULL DEFAULT '',
+    `asn` int(10) unsigned DEFAULT NULL,
+    `organization` varchar(255) NOT NULL DEFAULT '',
+    `network_type` varchar(32) NOT NULL DEFAULT 'unknown',
     `status` varchar(16) NOT NULL DEFAULT 'unknown',
+    `lookup_error` varchar(128) NOT NULL DEFAULT '',
     `resolved_at` bigint(20) DEFAULT NULL,
+    `expires_at` bigint(20) DEFAULT NULL,
     `created_at` int(11) NOT NULL,
     `updated_at` int(11) NOT NULL,
     PRIMARY KEY (`id`),
     UNIQUE KEY `ip` (`ip`),
     KEY `location_status` (`status`),
-    KEY `location_key` (`location_key`)
+    KEY `location_key` (`location_key`),
+    KEY `expires_at` (`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 ALTER TABLE `v2_subscription_risk_cycle`

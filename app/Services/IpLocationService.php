@@ -12,6 +12,7 @@ class IpLocationService
     private const UNKNOWN_STATUS = 'unknown';
     private $readers = [];
     private $readerFailures = [];
+    private $sourceVersions = [];
     private $cacheAvailable;
 
     public function lookup(?string $ip): array
@@ -59,9 +60,11 @@ class IpLocationService
                     if (!isset($pending[$ip])) {
                         continue;
                     }
-                    unset($pending[$ip]);
                     $version = strpos($ip, ':') !== false ? 6 : 4;
-                    $result[$ip] = $this->decorate($this->fromCache($cached, $ip, $version));
+                    if ($this->cacheIsFresh($cached)) {
+                        unset($pending[$ip]);
+                        $result[$ip] = $this->decorate($this->fromCache($cached, $ip, $version));
+                    }
                 }
             } catch (\Throwable $e) {
                 // 缓存读失败不能让整页归属地都变成未知：退回逐个解析。
@@ -89,7 +92,9 @@ class IpLocationService
             return $location;
         } catch (\Throwable $e) {
             Log::warning('IP location lookup failed', ['error' => $e->getMessage()]);
-            return $this->unknown($ip, $version);
+            $location = $this->unknown($ip, $version, 'lookup_failed');
+            $this->cache($location);
+            return $location;
         }
     }
 
@@ -110,20 +115,19 @@ class IpLocationService
     private function resolve(?string $ip): array
     {
         $ip = trim((string)$ip);
-        $unknown = $this->unknown($ip);
         if (!filter_var($ip, FILTER_VALIDATE_IP)) {
-            return $unknown;
+            return $this->unknown($ip, 0, 'invalid_ip');
         }
 
         $version = strpos($ip, ':') !== false ? 6 : 4;
         if (!$this->isPublicIp($ip)) {
-            return $unknown;
+            return $this->unknown($ip, $version, 'non_public_ip');
         }
 
         try {
             if ($this->cacheAvailable()) {
                 $cached = IpLocationCache::where('ip', $ip)->first();
-                if ($cached) {
+                if ($cached && $this->cacheIsFresh($cached)) {
                     return $this->fromCache($cached, $ip, $version);
                 }
             }
@@ -134,7 +138,9 @@ class IpLocationService
         } catch (\Throwable $e) {
             // Geolocation is enrichment only. It must never break subscription delivery.
             Log::warning('IP location lookup failed', ['ip' => $ip, 'error' => $e->getMessage()]);
-            return $unknown;
+            $location = $this->unknown($ip, $version, 'lookup_failed');
+            $this->cache($location);
+            return $location;
         }
     }
 
@@ -158,13 +164,21 @@ class IpLocationService
         return IpLocationCache::query()->delete();
     }
 
+    private function cacheIsFresh(IpLocationCache $cache): bool
+    {
+        // 旧缓存行没有 expires_at。让它们自然失效并在下次访问时按新 IP 库重算，
+        // 避免把以前的未知结果或过期归属无限期展示下去。
+        return $cache->expires_at !== null && (int)$cache->expires_at > time();
+    }
+
     private function lookupMmdb(string $ip, int $version): array
     {
         if ((int)env('IP_GEOIP_ENABLED', 1) !== 1) {
-            return $this->unknown($ip, $version);
+            return $this->unknown($ip, $version, 'geoip_disabled');
         }
 
         $prefix = $version === 6 ? 'ipv6' : 'ipv4';
+        $availableReaders = 0;
 
         // IDC/云厂商判定必须独立于地理定位，不能靠「首个命中的库」决定。
         // 香港的 AWS 地址同时存在于 china_ipv4.mmdb（有 province/city/isp="Amazon"，
@@ -183,6 +197,7 @@ class IpLocationService
             if (!$reader) {
                 continue;
             }
+            $availableReaders++;
             $record = $reader->get($ip);
             if (!is_array($record)) {
                 continue;
@@ -207,6 +222,7 @@ class IpLocationService
             if (!$reader) {
                 continue;
             }
+            $availableReaders++;
             $record = $reader->get($ip);
             if (!is_array($record) || !$this->isKnownRecord($record)) {
                 continue;
@@ -217,13 +233,14 @@ class IpLocationService
         if ($idcRecord !== null && $this->isKnownRecord($idcRecord)) {
             return $this->withIdcVendor($this->normalize($ip, $version, $idcRecord, $idcSource), $idcVendor);
         }
-        return $this->unknown($ip, $version);
+        return $this->unknown($ip, $version, $availableReaders ? 'no_matching_record' : 'mmdb_unavailable');
     }
 
     private function withIdcVendor(array $location, string $vendor): array
     {
         if ($vendor !== '' && ($location['status'] ?? '') === 'resolved') {
             $location['idc_vendor'] = $vendor;
+            $location['network_type'] = 'datacenter';
         }
         return $location;
     }
@@ -275,7 +292,7 @@ class IpLocationService
             $countryName = $this->value($record, ['country', 'country_name']) ?: $countryCode;
         }
         if ($countryCode === 'ZZ' || $countryCode === '') {
-            return $this->unknown($ip, $version);
+            return $this->unknown($ip, $version, 'no_matching_record');
         }
         $idc = $this->value($record, ['idc_vendor', 'vendor']);
 
@@ -294,11 +311,16 @@ class IpLocationService
             'latitude' => $this->number($record, 'latitude'),
             'longitude' => $this->number($record, 'longitude'),
             'source' => $source,
-            'status' => 'resolved'
+            'source_version' => $this->sourceVersion($source),
+            'asn' => $this->integer($record, ['asn', 'autonomous_system_number']),
+            'organization' => $this->value($record, ['organization', 'organization_name', 'org', 'owner']),
+            'network_type' => $this->networkType($record, $source, $idc),
+            'status' => 'resolved',
+            'lookup_error' => ''
         ];
     }
 
-    private function unknown(string $ip, int $version = 0): array
+    private function unknown(string $ip, int $version = 0, string $error = ''): array
     {
         return [
             'ip' => $ip,
@@ -306,7 +328,9 @@ class IpLocationService
             'country_code' => '', 'country_name' => '', 'region' => '', 'province' => '',
             'city' => '', 'district' => '', 'isp' => '', 'idc_vendor' => '',
             'location_key' => '', 'latitude' => null, 'longitude' => null,
-            'source' => '', 'status' => self::UNKNOWN_STATUS
+            'source' => '', 'source_version' => '', 'asn' => null, 'organization' => '',
+            'network_type' => 'unknown', 'status' => self::UNKNOWN_STATUS,
+            'lookup_error' => $error
         ];
     }
 
@@ -316,7 +340,10 @@ class IpLocationService
             return;
         }
         try {
-            IpLocationCache::updateOrCreate(['ip' => $location['ip']], $location + ['resolved_at' => time()]);
+            $now = time();
+            $location['resolved_at'] = $now;
+            $location['expires_at'] = $this->expiresAt($location, $now);
+            IpLocationCache::updateOrCreate(['ip' => $location['ip']], $location);
         } catch (\Throwable $e) {
             Log::warning('Unable to cache IP location', ['ip' => $location['ip'], 'error' => $e->getMessage()]);
         }
@@ -358,6 +385,71 @@ class IpLocationService
     private function number(array $record, string $key): ?float
     {
         return isset($record[$key]) && is_numeric($record[$key]) ? (float)$record[$key] : null;
+    }
+
+    private function integer(array $record, array $keys): ?int
+    {
+        foreach ($keys as $key) {
+            if (isset($record[$key]) && is_numeric($record[$key])) {
+                return (int)$record[$key];
+            }
+        }
+        return null;
+    }
+
+    private function networkType(array $record, string $source, string $idcVendor): string
+    {
+        if ($idcVendor !== '' || strpos($source, '_idc') !== false) {
+            return 'datacenter';
+        }
+
+        $declared = strtolower($this->value($record, ['network_type', 'network', 'type']));
+        if (in_array($declared, ['datacenter', 'mobile', 'residential', 'business'], true)) {
+            return $declared;
+        }
+        if (strpos($source, '_residential') !== false) {
+            return 'residential';
+        }
+
+        $isp = strtolower($this->value($record, ['isp']));
+        if (strpos($isp, 'mobile') !== false || strpos($isp, '移动') !== false) {
+            return 'mobile';
+        }
+        return 'unknown';
+    }
+
+    private function sourceVersion(string $source): string
+    {
+        if (isset($this->sourceVersions[$source])) {
+            return $this->sourceVersions[$source];
+        }
+
+        $reader = $this->reader($source . '.mmdb');
+        if (!$reader) {
+            return $this->sourceVersions[$source] = '';
+        }
+        try {
+            $metadata = $reader->metadata();
+            return $this->sourceVersions[$source] = substr(
+                $source . '@' . (int)$metadata->buildEpoch,
+                0,
+                96
+            );
+        } catch (\Throwable $e) {
+            return $this->sourceVersions[$source] = $source;
+        }
+    }
+
+    private function expiresAt(array $location, int $now): int
+    {
+        if (($location['status'] ?? '') === 'resolved') {
+            $days = max(1, min(365, (int)env('IP_GEOIP_CACHE_TTL_DAYS', 30)));
+            return $now + ($days * 86400);
+        }
+
+        // 失败缓存采用更短时间，IP 库更新或临时文件不可用后会自动重试。
+        $hours = max(1, min(168, (int)env('IP_GEOIP_UNKNOWN_CACHE_TTL_HOURS', 6)));
+        return $now + ($hours * 3600);
     }
 
     public function locationKey(string $countryCode, string $region = '', string $city = ''): string

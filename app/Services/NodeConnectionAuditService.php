@@ -29,7 +29,7 @@ class NodeConnectionAuditService
      * 节点上报的在线 IP 落库。$data 形如 [node_user_id => ['1.2.3.4_1', ...]]，
      * 与 /UniProxy/alive 收到的结构一致。
      */
-    public function record(string $nodeType, $nodeId, array $data): int
+    public function record(string $nodeType, $nodeId, array $data, ?string $nodeName = null): int
     {
         if (!$this->available() || empty($data)) {
             return 0;
@@ -45,7 +45,7 @@ class NodeConnectionAuditService
         }
 
         try {
-            $rows = $this->buildRows($nodeType, (int)$nodeId, $data);
+            $rows = $this->buildRows($nodeType, (int)$nodeId, $data, $nodeName);
             if (!$rows) {
                 return 0;
             }
@@ -62,7 +62,7 @@ class NodeConnectionAuditService
         }
     }
 
-    private function buildRows(string $nodeType, int $nodeId, array $data): array
+    private function buildRows(string $nodeType, int $nodeId, array $data, ?string $nodeName): array
     {
         $nodeUserIds = [];
         foreach (array_keys($data) as $nodeUserId) {
@@ -76,6 +76,7 @@ class NodeConnectionAuditService
 
         $owners = $this->resolveOwners($nodeUserIds);
         $now = time();
+        $nodeName = $this->truncateNodeName($nodeName);
         $rows = [];
         foreach ($data as $nodeUserId => $ips) {
             if (!is_numeric($nodeUserId) || !is_array($ips)) {
@@ -95,6 +96,7 @@ class NodeConnectionAuditService
                     'node_user_id' => (int)$nodeUserId,
                     'node_type' => $nodeType,
                     'node_id' => $nodeId,
+                    'node_name_snapshot' => $nodeName,
                     'ip' => $ip,
                     'report_count' => 1,
                     'first_seen_at' => $now,
@@ -105,6 +107,12 @@ class NodeConnectionAuditService
             }
         }
         return array_values($rows);
+    }
+
+    private function truncateNodeName(?string $name): string
+    {
+        $name = trim((string)$name);
+        return function_exists('mb_substr') ? mb_substr($name, 0, 255) : substr($name, 0, 255);
     }
 
     /**
@@ -159,7 +167,7 @@ class NodeConnectionAuditService
     private function upsert(array $rows): void
     {
         $columns = ['user_id', 'subscription_id', 'node_user_id', 'node_type', 'node_id',
-            'ip', 'report_count', 'first_seen_at', 'last_seen_at', 'created_at', 'updated_at'];
+            'node_name_snapshot', 'ip', 'report_count', 'first_seen_at', 'last_seen_at', 'created_at', 'updated_at'];
         $placeholder = '(' . implode(',', array_fill(0, count($columns), '?')) . ')';
         $bindings = [];
         foreach ($rows as $row) {
@@ -177,6 +185,8 @@ class NodeConnectionAuditService
             . '`last_seen_at` = VALUES(`last_seen_at`),'
             . '`user_id` = VALUES(`user_id`),'
             . '`subscription_id` = VALUES(`subscription_id`),'
+            // 名称快照一旦有值就不再覆盖，节点改名或删除时历史归属仍可辨认。
+            . '`node_name_snapshot` = IF(`node_name_snapshot` = \'\', VALUES(`node_name_snapshot`), `node_name_snapshot`),'
             . '`updated_at` = VALUES(`updated_at`)',
             $bindings
         );

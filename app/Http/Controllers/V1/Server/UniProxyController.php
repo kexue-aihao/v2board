@@ -207,7 +207,12 @@ class UniProxyController extends Controller
         }
 
         // 缓存只有 120 秒 TTL，查历史连接来源必须另外落库。
-        (new NodeConnectionAuditService())->record($this->nodeType, $this->nodeId, $data);
+        (new NodeConnectionAuditService())->record(
+            $this->nodeType,
+            $this->nodeId,
+            $data,
+            isset($this->nodeInfo->name) ? (string)$this->nodeInfo->name : null
+        );
 
         return response([
             'data' => true

@@ -458,6 +458,7 @@ class SchemaUpgradeService
             `node_user_id` bigint(20) NOT NULL,
             `node_type` varchar(16) NOT NULL,
             `node_id` int(11) NOT NULL,
+            `node_name_snapshot` varchar(255) NOT NULL DEFAULT '',
             `ip` varchar(45) NOT NULL,
             `report_count` bigint(20) NOT NULL DEFAULT '0',
             `first_seen_at` bigint(20) NOT NULL,
@@ -473,6 +474,7 @@ class SchemaUpgradeService
             'node_user_id' => 'bigint(20) NOT NULL',
             'node_type' => 'varchar(16) NOT NULL',
             'node_id' => 'int(11) NOT NULL',
+            'node_name_snapshot' => "varchar(255) NOT NULL DEFAULT ''",
             'ip' => 'varchar(45) NOT NULL',
             'report_count' => "bigint(20) NOT NULL DEFAULT '0'",
             'first_seen_at' => 'bigint(20) NOT NULL',
@@ -759,8 +761,14 @@ class SchemaUpgradeService
             `latitude` decimal(10,6) DEFAULT NULL,
             `longitude` decimal(10,6) DEFAULT NULL,
             `source` varchar(64) NOT NULL DEFAULT '',
+            `source_version` varchar(96) NOT NULL DEFAULT '',
+            `asn` int(10) unsigned DEFAULT NULL,
+            `organization` varchar(255) NOT NULL DEFAULT '',
+            `network_type` varchar(32) NOT NULL DEFAULT 'unknown',
             `status` varchar(16) NOT NULL DEFAULT 'unknown',
+            `lookup_error` varchar(128) NOT NULL DEFAULT '',
             `resolved_at` bigint(20) DEFAULT NULL,
+            `expires_at` bigint(20) DEFAULT NULL,
             `created_at` int(11) NOT NULL,
             `updated_at` int(11) NOT NULL,
             PRIMARY KEY (`id`)
@@ -780,8 +788,14 @@ class SchemaUpgradeService
             'latitude' => 'decimal(10,6) DEFAULT NULL',
             'longitude' => 'decimal(10,6) DEFAULT NULL',
             'source' => "varchar(64) NOT NULL DEFAULT ''",
+            'source_version' => "varchar(96) NOT NULL DEFAULT ''",
+            'asn' => 'int(10) unsigned DEFAULT NULL',
+            'organization' => "varchar(255) NOT NULL DEFAULT ''",
+            'network_type' => "varchar(32) NOT NULL DEFAULT 'unknown'",
             'status' => "varchar(16) NOT NULL DEFAULT 'unknown'",
+            'lookup_error' => "varchar(128) NOT NULL DEFAULT ''",
             'resolved_at' => 'bigint(20) DEFAULT NULL',
+            'expires_at' => 'bigint(20) DEFAULT NULL',
             'created_at' => 'int(11) NOT NULL',
             'updated_at' => 'int(11) NOT NULL'
         ] as $column => $definition) {
@@ -790,6 +804,7 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_ip_location_cache', 'ip', ['ip'], true);
         $this->ensureIndex('v2_ip_location_cache', 'location_status', ['status']);
         $this->ensureIndex('v2_ip_location_cache', 'location_key', ['location_key']);
+        $this->ensureIndex('v2_ip_location_cache', 'expires_at', ['expires_at']);
     }
 
     private function applyPasswordPolicySchema(): void
