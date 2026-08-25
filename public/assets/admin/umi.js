@@ -71902,7 +71902,6 @@
                         t.network_type && n.push("网络：" + (o[t.network_type] || t.network_type));
                         null !== t.geo_confidence && void 0 !== t.geo_confidence && n.push("置信度：" + (100 * Number(t.geo_confidence)).toFixed(1) + "%");
                         t.accuracy_radius && n.push("半径：" + t.accuracy_radius + " km");
-                        Array.isArray(t.matched_sources) && t.matched_sources.length && n.push("来源：" + t.matched_sources.join(", "));
                         return n.join(" · ") || "-"
                     }
                       , f = function(e) {
@@ -118257,7 +118256,6 @@
             loc.network_type && details.push("网络类型：" + (types[loc.network_type] || loc.network_type));
             null !== loc.geo_confidence && void 0 !== loc.geo_confidence && details.push("定位置信度：" + (100 * Number(loc.geo_confidence)).toFixed(1) + "%");
             loc.accuracy_radius && details.push("误差半径：" + loc.accuracy_radius + " km");
-            Array.isArray(loc.matched_sources) && loc.matched_sources.length && details.push("命中库：" + loc.matched_sources.join(", "));
             return details.join(" · ") || "-"
         }
         // request_ip 可能是字面量 "unknown"（当时服务端解析不出地址），所以不做 IP 正则强
