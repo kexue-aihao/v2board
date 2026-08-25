@@ -71886,6 +71886,25 @@
                         // 完全查不到为 null。查到且非 IDC 才能写「否」，查不到只能写未知。
                         return !0 === t.is_idc ? t.idc_vendor || "是" : !1 === t.is_idc ? "否" : "未知"
                     }
+                      , v2boardLocationDetails = function(e) {
+                        var t = e || {}, n = [], r = {
+                            mobile: "移动",
+                            telecom: "电信",
+                            unicom: "联通",
+                            other: "其他"
+                        }, o = {
+                            datacenter: "IDC",
+                            mobile: "移动网络",
+                            residential: "住宅",
+                            business: "企业"
+                        };
+                        t.operator_code && n.push("运营商：" + (r[t.operator_code] || t.operator_code));
+                        t.network_type && n.push("网络：" + (o[t.network_type] || t.network_type));
+                        null !== t.geo_confidence && void 0 !== t.geo_confidence && n.push("置信度：" + (100 * Number(t.geo_confidence)).toFixed(1) + "%");
+                        t.accuracy_radius && n.push("半径：" + t.accuracy_radius + " km");
+                        Array.isArray(t.matched_sources) && t.matched_sources.length && n.push("来源：" + t.matched_sources.join(", "));
+                        return n.join(" · ") || "-"
+                    }
                       , f = function(e) {
                         return e ? w()(1e3 * e).format("YYYY-MM-DD HH:mm:ss") : "-"
                     }
@@ -71980,12 +71999,17 @@
                                     render: function(e, t) {
                                         return u(t.ip_location)
                                     }
-                                }, {
-                                    title: "运营商",
-                                    render: function(e, t) {
-                                        return (t.ip_location || {}).isp || "-"
-                                    }
-                                }, {
+                                 }, {
+                                     title: "运营商",
+                                     render: function(e, t) {
+                                         return (t.ip_location || {}).isp || "-"
+                                     }
+                                 }, {
+                                     title: "网络类型",
+                                     render: function(e, t) {
+                                         return v2boardLocationDetails(t.ip_location)
+                                     }
+                                 }, {
                                     title: "IDC/云厂商",
                                     render: function(e, t) {
                                         return h(t.ip_location)
@@ -72040,12 +72064,17 @@
                                     render: function(e, t) {
                                         return u(t.ip_location)
                                     }
-                                }, {
-                                    title: "运营商",
-                                    render: function(e, t) {
-                                        return (t.ip_location || {}).isp || "-"
-                                    }
-                                }, {
+                                 }, {
+                                     title: "运营商",
+                                     render: function(e, t) {
+                                         return (t.ip_location || {}).isp || "-"
+                                     }
+                                 }, {
+                                     title: "网络类型",
+                                     render: function(e, t) {
+                                         return v2boardLocationDetails(t.ip_location)
+                                     }
+                                 }, {
                                     title: "IDC/云厂商",
                                     render: function(e, t) {
                                         return h(t.ip_location)
@@ -118212,6 +118241,25 @@
             // is_idc 是三态：命中 IDC 库为 true，命中普通库为 false，完全查不到为 null。
             return !0 === loc.is_idc ? loc.idc_vendor || "是" : !1 === loc.is_idc ? "否" : "未知"
         }
+        function v2boardSharedIpDetails(location) {
+            var loc = location || {}, details = [], operators = {
+                mobile: "移动",
+                telecom: "电信",
+                unicom: "联通",
+                other: "其他"
+            }, types = {
+                datacenter: "IDC",
+                mobile: "移动网络",
+                residential: "住宅",
+                business: "企业"
+            };
+            loc.operator_code && details.push("运营商分类：" + (operators[loc.operator_code] || loc.operator_code));
+            loc.network_type && details.push("网络类型：" + (types[loc.network_type] || loc.network_type));
+            null !== loc.geo_confidence && void 0 !== loc.geo_confidence && details.push("定位置信度：" + (100 * Number(loc.geo_confidence)).toFixed(1) + "%");
+            loc.accuracy_radius && details.push("误差半径：" + loc.accuracy_radius + " km");
+            Array.isArray(loc.matched_sources) && loc.matched_sources.length && details.push("命中库：" + loc.matched_sources.join(", "));
+            return details.join(" · ") || "-"
+        }
         // request_ip 可能是字面量 "unknown"（当时服务端解析不出地址），所以不做 IP 正则强
         // 校验，原值照样回传给明细接口。
         function v2boardSharedIpText(value) {
@@ -118682,7 +118730,7 @@
                     style: {
                         marginLeft: 10
                     }
-                }, v2boardSharedIpLocation(summary.ip_location) + " · " + ((summary.ip_location || {}).isp || "未知运营商") + " · IDC/云厂商：" + v2boardSharedIpIdc(summary.ip_location))), p.a.createElement("p", {
+                }, v2boardSharedIpLocation(summary.ip_location) + " · " + ((summary.ip_location || {}).isp || "未知运营商") + " · IDC/云厂商：" + v2boardSharedIpIdc(summary.ip_location) + " · " + v2boardSharedIpDetails(summary.ip_location))), p.a.createElement("p", {
                     className: "mb-0 text-muted font-size-sm"
                 }, (summary.account_count || 0) + " 个账号 · " + (summary.ua_count || 0) + " 种 User-Agent · 拉取 " + (summary.request_count || 0) + " 次 · " + v2boardSharedIpTime(summary.first_seen_at) + " ~ " + v2boardSharedIpTime(summary.last_seen_at))) : null, p.a.createElement(o["a"], {
                     size: "small",
@@ -118727,7 +118775,7 @@
                         }
                     }, "非公网地址") : null, p.a.createElement("div", {
                         className: "text-muted font-size-sm"
-                    }, v2boardSharedIpLocation(row.ip_location) + " · " + ((row.ip_location || {}).isp || "未知运营商") + " · IDC：" + v2boardSharedIpIdc(row.ip_location)))
+                    }, v2boardSharedIpLocation(row.ip_location) + " · " + ((row.ip_location || {}).isp || "未知运营商") + " · IDC：" + v2boardSharedIpIdc(row.ip_location) + " · " + v2boardSharedIpDetails(row.ip_location)))
                 }, {
                     title: "关联账号数",
                     dataIndex: "account_count",

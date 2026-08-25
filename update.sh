@@ -101,6 +101,7 @@ deploy_php artisan v2board:update
 deploy_php artisan optimize:clear
 deploy_php scripts/refresh-telegram-webhook.php
 deploy_php artisan ip:clear-location-cache
+deploy_php artisan ip:backfill-subscribe-locations --chunk=500
 deploy_php artisan horizon:terminate || true
 deploy_start_webman
 # 升级也要跑：早于本次改动安装的站点从来没被写过这条 cron，而检查是幂等的 —— 运维手写的

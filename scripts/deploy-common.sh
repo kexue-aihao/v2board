@@ -329,25 +329,62 @@ deploy_geoip_enabled() {
 
 deploy_check_mmdb() {
     local file
+    local -a required_files
     if ! deploy_geoip_enabled; then
         echo "IP geolocation is disabled; MMDB file check skipped."
         return 0
     fi
-    for file in \
-        resources/ipdb/china_ipv4.mmdb \
-        resources/ipdb/china_ipv4_idc.mmdb \
-        resources/ipdb/china_ipv6.mmdb \
-        resources/ipdb/china_ipv6_idc.mmdb \
-        resources/ipdb/global_ipv4_idc.mmdb \
-        resources/ipdb/global_ipv4_residential.mmdb \
-        resources/ipdb/global_ipv6_idc.mmdb \
-        resources/ipdb/global_ipv6_residential.mmdb; do
+    required_files=(
+        resources/ipdb/china_ipv4_high_prec_v2.mmdb
+        resources/ipdb/china_ipv4_high_prec.mmdb
+        resources/ipdb/china_ipv4.mmdb
+        resources/ipdb/china_ipv4_idc_enriched.mmdb
+        resources/ipdb/china_ipv4_idc.mmdb
+        resources/ipdb/china_ipv4_mobile.mmdb
+        resources/ipdb/china_ipv4_other.mmdb
+        resources/ipdb/china_ipv4_telecom.mmdb
+        resources/ipdb/china_ipv4_unicom.mmdb
+        resources/ipdb/china_ipv4_with_isp.mmdb
+        resources/ipdb/china_ipv6_enriched.mmdb
+        resources/ipdb/china_ipv6.mmdb
+        resources/ipdb/china_ipv6_idc_enriched.mmdb
+        resources/ipdb/china_ipv6_idc.mmdb
+        resources/ipdb/china_ipv6_mobile.mmdb
+        resources/ipdb/china_ipv6_other.mmdb
+        resources/ipdb/china_ipv6_telecom.mmdb
+        resources/ipdb/china_ipv6_unicom.mmdb
+        resources/ipdb/china_ipv6_with_isp.mmdb
+        resources/ipdb/global_ipv4_idc.mmdb
+        resources/ipdb/global_ipv4_residential.mmdb
+        resources/ipdb/global_ipv6_idc.mmdb
+        resources/ipdb/global_ipv6_residential.mmdb
+    )
+    for file in "${required_files[@]}"; do
         if [ ! -s "$file" ]; then
             echo "ERROR: MMDB file is missing or empty: $file" >&2
             return 1
         fi
     done
-    echo "MMDB files: all required files are present."
+    deploy_php -r '
+        require "vendor/autoload.php";
+        $ok = true;
+        foreach (array_slice($argv, 1) as $path) {
+            try {
+                $reader = new \MaxMind\Db\Reader($path);
+                $version = (int)$reader->metadata()->ipVersion;
+                $expected = strpos(basename($path), "ipv6") !== false ? 6 : 4;
+                if ($version !== $expected) {
+                    fwrite(STDERR, "ERROR: MMDB IP version mismatch: {$path}\n");
+                    $ok = false;
+                }
+            } catch (Throwable $e) {
+                fwrite(STDERR, "ERROR: MMDB cannot be read: {$path}\n");
+                $ok = false;
+            }
+        }
+        exit($ok ? 0 : 1);
+    ' "${required_files[@]}"
+    echo "MMDB files: all 23 required files are present and readable."
 }
 
 deploy_webman_port() {

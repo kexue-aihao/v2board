@@ -13,6 +13,8 @@ class IpLocationService
     private $readers = [];
     private $readerFailures = [];
     private $sourceVersions = [];
+    private $catalogVersion;
+    private static $catalogVersionCache = [];
     private $cacheAvailable;
 
     public function lookup(?string $ip): array
@@ -107,8 +109,16 @@ class IpLocationService
             $location['is_idc'] = null;
             return $location;
         }
+        $matchedIdc = false;
+        foreach ((array)($location['matched_sources'] ?? []) as $source) {
+            if (strpos((string)$source, '_idc') !== false) {
+                $matchedIdc = true;
+                break;
+            }
+        }
         $location['is_idc'] = (string)($location['idc_vendor'] ?? '') !== ''
-            || strpos((string)($location['source'] ?? ''), '_idc') !== false;
+            || strpos((string)($location['source'] ?? ''), '_idc') !== false
+            || $matchedIdc;
         return $location;
     }
 
@@ -168,7 +178,9 @@ class IpLocationService
     {
         // 旧缓存行没有 expires_at。让它们自然失效并在下次访问时按新 IP 库重算，
         // 避免把以前的未知结果或过期归属无限期展示下去。
-        return $cache->expires_at !== null && (int)$cache->expires_at > time();
+        return $cache->expires_at !== null
+            && (int)$cache->expires_at > time()
+            && (string)$cache->catalog_version === $this->catalogVersion();
     }
 
     private function lookupMmdb(string $ip, int $version): array
@@ -177,72 +189,285 @@ class IpLocationService
             return $this->unknown($ip, $version, 'geoip_disabled');
         }
 
-        $prefix = $version === 6 ? 'ipv6' : 'ipv4';
+        $candidates = $this->catalog($version);
         $availableReaders = 0;
 
-        // IDC/云厂商判定必须独立于地理定位，不能靠「首个命中的库」决定。
-        // 香港的 AWS 地址同时存在于 china_ipv4.mmdb（有 province/city/isp="Amazon"，
-        // 但没有 idc_vendor）和 global_ipv4_idc.mmdb（vendor="AWS"）。原来按文件顺序
-        // 首个命中即返回，中国库先命中就再也查不到 vendor，AWS、Azure 这类海外云
-        // 会被判成非 IDC。国内云不受影响，因为 china_ipv4.mmdb 自带 idc_vendor。
-        // 四个 IDC 库的每条记录都带 vendor，所以命中即可确定是 IDC 且拿得到厂商名。
-        $idcSource = '';
-        $idcRecord = null;
-        $idcVendor = '';
-        foreach ([
-            "china_{$prefix}_idc.mmdb" => 'china_' . $prefix . '_idc',
-            "global_{$prefix}_idc.mmdb" => 'global_' . $prefix . '_idc'
-        ] as $file => $source) {
+        $hits = [];
+        foreach ($candidates as $candidate) {
+            $file = $candidate['file'];
             $reader = $this->reader($file);
             if (!$reader) {
                 continue;
             }
             $availableReaders++;
-            $record = $reader->get($ip);
-            if (!is_array($record)) {
+            try {
+                $record = $reader->get($ip);
+            } catch (\Throwable $e) {
+                Log::warning('IP MMDB lookup failed', [
+                    'file' => $file,
+                    'error' => $e->getMessage()
+                ]);
                 continue;
             }
-            $vendor = $this->value($record, ['idc_vendor', 'vendor']);
-            if ($vendor === '') {
-                continue;
-            }
-            $idcSource = $source;
-            $idcRecord = $record;
-            $idcVendor = $vendor;
-            break;
-        }
-
-        // 地理信息取更精细的库：中国库有 province/city/isp，其次全球住宅库。
-        // IDC 库只在前两者都没有时兜底 —— 云厂商地址通常不在住宅库里。
-        foreach ([
-            "china_{$prefix}.mmdb" => 'china_' . $prefix,
-            "global_{$prefix}_residential.mmdb" => 'global_' . $prefix . '_residential'
-        ] as $file => $source) {
-            $reader = $this->reader($file);
-            if (!$reader) {
-                continue;
-            }
-            $availableReaders++;
-            $record = $reader->get($ip);
             if (!is_array($record) || !$this->isKnownRecord($record)) {
                 continue;
             }
-            return $this->withIdcVendor($this->normalize($ip, $version, $record, $source), $idcVendor);
+            $hits[] = [
+                'candidate' => $candidate,
+                'location' => $this->normalize($ip, $version, $record, $candidate)
+            ];
         }
 
-        if ($idcRecord !== null && $this->isKnownRecord($idcRecord)) {
-            return $this->withIdcVendor($this->normalize($ip, $version, $idcRecord, $idcSource), $idcVendor);
+        if (!$hits) {
+            return $this->unknown(
+                $ip,
+                $version,
+                $availableReaders ? 'no_matching_record' : 'mmdb_unavailable'
+            );
         }
-        return $this->unknown($ip, $version, $availableReaders ? 'no_matching_record' : 'mmdb_unavailable');
+
+        return $this->mergeLocations($ip, $version, $hits);
     }
 
-    private function withIdcVendor(array $location, string $vendor): array
+    /**
+     * Candidate order is intentionally stable. Field-specific ranks below decide
+     * which hit wins when several databases cover the same address.
+     */
+    private function catalog(int $version): array
     {
-        if ($vendor !== '' && ($location['status'] ?? '') === 'resolved') {
-            $location['idc_vendor'] = $vendor;
-            $location['network_type'] = 'datacenter';
+        $prefix = $version === 6 ? 'ipv6' : 'ipv4';
+        $candidates = [];
+        $add = function (string $file, string $source, string $scope, array $roles,
+                         int $geoRank, int $ispRank, int $idcRank, int $operatorRank) use (&$candidates) {
+            $candidates[] = [
+                'file' => $file,
+                'source' => $source,
+                'scope' => $scope,
+                'roles' => $roles,
+                'geo_rank' => $geoRank,
+                'isp_rank' => $ispRank,
+                'idc_rank' => $idcRank,
+                'operator_rank' => $operatorRank
+            ];
+        };
+
+        if ($version === 4) {
+            $add('china_ipv4_high_prec_v2.mmdb', 'china_ipv4_high_prec_v2', 'china', ['geo', 'isp'], 10, 30, 0, 0);
+            $add('china_ipv4_high_prec.mmdb', 'china_ipv4_high_prec', 'china', ['geo', 'isp'], 20, 40, 0, 0);
+            $add('china_ipv4_with_isp.mmdb', 'china_ipv4_with_isp', 'china', ['geo', 'isp'], 30, 10, 0, 0);
+            $add('china_ipv4.mmdb', 'china_ipv4', 'china', ['geo', 'isp'], 40, 50, 0, 0);
+            $add('china_ipv4_idc_enriched.mmdb', 'china_ipv4_idc_enriched', 'china', ['idc', 'geo', 'isp'], 70, 70, 10, 0);
+            $add('china_ipv4_idc.mmdb', 'china_ipv4_idc', 'china', ['idc', 'geo', 'isp'], 80, 70, 20, 0);
+            $add('china_ipv4_mobile.mmdb', 'china_ipv4_mobile', 'china', ['operator', 'geo', 'isp'], 90, 80, 0, 10);
+            $add('china_ipv4_telecom.mmdb', 'china_ipv4_telecom', 'china', ['operator', 'geo', 'isp'], 90, 80, 0, 20);
+            $add('china_ipv4_unicom.mmdb', 'china_ipv4_unicom', 'china', ['operator', 'geo', 'isp'], 90, 80, 0, 30);
+            $add('china_ipv4_other.mmdb', 'china_ipv4_other', 'china', ['operator', 'geo', 'isp'], 90, 80, 0, 40);
+        } else {
+            $add('china_ipv6_enriched.mmdb', 'china_ipv6_enriched', 'china', ['geo', 'isp'], 20, 30, 0, 0);
+            $add('china_ipv6_with_isp.mmdb', 'china_ipv6_with_isp', 'china', ['geo', 'isp'], 30, 10, 0, 0);
+            $add('china_ipv6.mmdb', 'china_ipv6', 'china', ['geo', 'isp'], 40, 50, 0, 0);
+            $add('china_ipv6_idc_enriched.mmdb', 'china_ipv6_idc_enriched', 'china', ['idc', 'geo', 'isp'], 70, 70, 10, 0);
+            $add('china_ipv6_idc.mmdb', 'china_ipv6_idc', 'china', ['idc', 'geo', 'isp'], 80, 70, 20, 0);
+            $add('china_ipv6_mobile.mmdb', 'china_ipv6_mobile', 'china', ['operator', 'geo', 'isp'], 90, 80, 0, 10);
+            $add('china_ipv6_telecom.mmdb', 'china_ipv6_telecom', 'china', ['operator', 'geo', 'isp'], 90, 80, 0, 20);
+            $add('china_ipv6_unicom.mmdb', 'china_ipv6_unicom', 'china', ['operator', 'geo', 'isp'], 90, 80, 0, 30);
+            $add('china_ipv6_other.mmdb', 'china_ipv6_other', 'china', ['operator', 'geo', 'isp'], 90, 80, 0, 40);
         }
+
+        $add("global_{$prefix}_idc.mmdb", "global_{$prefix}_idc", 'global', ['idc', 'geo', 'isp'], 100, 100, 50, 0);
+        $add("global_{$prefix}_residential.mmdb", "global_{$prefix}_residential", 'global', ['geo', 'isp'], 110, 90, 0, 0);
+        return $candidates;
+    }
+
+    private function catalogFiles(): array
+    {
+        $files = [];
+        foreach (array_merge($this->catalog(4), $this->catalog(6)) as $candidate) {
+            $files[$candidate['file']] = true;
+        }
+        return array_keys($files);
+    }
+
+    private function catalogVersion(): string
+    {
+        if ($this->catalogVersion !== null) {
+            return $this->catalogVersion;
+        }
+
+        $parts = [];
+        $basePath = base_path(env('IP_GEOIP_PATH', 'resources/ipdb'));
+        foreach ($this->catalogFiles() as $file) {
+            $path = $basePath . DIRECTORY_SEPARATOR . $file;
+            $exists = is_file($path);
+            $mtime = $exists ? (int)filemtime($path) : 0;
+            $size = $exists ? (int)filesize($path) : 0;
+            // The deployment preflight validates MMDB metadata. The runtime
+            // fingerprint intentionally uses filesystem stat data so cache hits
+            // do not open all 23 readers just to check whether a catalog changed.
+            $ipVersion = strpos($file, 'ipv6') !== false ? 6 : 4;
+            $parts[] = $file . '@' . $mtime . ':' . $size . ':' . $ipVersion;
+        }
+        $fingerprint = implode('|', $parts);
+        $cacheKey = $basePath . '|' . $fingerprint;
+        if (!isset(self::$catalogVersionCache[$cacheKey])) {
+            self::$catalogVersionCache[$cacheKey] = substr(hash('sha256', $fingerprint), 0, 64);
+        }
+        return $this->catalogVersion = self::$catalogVersionCache[$cacheKey];
+    }
+
+    private function mergeLocations(string $ip, int $version, array $hits): array
+    {
+        $geoHit = $this->bestHit($hits, 'geo_rank', 'geo', true);
+        if (!$geoHit) {
+            $geoHit = $this->bestHit($hits, 'idc_rank', 'idc', true);
+        }
+        if (!$geoHit) {
+            return $this->unknown($ip, $version, 'no_matching_record');
+        }
+
+        $location = $geoHit['location'];
+        foreach ([
+            'country_name', 'region', 'province', 'city', 'district',
+            'latitude', 'longitude', 'asn', 'organization'
+        ] as $field) {
+            if ($this->hasLocationValue($location[$field] ?? null)) {
+                continue;
+            }
+            $fieldHit = $this->bestLocationFieldHit($hits, $field, 'geo_rank');
+            if ($fieldHit !== null) {
+                $location[$field] = $fieldHit['location'][$field];
+            }
+        }
+
+        $ispHit = $this->bestHit($hits, 'isp_rank', 'isp', true);
+        if ($ispHit && $ispHit['location']['isp'] !== '') {
+            $location['isp'] = $ispHit['location']['isp'];
+        }
+
+        $operatorHit = $this->bestHit($hits, 'operator_rank', 'operator', true);
+        if ($operatorHit && $operatorHit['location']['operator_code'] !== '') {
+            $location['operator_code'] = $operatorHit['location']['operator_code'];
+        }
+        if ($operatorHit && $operatorHit['location']['division_code'] !== '') {
+            $location['division_code'] = $operatorHit['location']['division_code'];
+        } elseif (!$this->hasLocationValue($location['division_code'] ?? null)) {
+            $divisionHit = $this->bestLocationFieldHit($hits, 'division_code', 'geo_rank');
+            if ($divisionHit !== null) {
+                $location['division_code'] = $divisionHit['location']['division_code'];
+            }
+        }
+
+        $connectionHit = $this->bestLocationFieldHit($hits, 'connection_type', 'geo_rank');
+        if ($connectionHit !== null) {
+            $location['connection_type'] = $connectionHit['location']['connection_type'];
+        }
+        $residentialHit = $this->bestLocationFieldHit($hits, 'is_residential', 'geo_rank');
+        if ($residentialHit !== null) {
+            $location['is_residential'] = $residentialHit['location']['is_residential'];
+        }
+
+        $idcHit = $this->bestIdcHit($hits);
+        if ($idcHit) {
+            if ($idcHit['location']['idc_vendor'] !== '') {
+                $location['idc_vendor'] = $idcHit['location']['idc_vendor'];
+            }
+            $location['network_type'] = 'datacenter';
+        } else {
+            $location['network_type'] = $this->networkType(
+                ['isp' => $location['isp'], 'network_type' => $location['network_type']],
+                (string)$geoHit['candidate']['source'],
+                (string)($location['idc_vendor'] ?? ''),
+                (string)($location['operator_code'] ?? ''),
+                (string)($location['connection_type'] ?? ''),
+                $location['is_residential'] ?? null
+            );
+        }
+
+        $matchedSources = [];
+        foreach ($hits as $hit) {
+            $source = (string)$hit['candidate']['source'];
+            if (!in_array($source, $matchedSources, true)) {
+                $matchedSources[] = $source;
+            }
+        }
+        $location['source'] = (string)$geoHit['candidate']['source'];
+        $location['source_version'] = $this->sourceVersion($location['source']);
+        $location['matched_sources'] = $matchedSources;
+        $location['catalog_version'] = $this->catalogVersion();
+        $location['location_key'] = $this->locationKey(
+            (string)$location['country_code'],
+            (string)$location['region'],
+            (string)$location['city']
+        );
         return $location;
+    }
+
+    private function bestHit(array $hits, string $rankKey, string $role, bool $requireValue): ?array
+    {
+        $best = null;
+        foreach ($hits as $hit) {
+            if (!in_array($role, $hit['candidate']['roles'], true)) {
+                continue;
+            }
+            $location = $hit['location'];
+            if ($requireValue) {
+                $field = $role === 'operator' ? 'operator_code'
+                    : ($role === 'isp' ? 'isp' : 'country_code');
+                if ((string)($location[$field] ?? '') === '') {
+                    continue;
+                }
+            }
+            if ($best === null || (int)$hit['candidate'][$rankKey] < (int)$best['candidate'][$rankKey]) {
+                $best = $hit;
+            }
+        }
+        return $best;
+    }
+
+    private function bestLocationFieldHit(array $hits, string $field, string $rankKey): ?array
+    {
+        $best = null;
+        foreach ($hits as $hit) {
+            $location = $hit['location'];
+            if (!array_key_exists($field, $location) || !$this->hasLocationValue($location[$field])) {
+                continue;
+            }
+            if ($best === null || (int)$hit['candidate'][$rankKey] < (int)$best['candidate'][$rankKey]) {
+                $best = $hit;
+            }
+        }
+        return $best;
+    }
+
+    private function bestIdcHit(array $hits): ?array
+    {
+        $best = null;
+        $bestRank = null;
+        foreach ($hits as $hit) {
+            $vendor = (string)($hit['location']['idc_vendor'] ?? '');
+            if ($vendor === '') {
+                continue;
+            }
+            $rank = (int)$hit['candidate']['idc_rank'];
+            if ($rank <= 0) {
+                // Dedicated IDC databases always win. Other databases are still
+                // allowed to contribute an IDC field as a lower-priority fallback.
+                $rank = 1000 + (int)$hit['candidate']['geo_rank'];
+            }
+            if ($best === null || $rank < $bestRank) {
+                $best = $hit;
+                $bestRank = $rank;
+            }
+        }
+        return $best;
+    }
+
+    private function hasLocationValue($value): bool
+    {
+        if ($value === null || $value === '') {
+            return false;
+        }
+        return !is_string($value) || trim($value) !== '';
     }
 
     private function reader(string $file): ?Reader
@@ -270,11 +495,15 @@ class IpLocationService
         }
     }
 
-    private function normalize(string $ip, int $version, array $record, string $source): array
+    private function normalize(string $ip, int $version, array $record, array $candidate): array
     {
-        $isChina = strpos($source, 'china_') === 0;
+        $source = (string)$candidate['source'];
+        $isChina = (string)$candidate['scope'] === 'china';
         if ($isChina) {
-            $countryCode = strtoupper(trim((string)($record['country_code'] ?? ''))) ?: 'CN';
+            $countryCode = strtoupper($this->value($record, ['country_code']));
+            if ($countryCode === '' || $countryCode === 'ZZ') {
+                $countryCode = 'CN';
+            }
             $province = $this->value($record, ['province']);
             $region = $province ?: $this->value($record, ['region']);
             $city = $this->value($record, ['city']);
@@ -285,7 +514,7 @@ class IpLocationService
             // continent 字段几乎恒为 NA，不可用。按原来的字面映射会把美国地址标成
             // 「国家 NA / 地区 US」，风控统计的 country_count 数的其实是大洲。
             // 已对美国、澳大利亚、德国、南非、委内瑞拉、香港、中国大陆七地实测确认该规律。
-            $countryCode = strtoupper($this->value($record, ['region']));
+            $countryCode = strtoupper($this->value($record, ['region', 'country_code']));
             $province = $this->value($record, ['city']);
             $region = $province;
             $city = '';
@@ -295,6 +524,10 @@ class IpLocationService
             return $this->unknown($ip, $version, 'no_matching_record');
         }
         $idc = $this->value($record, ['idc_vendor', 'vendor']);
+        $connectionType = strtolower($this->value($record, ['connection_type', 'network_type']));
+        $isResidential = $this->boolean($record, 'is_residential');
+        $operatorCode = in_array('operator', $candidate['roles'], true)
+            ? $this->operatorCode($source) : '';
 
         return [
             'ip' => $ip,
@@ -314,7 +547,15 @@ class IpLocationService
             'source_version' => $this->sourceVersion($source),
             'asn' => $this->integer($record, ['asn', 'autonomous_system_number']),
             'organization' => $this->value($record, ['organization', 'organization_name', 'org', 'owner']),
-            'network_type' => $this->networkType($record, $source, $idc),
+            'operator_code' => $operatorCode,
+            'connection_type' => $connectionType,
+            'is_residential' => $isResidential,
+            'geo_confidence' => $this->number($record, 'confidence'),
+            'accuracy_radius' => $this->integer($record, ['accuracy_radius']),
+            'division_code' => $this->value($record, ['division_code']),
+            'network_type' => $this->networkType($record, $source, $idc, $operatorCode, $connectionType, $isResidential),
+            'matched_sources' => [$source],
+            'catalog_version' => $this->catalogVersion(),
             'status' => 'resolved',
             'lookup_error' => ''
         ];
@@ -329,7 +570,10 @@ class IpLocationService
             'city' => '', 'district' => '', 'isp' => '', 'idc_vendor' => '',
             'location_key' => '', 'latitude' => null, 'longitude' => null,
             'source' => '', 'source_version' => '', 'asn' => null, 'organization' => '',
-            'network_type' => 'unknown', 'status' => self::UNKNOWN_STATUS,
+            'operator_code' => '', 'connection_type' => '', 'is_residential' => null,
+            'geo_confidence' => null, 'accuracy_radius' => null, 'division_code' => '',
+            'network_type' => 'unknown', 'matched_sources' => [], 'catalog_version' => '',
+            'status' => self::UNKNOWN_STATUS,
             'lookup_error' => $error
         ];
     }
@@ -341,6 +585,11 @@ class IpLocationService
         }
         try {
             $now = time();
+            if (empty($location['catalog_version'])
+                && filter_var($location['ip'], FILTER_VALIDATE_IP)
+                && $this->isPublicIp($location['ip'])) {
+                $location['catalog_version'] = $this->catalogVersion();
+            }
             $location['resolved_at'] = $now;
             $location['expires_at'] = $this->expiresAt($location, $now);
             IpLocationCache::updateOrCreate(['ip' => $location['ip']], $location);
@@ -364,10 +613,16 @@ class IpLocationService
 
     private function isKnownRecord(array $record): bool
     {
-        foreach (['country_code', 'country', 'province', 'region', 'city', 'isp', 'vendor', 'idc_vendor'] as $key) {
+        foreach ([
+            'country_code', 'country', 'province', 'region', 'city', 'isp',
+            'vendor', 'idc_vendor', 'connection_type', 'division_code'
+        ] as $key) {
             if (isset($record[$key]) && trim((string)$record[$key]) !== '' && strtoupper(trim((string)$record[$key])) !== 'ZZ') {
                 return true;
             }
+        }
+        if (array_key_exists('is_residential', $record) && $record['is_residential'] !== null) {
+            return true;
         }
         return false;
     }
@@ -397,13 +652,15 @@ class IpLocationService
         return null;
     }
 
-    private function networkType(array $record, string $source, string $idcVendor): string
+    private function networkType(array $record, string $source, string $idcVendor,
+                                 string $operatorCode = '', string $connectionType = '',
+                                 ?bool $isResidential = null): string
     {
         if ($idcVendor !== '' || strpos($source, '_idc') !== false) {
             return 'datacenter';
         }
 
-        $declared = strtolower($this->value($record, ['network_type', 'network', 'type']));
+        $declared = strtolower($connectionType ?: $this->value($record, ['network_type', 'network', 'type']));
         if (in_array($declared, ['datacenter', 'mobile', 'residential', 'business'], true)) {
             return $declared;
         }
@@ -415,7 +672,44 @@ class IpLocationService
         if (strpos($isp, 'mobile') !== false || strpos($isp, '移动') !== false) {
             return 'mobile';
         }
+        if ($operatorCode !== '') {
+            return $operatorCode === 'other' ? 'unknown' : $operatorCode;
+        }
+        if ($isResidential === true) {
+            return 'residential';
+        }
         return 'unknown';
+    }
+
+    private function operatorCode(string $source): string
+    {
+        foreach (['mobile', 'telecom', 'unicom', 'other'] as $operator) {
+            if (substr($source, -strlen($operator)) === $operator) {
+                return $operator;
+            }
+        }
+        return '';
+    }
+
+    private function boolean(array $record, string $key): ?bool
+    {
+        if (!array_key_exists($key, $record)) {
+            return null;
+        }
+        if (is_bool($record[$key])) {
+            return $record[$key];
+        }
+        if (is_numeric($record[$key])) {
+            return (bool)(int)$record[$key];
+        }
+        $value = strtolower(trim((string)$record[$key]));
+        if (in_array($value, ['true', 'yes', 'on'], true)) {
+            return true;
+        }
+        if (in_array($value, ['false', 'no', 'off'], true)) {
+            return false;
+        }
+        return null;
     }
 
     private function sourceVersion(string $source): string

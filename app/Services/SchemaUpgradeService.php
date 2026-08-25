@@ -12,6 +12,7 @@ class SchemaUpgradeService
         'subscription_schema' => 'subscription_schema_v1',
         'risk_audit_schema' => 'risk_audit_schema_v1',
         'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
+        'ip_location_enrichment_schema' => 'ip_location_enrichment_schema_v1',
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
         'risk_rule_schema' => 'risk_rule_schema_v1',
         'risk_manual_schema' => 'risk_manual_schema_v1',
@@ -77,6 +78,9 @@ class SchemaUpgradeService
                 return;
             case 'ip_location_cache_schema':
                 $this->applyIpLocationCacheSchema();
+                return;
+            case 'ip_location_enrichment_schema':
+                $this->applyIpLocationEnrichmentSchema();
                 return;
             case 'node_connection_log_schema':
                 $this->applyNodeConnectionLogSchema();
@@ -805,6 +809,23 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_ip_location_cache', 'location_status', ['status']);
         $this->ensureIndex('v2_ip_location_cache', 'location_key', ['location_key']);
         $this->ensureIndex('v2_ip_location_cache', 'expires_at', ['expires_at']);
+    }
+
+    private function applyIpLocationEnrichmentSchema(): void
+    {
+        $this->requireTable('v2_ip_location_cache');
+        foreach ([
+            'operator_code' => "varchar(16) NOT NULL DEFAULT ''",
+            'connection_type' => "varchar(32) NOT NULL DEFAULT ''",
+            'is_residential' => 'tinyint(1) DEFAULT NULL',
+            'geo_confidence' => 'decimal(6,4) DEFAULT NULL',
+            'accuracy_radius' => 'int(10) unsigned DEFAULT NULL',
+            'division_code' => "varchar(32) NOT NULL DEFAULT ''",
+            'matched_sources' => 'text DEFAULT NULL',
+            'catalog_version' => "varchar(128) NOT NULL DEFAULT ''"
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_ip_location_cache', $column, $definition);
+        }
     }
 
     private function applyPasswordPolicySchema(): void
