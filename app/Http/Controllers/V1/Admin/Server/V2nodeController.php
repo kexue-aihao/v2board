@@ -67,6 +67,70 @@ class V2nodeController extends Controller
                 $params['tls_settings']['server_port'] = "443";
             }
         }
+        $params['tls_settings'] = $params['tls_settings'] ?? [];
+        if ((int)($params['tls'] ?? 0) === 1
+            && ($params['tls_settings']['cert_mode'] ?? null) === 'remote'
+            && (empty($params['tls_settings']['tls_cert'])
+                || empty($params['tls_settings']['tls_key'])
+                || empty($params['tls_settings']['pinned_peer_cert_sha256']))) {
+            $sni = $params['tls_settings']['server_name'] ?? 'example.com';
+            $key = openssl_pkey_new([
+                'private_key_type' => OPENSSL_KEYTYPE_EC,
+                'curve_name' => 'prime256v1'
+            ]);
+            if ($key === false) {
+                abort(500, '创建失败');
+            }
+
+            $csr = openssl_csr_new([
+                'commonName' => $sni
+            ], $key, [
+                'digest_alg' => 'sha256'
+            ]);
+
+            if ($csr === false) {
+                abort(500, '创建失败');
+            }
+
+            $cert = openssl_csr_sign(
+                $csr,
+                null,
+                $key,
+                3650,
+                [
+                    'digest_alg' => 'sha256'
+                ]
+            );
+
+            if ($cert === false) {
+                abort(500, '创建失败');
+            }
+
+            if (!openssl_pkey_export($key, $tlsKey)) {
+                abort(500, '创建失败');
+            }
+
+            if (!openssl_x509_export($cert, $tlsCert)) {
+                abort(500, '创建失败');
+            }
+
+            $certDer = base64_decode(
+                preg_replace(
+                    '/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s+/',
+                    '',
+                    $tlsCert
+                ),
+                true
+            );
+
+            if ($certDer === false) {
+                abort(500, '创建失败');
+            }
+
+            $params['tls_settings']['tls_cert'] = $tlsCert;
+            $params['tls_settings']['tls_key'] = $tlsKey;
+            $params['tls_settings']['pinned_peer_cert_sha256'] = hash('sha256', $certDer);
+        }
         if (isset($params['tls_settings']) && !empty($params['tls_settings']['ech']) && $params['tls_settings']['ech'] === 'custom') {
             if (empty($params['tls_settings']['ech_server_name'])) {
                 $params['tls_settings']['ech'] = '';

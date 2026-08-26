@@ -243,6 +243,10 @@ class Helper
             $tlsSettings = $server['tls_settings'] ?? $server['tlsSettings'] ?? [];
             $config['allowInsecure'] = (int)($tlsSettings['allow_insecure'] ?? $tlsSettings['allowInsecure'] ?? 0);
             $config['sni'] = $tlsSettings['server_name'] ?? $tlsSettings['serverName'] ?? '';
+            $pinnedPeerCertSha256 = self::pinnedPeerCertSha256($server);
+            if ($pinnedPeerCertSha256 !== '') {
+                $config['pcs'] = $pinnedPeerCertSha256;
+            }
         }
         
         $network = (string)$server['network'];
@@ -308,9 +312,12 @@ class Helper
             "fp" => $tlsSettings['fingerprint'] ?? 'chrome',
             "insecure" => $tlsSettings['allow_insecure'] ?? 0,
         ];
-
         if ($server['tls']) {
             $tlsSettings = $server['tls_settings'] ?? [];
+            $pinnedPeerCertSha256 = self::pinnedPeerCertSha256($server);
+            if ($pinnedPeerCertSha256 !== '') {
+                $config['pcs'] = $pinnedPeerCertSha256;
+            }
             $config['sni'] = $tlsSettings['server_name'] ?? '';
             if ($server['tls'] == 2) {
                 $config['pbk'] = $tlsSettings['public_key'] ?? '';
@@ -348,6 +355,10 @@ class Helper
             'sni' => $server['server_name'] ?? ($tlsSettings['server_name'] ?? ''),
             'type'=> $server['network'],
         ];
+        $pinnedPeerCertSha256 = self::pinnedPeerCertSha256($server);
+        if ($pinnedPeerCertSha256 !== '') {
+            $config['pcs'] = $pinnedPeerCertSha256;
+        }
 
         if(isset($server['network']) && in_array($server['network'], ["grpc", "ws"])){
             if($server['network'] === "grpc" && isset($server['network_settings']['serviceName'])) {
@@ -408,6 +419,10 @@ class Helper
         $insecure = $tlsSettings['allow_insecure'] ?? 0;
         $sni = $tlsSettings['server_name'] ?? '';
         $uri = "hysteria2://{$password}@{$remote}:{$firstPort}/?insecure={$insecure}&sni={$sni}";
+        $pinnedPeerCertSha256 = self::pinnedPeerCertSha256($server);
+        if ($pinnedPeerCertSha256 !== '') {
+            $uri .= '&pcs=' . rawurlencode($pinnedPeerCertSha256);
+        }
 
         if (isset($server['obfs']) && isset($server['obfs_password'])) {
             $obfs_password = rawurlencode($server['obfs_password']);
@@ -430,6 +445,10 @@ class Helper
             'disable_sni' => $server['disable_sni'],
             'udp_relay_mode' => $server['udp_relay_mode'],
         ];
+        $pinnedPeerCertSha256 = self::pinnedPeerCertSha256($server);
+        if ($pinnedPeerCertSha256 !== '') {
+            $config['pcs'] = $pinnedPeerCertSha256;
+        }
 
         $remote = self::formatHost($server['host']);
         $port = $server['port'];
@@ -455,6 +474,10 @@ class Helper
             $config['pbk'] = $tlsSettings['public_key'] ?? '';
             $config['sid'] = $tlsSettings['short_id'] ?? '';
         }
+        $pinnedPeerCertSha256 = self::pinnedPeerCertSha256($server);
+        if ($pinnedPeerCertSha256 !== '') {
+            $config['pcs'] = $pinnedPeerCertSha256;
+        }
         $remote = self::formatHost($server['host']);
         $port = $server['port'];
         $name = self::encodeURIComponent($server['name']);
@@ -463,6 +486,18 @@ class Helper
         }
         $query = http_build_query($config);
         return "anytls://{$password}@{$remote}:{$port}/?{$query}#{$name}\r\n";
+    }
+
+    private static function pinnedPeerCertSha256(array $server): string
+    {
+        $tlsSettings = $server['tls_settings'] ?? [];
+        $pinnedPeerCertSha256 = $tlsSettings['pinned_peer_cert_sha256'] ?? '';
+
+        if ($pinnedPeerCertSha256 === '' && isset($server['tlsSettings'])) {
+            $pinnedPeerCertSha256 = $server['tlsSettings']['pinnedPeerCertSha256'] ?? '';
+        }
+
+        return trim((string)$pinnedPeerCertSha256);
     }
 
     /**
