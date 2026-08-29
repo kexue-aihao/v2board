@@ -119093,7 +119093,7 @@
                     loading: !0
                 }),
                 gatewayGet("/risk/gateway/fetch", i()({
-                    user: filters.user,
+                    user_filter: filters.user,
                     subscription_id: filters.subscription_id,
                     request_ip: filters.request_ip,
                     user_agent: filters.user_agent,

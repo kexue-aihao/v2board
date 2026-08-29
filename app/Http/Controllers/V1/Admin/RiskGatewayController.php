@@ -33,7 +33,10 @@ class RiskGatewayController extends Controller
         try {
             [$page, $pageSize] = $this->pagination($request);
             $query = SubscribeRequestLog::query();
-            $userFilter = trim((string)$request->input('user'));
+            // `Admin` middleware stores the authenticated administrator in the
+            // request's `user` input key.  Do not reuse that key for filters.
+            $userFilterInput = $request->input('user_filter');
+            $userFilter = is_scalar($userFilterInput) ? trim((string)$userFilterInput) : '';
             if ($userFilter !== '') {
                 if (ctype_digit($userFilter)) {
                     $query->where('user_id', (int)$userFilter);
