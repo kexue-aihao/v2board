@@ -9,6 +9,7 @@ use App\Protocols\Singbox\SingboxOld;
 use App\Protocols\ClashMeta;
 use App\Services\ServerService;
 use App\Services\SubscribeAuditService;
+use App\Services\SubscribeGatewayService;
 use App\Services\UserService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
@@ -24,7 +25,13 @@ class ClientController extends Controller
         // account not expired and is not banned.
         $userService = new UserService();
         if ($userService->isAvailable($user)) {
-            (new SubscribeAuditService())->record($request, $user, $request->input('subscription'));
+            $subscription = $request->input('subscription');
+            $result = (new SubscribeGatewayService())->inspect($request, $user, $subscription);
+            (new SubscribeAuditService())->record($request, $user, $subscription, $result);
+            if ($result['decision'] === 'blocked') {
+                abort(403, 'subscription is unavailable');
+            }
+
             $serverService = new ServerService();
             $servers = $serverService->getAvailableServers($user);
             if($flag) {

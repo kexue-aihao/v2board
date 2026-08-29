@@ -652,6 +652,10 @@ CREATE TABLE `v2_subscribe_request_log` (
                                   `ua_hash` char(64) NOT NULL,
                                   `request_ip` varchar(45) NOT NULL,
                                   `requested_at` bigint(20) NOT NULL,
+                                  `decision` varchar(16) NOT NULL DEFAULT 'allowed',
+                                  `block_rule_id` bigint(20) DEFAULT NULL,
+                                  `block_scope` varchar(16) DEFAULT NULL,
+                                  `block_reason` text DEFAULT NULL,
                                   `created_at` int(11) NOT NULL,
                                   `updated_at` int(11) NOT NULL,
                                   PRIMARY KEY (`id`),
@@ -660,6 +664,48 @@ CREATE TABLE `v2_subscribe_request_log` (
                                   KEY `subscription_ua_requested_at` (`subscription_id`,`ua_hash`,`requested_at`),
                                   KEY `user_requested_at` (`user_id`,`requested_at`),
                                   KEY `requested_at` (`requested_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_subscribe_block_rule`;
+CREATE TABLE `v2_subscribe_block_rule` (
+                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                  `scope` varchar(16) NOT NULL,
+                                  `user_id` int(11) DEFAULT NULL,
+                                  `subscription_id` bigint(20) DEFAULT NULL,
+                                  `ip` varchar(45) DEFAULT NULL,
+                                  `user_agent` varchar(1000) DEFAULT NULL,
+                                  `user_agent_hash` char(64) DEFAULT NULL,
+                                  `status` varchar(16) NOT NULL DEFAULT 'active',
+                                  `reason` text DEFAULT NULL,
+                                  `blocked_by` int(11) DEFAULT NULL,
+                                  `blocked_at` bigint(20) DEFAULT NULL,
+                                  `expires_at` bigint(20) DEFAULT NULL,
+                                  `released_by` int(11) DEFAULT NULL,
+                                  `released_at` bigint(20) DEFAULT NULL,
+                                  `release_reason` text DEFAULT NULL,
+                                  `created_at` int(11) NOT NULL,
+                                  `updated_at` int(11) NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  KEY `scope_subscription_status_expires` (`scope`,`subscription_id`,`status`,`expires_at`),
+                                  KEY `scope_user_status_expires` (`scope`,`user_id`,`status`,`expires_at`),
+                                  KEY `scope_ip_status_expires` (`scope`,`ip`,`status`,`expires_at`),
+                                  KEY `scope_ua_hash_status_expires` (`scope`,`user_agent_hash`,`status`,`expires_at`),
+                                  KEY `status_blocked_at` (`status`,`blocked_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_subscribe_block_rule_event`;
+CREATE TABLE `v2_subscribe_block_rule_event` (
+                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                  `rule_id` bigint(20) NOT NULL,
+                                  `action` varchar(32) NOT NULL,
+                                  `actor_id` int(11) DEFAULT NULL,
+                                  `reason` text DEFAULT NULL,
+                                  `metadata` text DEFAULT NULL,
+                                  `created_at` int(11) NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  KEY `rule_created_at` (`rule_id`,`created_at`),
+                                  KEY `actor_created_at` (`actor_id`,`created_at`),
+                                  KEY `action_created_at` (`action`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 DROP TABLE IF EXISTS `v2_ip_account_link`;

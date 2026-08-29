@@ -21662,6 +21662,13 @@
                             className: "nav-main-link-icon si si-magnifier"
                         })
                     }, {
+                        title: "订阅风控网关",
+                        type: "item",
+                        href: "/risk/gateway",
+                        icon: o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-shield"
+                        })
+                    }, {
                         title: "多账号同 IP",
                         type: "item",
                         href: "/risk/shared-ip",
@@ -83668,6 +83675,10 @@
             exact: !0,
             component: n("risktracepage").default
         }, {
+            path: "/risk/gateway",
+            exact: !0,
+            component: n("riskgatewaypage").default
+        }, {
             path: "/risk/shared-ip",
             exact: !0,
             component: n("risksharedippage").default
@@ -118944,6 +118955,816 @@
             }
         }
         t["default"] = Object(k["c"])()(v2boardSharedIpPanel)
+    },
+    riskgatewaypage: function(e, t, n) {
+        "use strict";
+        n.r(t);
+        // 订阅风控网关不读取或展示订阅凭证；这里只消费已经脱敏的审计字段，并复用风控页面的
+        // secure_path + t3Un 请求方式。数据库尚未升级时后端会返回 available:false。
+        var r = n("jehZ")
+          , i = n.n(r)
+          , o = (n("g9YV"), n("wCAj"))
+          , a = (n("+L6B"), n("2/Rp"))
+          , s = (n("5NDa"), n("5rEg"))
+          , l = (n("Pwec"), n("CtXQ"))
+          , c = (n("2qtc"), n("kLXV"))
+          , u = (n("OaEy"), n("2fM7"))
+          , y = (n("+BJd"), n("mr32"))
+          , D = (n("iQDF"), n("+eQT"))
+          , d = n("q1tI")
+          , p = n.n(d)
+          , m = n("Bl7J")
+          , g = n("v32e")
+          , w = n("wd/R");
+        function gatewayUrl(path) {
+            return "/" + window.settings.secure_path + path
+        }
+        function gatewayGet(path, params) {
+            return Object(n("t3Un")["a"])(gatewayUrl(path), params)
+        }
+        function gatewayPost(path, params) {
+            return Object(n("t3Un")["b"])(gatewayUrl(path), params)
+        }
+        function gatewayTime(value) {
+            if (!value)
+                return "-";
+            var number = Number(value)
+              , date = number > 0 ? w(1e3 * number) : w(value);
+            return date && date.isValid && date.isValid() ? date.format("YYYY-MM-DD HH:mm:ss") : "-"
+        }
+        function gatewayPage(pagination) {
+            var page = pagination || {}
+              , current = Number(page.current)
+              , pageSize = Number(page.pageSize);
+            return {
+                current: current > 0 ? current : 1,
+                pageSize: pageSize > 0 ? pageSize : 20
+            }
+        }
+        function gatewayScopeText(scope) {
+            return {
+                subscription: "当前订阅",
+                user: "当前用户",
+                ip: "当前 IP",
+                user_agent: "当前 User-Agent"
+            }[scope] || scope || "-"
+        }
+        function gatewayStatusText(status) {
+            return {
+                active: "有效",
+                disabled: "已解除",
+                expired: "已到期",
+                inactive: "无效"
+            }[status] || status || "-"
+        }
+        function gatewayDecisionText(decision) {
+            return "blocked" === decision ? "阻断" : "error" === decision ? "错误" : "通过"
+        }
+        class RiskGatewayPage extends p.a.Component {
+            constructor(props) {
+                super(props),
+                this.state = {
+                    rows: [],
+                    pagination: {
+                        current: 1,
+                        pageSize: 20
+                    },
+                    filters: {
+                        user: "",
+                        subscription_id: "",
+                        request_ip: "",
+                        user_agent: "",
+                        decision: "",
+                        range: [null, null]
+                    },
+                    loading: !0,
+                    available: !0,
+                    blockVisible: !1,
+                    blocking: !1,
+                    blockRecord: null,
+                    block: {
+                        scope: "subscription",
+                        reason: "",
+                        expiresType: "permanent",
+                        expiresAt: null
+                    },
+                    rulesVisible: !1,
+                    rules: [],
+                    rulesTotal: 0,
+                    rulesLoading: !1,
+                    rulesPagination: {
+                        current: 1,
+                        pageSize: 20
+                    },
+                    ruleFilters: {
+                        scope: "",
+                        status: "",
+                        keyword: ""
+                    },
+                    historyVisible: !1,
+                    historyLoading: !1,
+                    historyRule: null,
+                    history: []
+                },
+                this.filterTimer = null,
+                this.ruleFilterTimer = null,
+                this.unmounted = !1
+            }
+            componentDidMount() {
+                this.fetch()
+            }
+            componentWillUnmount() {
+                this.unmounted = !0,
+                this.filterTimer && clearTimeout(this.filterTimer),
+                this.ruleFilterTimer && clearTimeout(this.ruleFilterTimer)
+            }
+            timeParams() {
+                var range = this.state.filters.range;
+                return range && range[0] && range[1] ? {
+                    start_at: range[0].clone().startOf("day").unix(),
+                    end_at: range[1].clone().endOf("day").unix()
+                } : {}
+            }
+            fetch() {
+                var state = this.state
+                  , filters = state.filters;
+                this.setState({
+                    loading: !0
+                }),
+                gatewayGet("/risk/gateway/fetch", i()({
+                    user: filters.user,
+                    subscription_id: filters.subscription_id,
+                    request_ip: filters.request_ip,
+                    user_agent: filters.user_agent,
+                    decision: filters.decision
+                }, this.timeParams(), gatewayPage(state.pagination))).then(res=>{
+                    if (this.unmounted)
+                        return;
+                    if (200 !== res.code)
+                        return void this.setState({
+                            loading: !1
+                        });
+                    this.setState({
+                        rows: res.data || [],
+                        available: !1 !== res.available,
+                        pagination: i()({}, this.state.pagination, {
+                            total: res.total || 0
+                        }),
+                        loading: !1
+                    })
+                }).catch(()=>{
+                    this.unmounted || this.setState({
+                        loading: !1,
+                        available: !1
+                    })
+                })
+            }
+            resetFilters(patch) {
+                this.setState({
+                    filters: i()({}, this.state.filters, patch),
+                    pagination: i()({}, this.state.pagination, {
+                        current: 1
+                    })
+                }, ()=>this.fetch())
+            }
+            inputFilter(field, value) {
+                this.filterTimer && clearTimeout(this.filterTimer),
+                this.filterTimer = setTimeout(()=>{
+                    this.filterTimer = null;
+                    var patch = {};
+                    patch[field] = value,
+                    this.resetFilters(patch)
+                }, 400)
+            }
+            tableChange(pagination) {
+                this.setState({
+                    pagination: i()({}, this.state.pagination, gatewayPage(pagination))
+                }, ()=>this.fetch())
+            }
+            openBlock(record) {
+                this.setState({
+                    blockVisible: !0,
+                    blockRecord: record,
+                    block: {
+                        scope: record.subscription_id ? "subscription" : "user",
+                        reason: "",
+                        expiresType: "permanent",
+                        expiresAt: null
+                    }
+                })
+            }
+            closeBlock() {
+                this.setState({
+                    blockVisible: !1,
+                    blockRecord: null,
+                    blocking: !1
+                })
+            }
+            changeBlock(key, value) {
+                var patch = {};
+                patch[key] = value,
+                this.setState({
+                    block: i()({}, this.state.block, patch)
+                })
+            }
+            submitBlock() {
+                var block = this.state.block
+                  , reason = String(block.reason || "").trim();
+                if (!reason)
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "请填写阻断原因"
+                    });
+                if ("expires" === block.expiresType && !block.expiresAt)
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "请选择到期时间"
+                    });
+                this.setState({
+                    blocking: !0
+                }),
+                gatewayPost("/risk/gateway/block", {
+                    log_id: this.state.blockRecord.id,
+                    scope: block.scope,
+                    reason: reason,
+                    expires_at: "expires" === block.expiresType ? block.expiresAt.unix() : null
+                }).then(res=>{
+                    if (200 !== res.code)
+                        return void this.setState({
+                            blocking: !1
+                        });
+                    this.closeBlock(),
+                    this.fetch(),
+                    this.state.rulesVisible && this.fetchRules()
+                }).catch(()=>this.setState({
+                    blocking: !1
+                }))
+            }
+            openRules() {
+                this.setState({
+                    rulesVisible: !0
+                }, ()=>this.fetchRules())
+            }
+            closeRules() {
+                this.setState({
+                    rulesVisible: !1
+                })
+            }
+            fetchRules() {
+                var state = this.state
+                  , filters = state.ruleFilters;
+                this.setState({
+                    rulesLoading: !0
+                }),
+                gatewayGet("/risk/gateway/rules", i()({
+                    scope: filters.scope,
+                    status: filters.status,
+                    keyword: filters.keyword
+                }, gatewayPage(state.rulesPagination))).then(res=>{
+                    if (this.unmounted)
+                        return;
+                    if (200 !== res.code)
+                        return void this.setState({
+                            rulesLoading: !1
+                        });
+                    this.setState({
+                        rules: res.data || [],
+                        available: !1 !== res.available,
+                        rulesTotal: res.total || 0,
+                        rulesPagination: i()({}, this.state.rulesPagination, {
+                            total: res.total || 0
+                        }),
+                        rulesLoading: !1
+                    })
+                }).catch(()=>this.unmounted || this.setState({
+                    rulesLoading: !1,
+                    available: !1
+                }))
+            }
+            changeRuleFilters(patch) {
+                this.setState({
+                    ruleFilters: i()({}, this.state.ruleFilters, patch),
+                    rulesPagination: i()({}, this.state.rulesPagination, {
+                        current: 1
+                    })
+                }, ()=>this.fetchRules())
+            }
+            inputRuleFilter(value) {
+                this.ruleFilterTimer && clearTimeout(this.ruleFilterTimer),
+                this.ruleFilterTimer = setTimeout(()=>{
+                    this.ruleFilterTimer = null,
+                    this.changeRuleFilters({
+                        keyword: value
+                    })
+                }, 400)
+            }
+            releaseRule(rule) {
+                var reason = "";
+                c["a"].confirm({
+                    title: "解除阻断",
+                    content: p.a.createElement("div", null, p.a.createElement("p", {
+                        className: "text-muted"
+                    }, "解除后将立即停止该规则的阻断效果。"), p.a.createElement(s["a"], {
+                        placeholder: "解除原因（可选）",
+                        onChange: event=>{
+                            reason = event.target.value
+                        }
+                    })),
+                    okText: "确认解除",
+                    okType: "danger",
+                    cancelText: "取消",
+                    onOk: ()=>gatewayPost("/risk/gateway/release", {
+                        id: rule.id,
+                        reason: String(reason || "").trim() || void 0
+                    }).then(res=>{
+                        200 === res.code && this.fetchRules()
+                    })
+                })
+            }
+            showHistory(rule) {
+                this.setState({
+                    historyVisible: !0,
+                    historyLoading: !0,
+                    historyRule: rule,
+                    history: []
+                }),
+                gatewayGet("/risk/gateway/history", {
+                    rule_id: rule.id
+                }).then(res=>{
+                    if (this.unmounted)
+                        return;
+                    this.setState({
+                        history: 200 === res.code ? res.data || [] : [],
+                        historyLoading: !1
+                    })
+                }).catch(()=>this.unmounted || this.setState({
+                    historyLoading: !1
+                }))
+            }
+            renderTarget(rule) {
+                if ("subscription" === rule.scope)
+                    return rule.target ? "#" + rule.target : "-";
+                if ("user" === rule.scope)
+                    return rule.target ? "#" + rule.target : "-";
+                return rule.target || "-"
+            }
+            renderRules() {
+                var state = this.state
+                  , columns = [{
+                    title: "状态",
+                    key: "status",
+                    width: 90,
+                    render: (value, rule)=>p.a.createElement(y["a"], {
+                        color: "active" === rule.effective_status || "active" === rule.status ? "red" : void 0
+                    }, gatewayStatusText(rule.effective_status || rule.status))
+                }, {
+                    title: "范围",
+                    dataIndex: "scope",
+                    width: 120,
+                    render: gatewayScopeText
+                }, {
+                    title: "目标",
+                    key: "target",
+                    render: (value, rule)=>p.a.createElement("span", {
+                        style: {
+                            wordBreak: "break-all"
+                        }
+                    }, this.renderTarget(rule))
+                }, {
+                    title: "原因",
+                    dataIndex: "reason",
+                    width: 180,
+                    render: value=>p.a.createElement("span", {
+                        style: {
+                            wordBreak: "break-all"
+                        }
+                    }, value || "-")
+                }, {
+                    title: "创建人 / 时间",
+                    key: "blocked",
+                    width: 190,
+                    render: (value, rule)=>p.a.createElement("div", null, rule.blocked_by_email || "-", p.a.createElement("div", {
+                        className: "text-muted font-size-sm"
+                    }, gatewayTime(rule.blocked_at)))
+                }, {
+                    title: "到期",
+                    dataIndex: "expires_at",
+                    width: 170,
+                    render: value=>value ? gatewayTime(value) : "永久"
+                }, {
+                    title: "解除信息",
+                    key: "released",
+                    width: 200,
+                    render: (value, rule)=>rule.released_at || rule.released_by_email ? p.a.createElement("div", null, rule.released_by_email || "-", p.a.createElement("div", {
+                        className: "text-muted font-size-sm"
+                    }, gatewayTime(rule.released_at)), rule.release_reason ? p.a.createElement("div", {
+                        className: "text-muted font-size-sm",
+                        style: {
+                            wordBreak: "break-all"
+                        }
+                    }, rule.release_reason) : null) : "-"
+                }, {
+                    title: "操作",
+                    key: "action",
+                    fixed: "right",
+                    width: 145,
+                    render: (value, rule)=>p.a.createElement("span", null, p.a.createElement("a", {
+                        href: "javascript:void(0);",
+                        onClick: ()=>this.showHistory(rule)
+                    }, "历史"), ("active" === rule.effective_status || "active" === rule.status) ? p.a.createElement("a", {
+                        href: "javascript:void(0);",
+                        style: {
+                            marginLeft: 10
+                        },
+                        onClick: ()=>this.releaseRule(rule)
+                    }, "解除") : null)
+                }];
+                return p.a.createElement(c["a"], {
+                    title: "阻断规则",
+                    visible: state.rulesVisible,
+                    width: 1180,
+                    footer: null,
+                    onCancel: ()=>this.closeRules()
+                }, p.a.createElement("div", {
+                    className: "d-flex flex-wrap align-items-center",
+                    style: {
+                        marginBottom: 14
+                    }
+                }, p.a.createElement(u["a"], {
+                    allowClear: !0,
+                    placeholder: "全部范围",
+                    value: state.ruleFilters.scope || void 0,
+                    onChange: value=>this.changeRuleFilters({
+                        scope: value || ""
+                    }),
+                    style: {
+                        width: 150,
+                        marginRight: 10,
+                        marginBottom: 6
+                    }
+                }, ["subscription", "user", "ip", "user_agent"].map(scope=>p.a.createElement(u["a"].Option, {
+                    key: scope,
+                    value: scope
+                }, gatewayScopeText(scope)))), p.a.createElement(u["a"], {
+                    allowClear: !0,
+                    placeholder: "全部状态",
+                    value: state.ruleFilters.status || void 0,
+                    onChange: value=>this.changeRuleFilters({
+                        status: value || ""
+                    }),
+                    style: {
+                        width: 130,
+                        marginRight: 10,
+                        marginBottom: 6
+                    }
+                }, ["active", "disabled", "expired"].map(status=>p.a.createElement(u["a"].Option, {
+                    key: status,
+                    value: status
+                }, gatewayStatusText(status)))), p.a.createElement(s["a"], {
+                    allowClear: !0,
+                    placeholder: "搜索目标、原因或创建人",
+                    defaultValue: state.ruleFilters.keyword,
+                    onChange: event=>this.inputRuleFilter(event.target.value),
+                    style: {
+                        width: 240,
+                        marginRight: 10,
+                        marginBottom: 6
+                    }
+                }), p.a.createElement(a["a"], {
+                    style: {
+                        marginBottom: 6
+                    },
+                    onClick: ()=>this.fetchRules()
+                }, p.a.createElement(l["a"], {
+                    type: "reload"
+                }), " 刷新")), p.a.createElement(o["a"], {
+                    loading: state.rulesLoading,
+                    rowKey: rule=>rule.id,
+                    dataSource: state.rules,
+                    columns: columns,
+                    pagination: i()({}, state.rulesPagination, {
+                        size: "small",
+                        showSizeChanger: !0,
+                        pageSizeOptions: ["10", "20", "50", "100"]
+                    }),
+                    onChange: pagination=>this.setState({
+                        rulesPagination: i()({}, this.state.rulesPagination, gatewayPage(pagination))
+                    }, ()=>this.fetchRules()),
+                    locale: {
+                        emptyText: "暂无阻断规则"
+                    },
+                    scroll: {
+                        x: 1120,
+                        y: 430
+                    }
+                }))
+            }
+            renderHistory() {
+                var state = this.state
+                  , columns = [{
+                    title: "时间",
+                    key: "time",
+                    width: 180,
+                    render: (value, event)=>gatewayTime(event.created_at || event.operated_at || event.at || event.timestamp)
+                }, {
+                    title: "事件",
+                    key: "action",
+                    width: 130,
+                    render: (value, event)=>event.action || event.event || event.type || "-"
+                }, {
+                    title: "操作人",
+                    key: "operator",
+                    width: 200,
+                    render: (value, event)=>event.operator_email || event.admin_email || event.created_by_email || "-"
+                }, {
+                    title: "原因 / 详情",
+                    key: "detail",
+                    render: (value, event)=>p.a.createElement("span", {
+                        style: {
+                            wordBreak: "break-all"
+                        }
+                    }, event.reason || event.release_reason || event.detail || "-")
+                }];
+                return p.a.createElement(c["a"], {
+                    title: "规则历史" + (state.historyRule ? " #" + state.historyRule.id : ""),
+                    visible: state.historyVisible,
+                    width: 780,
+                    footer: null,
+                    onCancel: ()=>this.setState({
+                        historyVisible: !1,
+                        historyRule: null
+                    })
+                }, p.a.createElement(o["a"], {
+                    loading: state.historyLoading,
+                    rowKey: (event, index)=>event.id || index,
+                    dataSource: state.history,
+                    columns: columns,
+                    pagination: !1,
+                    locale: {
+                        emptyText: "暂无操作历史"
+                    },
+                    scroll: {
+                        x: 680
+                    }
+                }))
+            }
+            renderBlock() {
+                var state = this.state
+                  , record = state.blockRecord || {}
+                  , block = state.block;
+                return p.a.createElement(c["a"], {
+                    title: "阻断订阅请求",
+                    visible: state.blockVisible,
+                    okText: "确认阻断",
+                    okType: "danger",
+                    cancelText: "取消",
+                    onCancel: ()=>this.closeBlock(),
+                    onOk: ()=>this.submitBlock(),
+                    okButtonProps: {
+                        loading: state.blocking
+                    }
+                }, p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "阻断范围"), p.a.createElement(u["a"], {
+                    value: block.scope,
+                    style: {
+                        width: "100%"
+                    },
+                    onChange: value=>this.changeBlock("scope", value)
+                }, p.a.createElement(u["a"].Option, {
+                    value: "subscription",
+                    disabled: !record.subscription_id
+                }, "当前订阅"), p.a.createElement(u["a"].Option, {
+                    value: "user"
+                }, "当前用户"), p.a.createElement(u["a"].Option, {
+                    value: "ip"
+                }, "当前 IP"), p.a.createElement(u["a"].Option, {
+                    value: "user_agent"
+                }, "当前 User-Agent"))), p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "阻断原因"), p.a.createElement(s["a"].TextArea, {
+                    rows: 3,
+                    value: block.reason,
+                    placeholder: "请填写阻断原因",
+                    onChange: event=>this.changeBlock("reason", event.target.value)
+                })), p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "有效期"), p.a.createElement(u["a"], {
+                    value: block.expiresType,
+                    style: {
+                        width: "100%"
+                    },
+                    onChange: value=>this.changeBlock("expiresType", value)
+                }, p.a.createElement(u["a"].Option, {
+                    value: "permanent"
+                }, "永久"), p.a.createElement(u["a"].Option, {
+                    value: "expires"
+                }, "到期时间"))), "expires" === block.expiresType ? p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "到期时间"), p.a.createElement(D["a"], {
+                    showTime: !0,
+                    format: "YYYY-MM-DD HH:mm",
+                    placeholder: "请选择到期时间",
+                    value: block.expiresAt,
+                    onChange: value=>this.changeBlock("expiresAt", value),
+                    style: {
+                        width: "100%"
+                    }
+                })) : null)
+            }
+            render() {
+                var state = this.state
+                  , filters = state.filters
+                  , columns = [{
+                    title: "时间",
+                    dataIndex: "requested_at",
+                    width: 175,
+                    render: gatewayTime
+                }, {
+                    title: "用户",
+                    key: "user",
+                    width: 185,
+                    render: (value, row)=>p.a.createElement("span", {
+                        style: {
+                            wordBreak: "break-all"
+                        }
+                    }, row.user_email || "-", row.user_id ? " (#" + row.user_id + ")" : "")
+                }, {
+                    title: "订阅",
+                    key: "subscription",
+                    width: 160,
+                    render: (value, row)=>row.subscription_id ? p.a.createElement("span", null, row.subscription_plan_name || "未命名套餐", " (#" + row.subscription_id + ")") : "-"
+                }, {
+                    title: "IP",
+                    dataIndex: "request_ip",
+                    width: 145,
+                    render: value=>value || "-"
+                }, {
+                    title: "User-Agent",
+                    dataIndex: "user_agent",
+                    width: 235,
+                    render: value=>p.a.createElement("span", {
+                        style: {
+                            wordBreak: "break-all"
+                        }
+                    }, value || "-")
+                }, {
+                    title: "结果",
+                    dataIndex: "decision",
+                    width: 95,
+                    render: value=>p.a.createElement(y["a"], {
+                        color: "blocked" === value ? "red" : "error" === value ? "orange" : "green"
+                    }, gatewayDecisionText(value))
+                }, {
+                    title: "命中范围",
+                    dataIndex: "block_scope",
+                    width: 120,
+                    render: gatewayScopeText
+                }, {
+                    title: "原因",
+                    dataIndex: "block_reason",
+                    width: 190,
+                    render: value=>p.a.createElement("span", {
+                        style: {
+                            wordBreak: "break-all"
+                        }
+                    }, value || "-")
+                }, {
+                    title: "操作",
+                    key: "action",
+                    fixed: "right",
+                    width: 80,
+                    render: (value, row)=>p.a.createElement("a", {
+                        href: "javascript:void(0);",
+                        onClick: ()=>this.openBlock(row)
+                    }, "阻断")
+                }];
+                return p.a.createElement(m["a"], i()({}, this.props, {
+                    title: "订阅风控网关"
+                }), p.a.createElement(g["a"], {
+                    loading: state.loading
+                }, !state.loading && !state.available ? p.a.createElement("div", {
+                    className: "alert alert-warning",
+                    role: "alert"
+                }, p.a.createElement("p", {
+                    className: "mb-0"
+                }, "订阅风控网关所需的数据表或接口尚未安装（数据库尚未升级），暂时无法读取审计与阻断规则。")) : null, p.a.createElement("div", {
+                    className: "block block-rounded"
+                }, p.a.createElement("div", {
+                    className: "bg-white"
+                }, p.a.createElement("div", {
+                    className: "d-flex flex-wrap align-items-center",
+                    style: {
+                        padding: 15
+                    }
+                }, p.a.createElement(s["a"], {
+                    allowClear: !0,
+                    placeholder: "用户 ID 或邮箱",
+                    defaultValue: filters.user,
+                    onChange: event=>this.inputFilter("user", event.target.value),
+                    style: {
+                        width: 180,
+                        marginRight: 10,
+                        marginBottom: 6
+                    }
+                }), p.a.createElement(s["a"], {
+                    allowClear: !0,
+                    placeholder: "订阅 ID",
+                    defaultValue: filters.subscription_id,
+                    onChange: event=>this.inputFilter("subscription_id", event.target.value),
+                    style: {
+                        width: 125,
+                        marginRight: 10,
+                        marginBottom: 6
+                    }
+                }), p.a.createElement(s["a"], {
+                    allowClear: !0,
+                    placeholder: "IP",
+                    defaultValue: filters.request_ip,
+                    onChange: event=>this.inputFilter("request_ip", event.target.value),
+                    style: {
+                        width: 145,
+                        marginRight: 10,
+                        marginBottom: 6
+                    }
+                }), p.a.createElement(s["a"], {
+                    allowClear: !0,
+                    placeholder: "User-Agent",
+                    defaultValue: filters.user_agent,
+                    onChange: event=>this.inputFilter("user_agent", event.target.value),
+                    style: {
+                        width: 180,
+                        marginRight: 10,
+                        marginBottom: 6
+                    }
+                }), p.a.createElement(u["a"], {
+                    allowClear: !0,
+                    placeholder: "全部结果",
+                    value: filters.decision || void 0,
+                    onChange: value=>this.resetFilters({
+                        decision: value || ""
+                    }),
+                    style: {
+                        width: 120,
+                        marginRight: 10,
+                        marginBottom: 6
+                    }
+                }, p.a.createElement(u["a"].Option, {
+                    value: "allowed"
+                }, "通过"), p.a.createElement(u["a"].Option, {
+                    value: "blocked"
+                }, "阻断"), p.a.createElement(u["a"].Option, {
+                    value: "error"
+                }, "错误")), p.a.createElement(D["a"].RangePicker, {
+                    format: "YYYY-MM-DD",
+                    placeholder: ["开始日期", "结束日期"],
+                    value: filters.range,
+                    onChange: range=>this.resetFilters({
+                        range: range && range.length ? range : [null, null]
+                    }),
+                    style: {
+                        width: 245,
+                        marginRight: 10,
+                        marginBottom: 6
+                    }
+                }), p.a.createElement(a["a"], {
+                    style: {
+                        marginRight: 8,
+                        marginBottom: 6
+                    },
+                    onClick: ()=>this.fetch()
+                }, p.a.createElement(l["a"], {
+                    type: "reload"
+                }), " 刷新"), p.a.createElement(a["a"], {
+                    type: "primary",
+                    style: {
+                        marginBottom: 6
+                    },
+                    onClick: ()=>this.openRules()
+                }, "阻断规则")), p.a.createElement("div", {
+                    style: {
+                        padding: "0 15px 15px"
+                    }
+                }, p.a.createElement(o["a"], {
+                    rowKey: row=>row.id,
+                    dataSource: state.rows,
+                    columns: columns,
+                    pagination: i()({}, state.pagination, {
+                        size: "small",
+                        showSizeChanger: !0,
+                        pageSizeOptions: ["10", "20", "50", "100"]
+                    }),
+                    onChange: pagination=>this.tableChange(pagination),
+                    locale: {
+                        emptyText: "暂无订阅审计记录"
+                    },
+                    scroll: {
+                        x: 1450
+                    }
+                }))))), this.renderBlock(), this.renderRules(), this.renderHistory())
+            }
+        }
+        t["default"] = RiskGatewayPage
     },
     resellerpage: function(e, t, n) {
     "use strict";

@@ -152,6 +152,12 @@ class AdminRoute
             // 多账号同 IP 关联分析。只读，数据来自 audit:ip-link 离线聚合出的累积表。
             $router->get ('/risk/shared-ip/fetch', 'V1\\Admin\\RiskSharedIpController@fetch');
             $router->get ('/risk/shared-ip/detail', 'V1\\Admin\\RiskSharedIpController@detail');
+            // 订阅拉取风控网关。规则目标仅能从既有审计记录派生。
+            $router->get ('/risk/gateway/fetch', 'V1\\Admin\\RiskGatewayController@fetch');
+            $router->get ('/risk/gateway/rules', 'V1\\Admin\\RiskGatewayController@rules');
+            $router->get ('/risk/gateway/history', 'V1\\Admin\\RiskGatewayController@history');
+            $router->post('/risk/gateway/block', 'V1\\Admin\\RiskGatewayController@block');
+            $router->post('/risk/gateway/release', 'V1\\Admin\\RiskGatewayController@release');
             // Stat
             $router->get ('/stat/getStat', 'V1\\Admin\\StatController@getStat');
             $router->get ('/stat/getOverride', 'V1\\Admin\\StatController@getOverride');

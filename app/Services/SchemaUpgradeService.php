@@ -11,6 +11,7 @@ class SchemaUpgradeService
     private const MIGRATIONS = [
         'subscription_schema' => 'subscription_schema_v1',
         'risk_audit_schema' => 'risk_audit_schema_v1',
+        'subscribe_gateway_schema' => 'subscribe_gateway_schema_v1',
         'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
         'ip_location_enrichment_schema' => 'ip_location_enrichment_schema_v1',
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
@@ -75,6 +76,9 @@ class SchemaUpgradeService
                 return;
             case 'risk_audit_schema':
                 $this->applyRiskAuditSchema();
+                return;
+            case 'subscribe_gateway_schema':
+                $this->applySubscribeGatewaySchema();
                 return;
             case 'ip_location_cache_schema':
                 $this->applyIpLocationCacheSchema();
@@ -364,6 +368,90 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_subscription_risk_cycle', 'subscription_cycle_start', ['subscription_id', 'cycle_start'], true);
         $this->ensureIndex('v2_subscription_risk_cycle', 'user_cycle_end', ['user_id', 'cycle_end']);
         $this->ensureIndex('v2_subscription_risk_cycle', 'status', ['status']);
+    }
+
+    private function applySubscribeGatewaySchema(): void
+    {
+        $this->requireTable('v2_subscribe_request_log');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscribe_block_rule` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `scope` varchar(16) NOT NULL,
+            `user_id` int(11) DEFAULT NULL,
+            `subscription_id` bigint(20) DEFAULT NULL,
+            `ip` varchar(45) DEFAULT NULL,
+            `user_agent` varchar(1000) DEFAULT NULL,
+            `user_agent_hash` char(64) DEFAULT NULL,
+            `status` varchar(16) NOT NULL DEFAULT 'active',
+            `reason` text DEFAULT NULL,
+            `blocked_by` int(11) DEFAULT NULL,
+            `blocked_at` bigint(20) DEFAULT NULL,
+            `expires_at` bigint(20) DEFAULT NULL,
+            `released_by` int(11) DEFAULT NULL,
+            `released_at` bigint(20) DEFAULT NULL,
+            `release_reason` text DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'scope' => 'varchar(16) NOT NULL',
+            'user_id' => 'int(11) DEFAULT NULL',
+            'subscription_id' => 'bigint(20) DEFAULT NULL',
+            'ip' => 'varchar(45) DEFAULT NULL',
+            'user_agent' => 'varchar(1000) DEFAULT NULL',
+            'user_agent_hash' => 'char(64) DEFAULT NULL',
+            'status' => "varchar(16) NOT NULL DEFAULT 'active'",
+            'reason' => 'text DEFAULT NULL',
+            'blocked_by' => 'int(11) DEFAULT NULL',
+            'blocked_at' => 'bigint(20) DEFAULT NULL',
+            'expires_at' => 'bigint(20) DEFAULT NULL',
+            'released_by' => 'int(11) DEFAULT NULL',
+            'released_at' => 'bigint(20) DEFAULT NULL',
+            'release_reason' => 'text DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscribe_block_rule', $column, $definition);
+        }
+        $this->ensureIndex('v2_subscribe_block_rule', 'scope_subscription_status_expires', ['scope', 'subscription_id', 'status', 'expires_at']);
+        $this->ensureIndex('v2_subscribe_block_rule', 'scope_user_status_expires', ['scope', 'user_id', 'status', 'expires_at']);
+        $this->ensureIndex('v2_subscribe_block_rule', 'scope_ip_status_expires', ['scope', 'ip', 'status', 'expires_at']);
+        $this->ensureIndex('v2_subscribe_block_rule', 'scope_ua_hash_status_expires', ['scope', 'user_agent_hash', 'status', 'expires_at']);
+        $this->ensureIndex('v2_subscribe_block_rule', 'status_blocked_at', ['status', 'blocked_at']);
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscribe_block_rule_event` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `rule_id` bigint(20) NOT NULL,
+            `action` varchar(32) NOT NULL,
+            `actor_id` int(11) DEFAULT NULL,
+            `reason` text DEFAULT NULL,
+            `metadata` text DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'rule_id' => 'bigint(20) NOT NULL',
+            'action' => 'varchar(32) NOT NULL',
+            'actor_id' => 'int(11) DEFAULT NULL',
+            'reason' => 'text DEFAULT NULL',
+            'metadata' => 'text DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscribe_block_rule_event', $column, $definition);
+        }
+        $this->ensureIndex('v2_subscribe_block_rule_event', 'rule_created_at', ['rule_id', 'created_at']);
+        $this->ensureIndex('v2_subscribe_block_rule_event', 'actor_created_at', ['actor_id', 'created_at']);
+        $this->ensureIndex('v2_subscribe_block_rule_event', 'action_created_at', ['action', 'created_at']);
+
+        foreach ([
+            'decision' => "varchar(16) NOT NULL DEFAULT 'allowed'",
+            'block_rule_id' => 'bigint(20) DEFAULT NULL',
+            'block_scope' => 'varchar(16) DEFAULT NULL',
+            'block_reason' => 'text DEFAULT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscribe_request_log', $column, $definition);
+        }
     }
 
     /**

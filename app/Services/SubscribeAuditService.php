@@ -11,33 +11,60 @@ class SubscribeAuditService
 {
     private const MAX_USER_AGENT_LENGTH = 1000;
 
-    public function record(Request $request, $user, ?Subscription $subscription = null): ?SubscribeRequestLog
+    private static $decisionColumnsAvailable;
+
+    public function record(Request $request, $user, ?Subscription $subscription = null, array $result = []): ?SubscribeRequestLog
     {
-        if (!$user || !Schema::hasTable('v2_subscribe_request_log')) {
+        if (!$user) {
             return null;
         }
 
-        $userAgent = trim((string)$request->header('User-Agent', ''));
-        if ($userAgent === '') {
-            $userAgent = '(empty)';
-        }
-        $userAgent = function_exists('mb_substr')
-            ? mb_substr($userAgent, 0, self::MAX_USER_AGENT_LENGTH)
-            : substr($userAgent, 0, self::MAX_USER_AGENT_LENGTH);
-
         try {
-            return SubscribeRequestLog::create([
+            if (!Schema::hasTable('v2_subscribe_request_log')) {
+                return null;
+            }
+
+            $userAgent = $this->normalizeUserAgent($request);
+            $payload = [
                 'user_id' => (int)$user->id,
                 'subscription_id' => $subscription ? (int)$subscription->id : null,
                 'user_agent' => $userAgent,
                 'ua_hash' => hash('sha256', strtolower($userAgent)),
                 'request_ip' => $this->resolveIp($request),
                 'requested_at' => time()
-            ]);
+            ];
+
+            if ($this->decisionColumnsAvailable()) {
+                $payload = array_merge($payload, [
+                    'decision' => $this->decision($result),
+                    'block_rule_id' => isset($result['block_rule_id']) ? (int)$result['block_rule_id'] : null,
+                    'block_scope' => isset($result['block_scope']) ? (string)$result['block_scope'] : null,
+                    'block_reason' => isset($result['block_reason']) ? (string)$result['block_reason'] : null
+                ]);
+            }
+
+            return SubscribeRequestLog::create($payload);
         } catch (\Throwable $e) {
             // Audit failure must not make an otherwise valid subscription unusable.
             return null;
         }
+    }
+
+    public function normalizeUserAgent(Request $request): string
+    {
+        $userAgent = trim((string)$request->header('User-Agent', ''));
+        if ($userAgent === '') {
+            $userAgent = '(empty)';
+        }
+
+        return function_exists('mb_substr')
+            ? mb_substr($userAgent, 0, self::MAX_USER_AGENT_LENGTH)
+            : substr($userAgent, 0, self::MAX_USER_AGENT_LENGTH);
+    }
+
+    public function userAgentHash(Request $request): string
+    {
+        return hash('sha256', strtolower($this->normalizeUserAgent($request)));
     }
 
     public function resolveIp(Request $request): string
@@ -51,5 +78,28 @@ class SubscribeAuditService
             $address = $request->server('REMOTE_ADDR');
         }
         return filter_var($address, FILTER_VALIDATE_IP) ? $address : 'unknown';
+    }
+
+    private function decisionColumnsAvailable(): bool
+    {
+        if (self::$decisionColumnsAvailable !== null) {
+            return self::$decisionColumnsAvailable;
+        }
+
+        try {
+            return self::$decisionColumnsAvailable = Schema::hasColumn('v2_subscribe_request_log', 'decision')
+                && Schema::hasColumn('v2_subscribe_request_log', 'block_rule_id')
+                && Schema::hasColumn('v2_subscribe_request_log', 'block_scope')
+                && Schema::hasColumn('v2_subscribe_request_log', 'block_reason');
+        } catch (\Throwable $e) {
+            return self::$decisionColumnsAvailable = false;
+        }
+    }
+
+    private function decision(array $result): string
+    {
+        $decision = isset($result['decision']) ? (string)$result['decision'] : 'allowed';
+
+        return in_array($decision, ['allowed', 'blocked', 'error'], true) ? $decision : 'allowed';
     }
 }

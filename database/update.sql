@@ -1010,3 +1010,52 @@ ALTER TABLE `v2_subscription_risk_cycle`
     ADD `city_count` int(11) NOT NULL DEFAULT '0' AFTER `distinct_ip_count`,
     ADD `region_count` int(11) NOT NULL DEFAULT '0' AFTER `city_count`,
     ADD `country_count` int(11) NOT NULL DEFAULT '0' AFTER `region_count`;
+
+CREATE TABLE IF NOT EXISTS `v2_subscribe_block_rule` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `scope` varchar(16) NOT NULL,
+    `user_id` int(11) DEFAULT NULL,
+    `subscription_id` bigint(20) DEFAULT NULL,
+    `ip` varchar(45) DEFAULT NULL,
+    `user_agent` varchar(1000) DEFAULT NULL,
+    `user_agent_hash` char(64) DEFAULT NULL,
+    `status` varchar(16) NOT NULL DEFAULT 'active',
+    `reason` text DEFAULT NULL,
+    `blocked_by` int(11) DEFAULT NULL,
+    `blocked_at` bigint(20) DEFAULT NULL,
+    `expires_at` bigint(20) DEFAULT NULL,
+    `released_by` int(11) DEFAULT NULL,
+    `released_at` bigint(20) DEFAULT NULL,
+    `release_reason` text DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `scope_subscription_status_expires` (`scope`,`subscription_id`,`status`,`expires_at`),
+    KEY `scope_user_status_expires` (`scope`,`user_id`,`status`,`expires_at`),
+    KEY `scope_ip_status_expires` (`scope`,`ip`,`status`,`expires_at`),
+    KEY `scope_ua_hash_status_expires` (`scope`,`user_agent_hash`,`status`,`expires_at`),
+    KEY `status_blocked_at` (`status`,`blocked_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `v2_subscribe_block_rule_event` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `rule_id` bigint(20) NOT NULL,
+    `action` varchar(32) NOT NULL,
+    `actor_id` int(11) DEFAULT NULL,
+    `reason` text DEFAULT NULL,
+    `metadata` text DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `rule_created_at` (`rule_id`,`created_at`),
+    KEY `actor_created_at` (`actor_id`,`created_at`),
+    KEY `action_created_at` (`action`,`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- v2board:update --legacy 会按分号拆分并逐条 DB::statement，不能使用 mysql 客户端
+-- 专用的 DELIMITER / PROCEDURE 语法。日常升级请使用默认的幂等 SchemaUpgradeService；
+-- 这个历史脚本本身已包含非幂等 ALTER，以下字段仅供从旧版本首次升级时补齐。
+ALTER TABLE `v2_subscribe_request_log`
+    ADD `decision` varchar(16) NOT NULL DEFAULT 'allowed',
+    ADD `block_rule_id` bigint(20) DEFAULT NULL,
+    ADD `block_scope` varchar(16) DEFAULT NULL,
+    ADD `block_reason` text DEFAULT NULL;

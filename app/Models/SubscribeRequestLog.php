@@ -12,6 +12,7 @@ class SubscribeRequestLog extends Model
     public $timestamps = true;
 
     protected $casts = [
+        'block_rule_id' => 'integer',
         'requested_at' => 'timestamp',
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp'
