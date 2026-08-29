@@ -141,6 +141,33 @@ class RiskGatewayControllerTest extends TestCase
         $this->assertSame(301, $uaPayload['data'][0]['subscription_id']);
     }
 
+    public function testSummaryViewExplainsWhenRawAuditsExistButInitialBackfillWasMissed(): void
+    {
+        $this->createSummaryTables();
+        $now = time();
+        DB::table('v2_subscribe_request_log')->insert([
+            'user_id' => 104,
+            'subscription_id' => null,
+            'user_agent' => 'GatewayTest/4.0',
+            'ua_hash' => hash('sha256', 'GatewayTest/4.0'),
+            'request_ip' => '198.51.100.13',
+            'requested_at' => $now,
+            'decision' => 'allowed',
+            'block_rule_id' => null,
+            'block_scope' => null,
+            'block_reason' => null,
+            'created_at' => $now,
+            'updated_at' => $now
+        ]);
+
+        $response = (new RiskGatewayController())->ipRecords(Request::create('/', 'GET'));
+        $payload = json_decode($response->getContent(), true);
+
+        $this->assertTrue($payload['available']);
+        $this->assertSame(0, $payload['total']);
+        $this->assertStringContainsString('audit:backfill-summaries', $payload['error']);
+    }
+
     public function testDetailAcceptsIdAndReturnsRelatedRawAuditRecords(): void
     {
         $now = time();

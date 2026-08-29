@@ -127,7 +127,7 @@ class SubscribeAuditService
 
         $processed = 0;
         if ($ceiling <= 0) {
-            return ['available' => true, 'audits' => 0];
+            return $this->summaryRebuildResult(0);
         }
 
         SubscribeRequestLog::where('id', '<=', $ceiling)
@@ -142,7 +142,36 @@ class SubscribeAuditService
                 }
             });
 
-        return ['available' => true, 'audits' => $processed];
+        return $this->summaryRebuildResult($processed);
+    }
+
+    /**
+     * The summary tables are derived data, but a successful rebuild must not
+     * silently leave them empty while there are raw rows to display.  The
+     * counters deliberately allow rows written after the rebuild ceiling: the
+     * normal request path may add those concurrently while the replay runs.
+     */
+    private function summaryRebuildResult(int $audits): array
+    {
+        $ipRows = (int) SubscribeIpSummary::query()->count();
+        $userAgentRows = (int) SubscribeUserAgentSummary::query()->count();
+        $ipHits = (int) SubscribeIpSummary::query()->sum('hit_count');
+        $userAgentHits = (int) SubscribeUserAgentSummary::query()->sum('hit_count');
+
+        return [
+            'available' => true,
+            'audits' => $audits,
+            'ip_rows' => $ipRows,
+            'user_agent_rows' => $userAgentRows,
+            'ip_hits' => $ipHits,
+            'user_agent_hits' => $userAgentHits,
+            'verified' => $audits === 0 || (
+                $ipRows > 0
+                && $userAgentRows > 0
+                && $ipHits >= $audits
+                && $userAgentHits >= $audits
+            )
+        ];
     }
 
     private function syncSummaries(SubscribeRequestLog $audit): void

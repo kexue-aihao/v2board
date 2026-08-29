@@ -44,12 +44,23 @@ DEPLOY_BRANCH="${DEPLOY_BRANCH:-$(git symbolic-ref --quiet --short HEAD || true)
 echo "Deploying branch: $DEPLOY_BRANCH"
 deploy_stop_webman
 git config --global --add safe.directory "$ROOT_DIR"
+UPDATE_SCRIPT_BEFORE="$(git rev-parse --verify HEAD:update.sh 2>/dev/null || true)"
 git fetch origin "$DEPLOY_BRANCH"
 git show-ref --verify --quiet "refs/remotes/origin/$DEPLOY_BRANCH" || {
     echo "ERROR: Remote branch not found: origin/$DEPLOY_BRANCH" >&2
     exit 1
 }
 git reset --hard "origin/$DEPLOY_BRANCH"
+UPDATE_SCRIPT_AFTER="$(git rev-parse --verify HEAD:update.sh 2>/dev/null || true)"
+
+# `git reset` replaces this file on disk, but the shell that started before the
+# reset continues to execute its old in-memory script.  Restart once from the
+# checked-out script so a newly introduced migration or backfill step cannot be
+# skipped on the first deployment that contains it.
+if [ "$UPDATE_SCRIPT_BEFORE" != "$UPDATE_SCRIPT_AFTER" ] && [ "${V2BOARD_UPDATE_REEXECUTED:-0}" != "1" ]; then
+    echo "update.sh changed during deployment; continuing with the checked-out script."
+    V2BOARD_UPDATE_REEXECUTED=1 exec bash "$ROOT_DIR/update.sh" "$@"
+fi
 
 DEPLOY_REVISION="$(git rev-parse HEAD)"
 REMOTE_REVISION="$(git rev-parse "origin/$DEPLOY_BRANCH")"

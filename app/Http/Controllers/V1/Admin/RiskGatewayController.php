@@ -97,7 +97,7 @@ class RiskGatewayController extends Controller
                 $data[] = $row;
             }
 
-            return response(['data' => $data, 'total' => $total, 'available' => true]);
+            return $this->summaryListResponse($data, $total, $request);
         } catch (\Throwable $e) {
             report($e);
             return $this->runtimeErrorList();
@@ -161,7 +161,7 @@ class RiskGatewayController extends Controller
                 $data[] = $row;
             }
 
-            return response(['data' => $data, 'total' => $total, 'available' => true]);
+            return $this->summaryListResponse($data, $total, $request);
         } catch (\Throwable $e) {
             report($e);
             return $this->runtimeErrorList();
@@ -950,6 +950,41 @@ class RiskGatewayController extends Controller
     private function emptyAvailableList($key = 'data')
     {
         return response([$key => [], 'total' => 0, 'available' => true]);
+    }
+
+    /**
+     * Do not rebuild on an admin page request: a rebuild clears derived data
+     * first and can be expensive.  Instead make the skipped/failed deployment
+     * state explicit when unfiltered raw audits exist but both summary views
+     * have no rows.
+     */
+    private function summaryListResponse(array $data, int $total, Request $request)
+    {
+        $response = ['data' => $data, 'total' => $total, 'available' => true];
+        if ($total === 0 && !$this->hasSummaryFilters($request) && $this->hasRetainedRawAudits()) {
+            $response['error'] = __('订阅风控网关汇总为空，但原始拉取审计仍存在。请在服务器执行 php artisan audit:backfill-summaries 后刷新本页。');
+        }
+
+        return response($response);
+    }
+
+    private function hasSummaryFilters(Request $request): bool
+    {
+        foreach (['user_filter', 'subscription_id', 'request_ip', 'user_agent', 'decision', 'start_at', 'end_at'] as $key) {
+            if ($this->scalarInput($request, $key) !== '') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function hasRetainedRawAudits(): bool
+    {
+        try {
+            return $this->rawAuditAvailable() && SubscribeRequestLog::query()->exists();
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**
