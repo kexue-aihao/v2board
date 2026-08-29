@@ -119039,6 +119039,7 @@
                     },
                     loading: !0,
                     available: !0,
+                    error: "",
                     blockVisible: !1,
                     blocking: !1,
                     blockRecord: null,
@@ -119102,20 +119103,22 @@
                         return;
                     if (200 !== res.code)
                         return void this.setState({
-                            loading: !1
+                            loading: !1,
+                            error: res.msg || "订阅风控网关请求失败，请稍后重试"
                         });
                     this.setState({
                         rows: res.data || [],
                         available: !1 !== res.available,
+                        error: res.error || "",
                         pagination: i()({}, this.state.pagination, {
                             total: res.total || 0
                         }),
                         loading: !1
                     })
-                }).catch(()=>{
+                }).catch(error=>{
                     this.unmounted || this.setState({
                         loading: !1,
-                        available: !1
+                        error: error && error.message || "订阅风控网关请求失败，请检查网络或管理员登录状态"
                     })
                 })
             }
@@ -119236,9 +119239,9 @@
                         }),
                         rulesLoading: !1
                     })
-                }).catch(()=>this.unmounted || this.setState({
+                }).catch(error=>this.unmounted || this.setState({
                     rulesLoading: !1,
-                    available: !1
+                    error: error && error.message || "阻断规则请求失败，请检查网络或管理员登录状态"
                 }))
             }
             changeRuleFilters(patch) {
@@ -119648,7 +119651,12 @@
                     role: "alert"
                 }, p.a.createElement("p", {
                     className: "mb-0"
-                }, "订阅风控网关所需的数据表或接口尚未安装（数据库尚未升级），暂时无法读取审计与阻断规则。")) : null, p.a.createElement("div", {
+                }, "订阅风控网关所需的数据表或接口尚未安装（数据库尚未升级），暂时无法读取审计与阻断规则。")) : null, !state.loading && state.error ? p.a.createElement("div", {
+                    className: "alert alert-danger",
+                    role: "alert"
+                }, p.a.createElement("p", {
+                    className: "mb-0"
+                }, state.error)) : null, p.a.createElement("div", {
                     className: "block block-rounded"
                 }, p.a.createElement("div", {
                     className: "bg-white"

@@ -87,7 +87,8 @@ class RiskGatewayController extends Controller
 
             return response(['data' => $data, 'total' => $total, 'available' => true]);
         } catch (\Throwable $e) {
-            return $this->emptyList();
+            report($e);
+            return $this->runtimeErrorList();
         }
     }
 
@@ -552,6 +553,21 @@ class RiskGatewayController extends Controller
     private function emptyAvailableList($key = 'data')
     {
         return response([$key => [], 'total' => 0, 'available' => true]);
+    }
+
+    /**
+     * A query failure must not be represented as a missing schema.  The
+     * administrator needs an actionable message while the original exception
+     * remains available in the application log for diagnosis.
+     */
+    private function runtimeErrorList($key = 'data')
+    {
+        return response([
+            $key => [],
+            'total' => 0,
+            'available' => true,
+            'error' => __('订阅风控网关暂时无法读取数据，请查看应用日志后重试')
+        ]);
     }
 
     private function upgradeRequired(): void
