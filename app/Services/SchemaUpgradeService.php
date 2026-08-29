@@ -12,6 +12,7 @@ class SchemaUpgradeService
         'subscription_schema' => 'subscription_schema_v1',
         'risk_audit_schema' => 'risk_audit_schema_v1',
         'subscribe_gateway_schema' => 'subscribe_gateway_schema_v1',
+        'subscribe_audit_summary_schema' => 'subscribe_audit_summary_schema_v1',
         'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
         'ip_location_enrichment_schema' => 'ip_location_enrichment_schema_v1',
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
@@ -79,6 +80,9 @@ class SchemaUpgradeService
                 return;
             case 'subscribe_gateway_schema':
                 $this->applySubscribeGatewaySchema();
+                return;
+            case 'subscribe_audit_summary_schema':
+                $this->applySubscribeAuditSummarySchema();
                 return;
             case 'ip_location_cache_schema':
                 $this->applyIpLocationCacheSchema();
@@ -452,6 +456,81 @@ class SchemaUpgradeService
         ] as $column => $definition) {
             $this->ensureColumn('v2_subscribe_request_log', $column, $definition);
         }
+    }
+
+    private function applySubscribeAuditSummarySchema(): void
+    {
+        $this->requireTable('v2_subscribe_request_log');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscribe_ip_summary` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `request_ip` varchar(45) NOT NULL,
+            `hit_count` bigint(20) NOT NULL DEFAULT '0',
+            `first_seen_at` bigint(20) NOT NULL,
+            `last_seen_at` bigint(20) NOT NULL,
+            `recent_audit_id` bigint(20) NOT NULL,
+            `recent_subscription_id` bigint(20) DEFAULT NULL,
+            `recent_user_agent` varchar(1000) NOT NULL,
+            `recent_decision` varchar(16) NOT NULL DEFAULT 'allowed',
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'request_ip' => 'varchar(45) NOT NULL',
+            'hit_count' => "bigint(20) NOT NULL DEFAULT '0'",
+            'first_seen_at' => 'bigint(20) NOT NULL',
+            'last_seen_at' => 'bigint(20) NOT NULL',
+            'recent_audit_id' => 'bigint(20) NOT NULL',
+            'recent_subscription_id' => 'bigint(20) DEFAULT NULL',
+            'recent_user_agent' => 'varchar(1000) NOT NULL',
+            'recent_decision' => "varchar(16) NOT NULL DEFAULT 'allowed'",
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscribe_ip_summary', $column, $definition);
+        }
+        $this->ensureIndex('v2_subscribe_ip_summary', 'user_request_ip', ['user_id', 'request_ip'], true);
+        $this->ensureIndex('v2_subscribe_ip_summary', 'last_seen_at', ['last_seen_at']);
+        $this->ensureIndex('v2_subscribe_ip_summary', 'recent_audit_id', ['recent_audit_id']);
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscribe_user_agent_summary` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `ua_hash` char(64) NOT NULL,
+            `user_agent` varchar(1000) NOT NULL,
+            `hit_count` bigint(20) NOT NULL DEFAULT '0',
+            `first_seen_at` bigint(20) NOT NULL,
+            `last_seen_at` bigint(20) NOT NULL,
+            `recent_audit_id` bigint(20) NOT NULL,
+            `recent_subscription_id` bigint(20) DEFAULT NULL,
+            `recent_request_ip` varchar(45) NOT NULL,
+            `recent_decision` varchar(16) NOT NULL DEFAULT 'allowed',
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'ua_hash' => 'char(64) NOT NULL',
+            'user_agent' => 'varchar(1000) NOT NULL',
+            'hit_count' => "bigint(20) NOT NULL DEFAULT '0'",
+            'first_seen_at' => 'bigint(20) NOT NULL',
+            'last_seen_at' => 'bigint(20) NOT NULL',
+            'recent_audit_id' => 'bigint(20) NOT NULL',
+            'recent_subscription_id' => 'bigint(20) DEFAULT NULL',
+            'recent_request_ip' => 'varchar(45) NOT NULL',
+            'recent_decision' => "varchar(16) NOT NULL DEFAULT 'allowed'",
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscribe_user_agent_summary', $column, $definition);
+        }
+        $this->ensureIndex('v2_subscribe_user_agent_summary', 'user_ua_hash', ['user_id', 'ua_hash'], true);
+        $this->ensureIndex('v2_subscribe_user_agent_summary', 'last_seen_at', ['last_seen_at']);
+        $this->ensureIndex('v2_subscribe_user_agent_summary', 'recent_audit_id', ['recent_audit_id']);
     }
 
     /**

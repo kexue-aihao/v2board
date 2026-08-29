@@ -154,6 +154,14 @@ class AdminRoute
             $router->get ('/risk/shared-ip/detail', 'V1\\Admin\\RiskSharedIpController@detail');
             // 订阅拉取风控网关。规则目标仅能从既有审计记录派生。
             $router->get ('/risk/gateway/fetch', 'V1\\Admin\\RiskGatewayController@fetch');
+            $router->get ('/risk/gateway/ip-records', 'V1\\Admin\\RiskGatewayController@ipRecords');
+            $router->get ('/risk/gateway/user-agent-records', 'V1\\Admin\\RiskGatewayController@userAgentRecords');
+            $router->get ('/risk/gateway/audit-records', 'V1\\Admin\\RiskGatewayController@auditRecords');
+            $router->get ('/risk/gateway/detail', 'V1\\Admin\\RiskGatewayController@detail');
+            // Compatibility aliases used by the compiled administrator bundle.
+            $router->get ('/risk/gateway/ip-summaries', 'V1\\Admin\\RiskGatewayController@ipRecords');
+            $router->get ('/risk/gateway/ua-summaries', 'V1\\Admin\\RiskGatewayController@userAgentRecords');
+            $router->get ('/risk/gateway/audit-detail', 'V1\\Admin\\RiskGatewayController@detail');
             $router->get ('/risk/gateway/rules', 'V1\\Admin\\RiskGatewayController@rules');
             $router->get ('/risk/gateway/history', 'V1\\Admin\\RiskGatewayController@history');
             $router->post('/risk/gateway/block', 'V1\\Admin\\RiskGatewayController@block');

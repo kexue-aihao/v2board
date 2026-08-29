@@ -98,6 +98,7 @@ fi
 # Always run the idempotent schema migrations. Legacy mode only prepares
 # historical installations; it does not include newer reward schema changes.
 deploy_php artisan v2board:update
+deploy_php artisan audit:backfill-summaries --chunk=1000
 deploy_php artisan optimize:clear
 deploy_php scripts/refresh-telegram-webhook.php
 deploy_php artisan ip:clear-location-cache

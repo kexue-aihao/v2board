@@ -666,6 +666,47 @@ CREATE TABLE `v2_subscribe_request_log` (
                                   KEY `requested_at` (`requested_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+DROP TABLE IF EXISTS `v2_subscribe_ip_summary`;
+CREATE TABLE `v2_subscribe_ip_summary` (
+                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                  `user_id` int(11) NOT NULL,
+                                  `request_ip` varchar(45) NOT NULL,
+                                  `hit_count` bigint(20) NOT NULL DEFAULT '0',
+                                  `first_seen_at` bigint(20) NOT NULL,
+                                  `last_seen_at` bigint(20) NOT NULL,
+                                  `recent_audit_id` bigint(20) NOT NULL,
+                                  `recent_subscription_id` bigint(20) DEFAULT NULL,
+                                  `recent_user_agent` varchar(1000) NOT NULL,
+                                  `recent_decision` varchar(16) NOT NULL DEFAULT 'allowed',
+                                  `created_at` int(11) NOT NULL,
+                                  `updated_at` int(11) NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `user_request_ip` (`user_id`,`request_ip`),
+                                  KEY `last_seen_at` (`last_seen_at`),
+                                  KEY `recent_audit_id` (`recent_audit_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_subscribe_user_agent_summary`;
+CREATE TABLE `v2_subscribe_user_agent_summary` (
+                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+                                  `user_id` int(11) NOT NULL,
+                                  `ua_hash` char(64) NOT NULL,
+                                  `user_agent` varchar(1000) NOT NULL,
+                                  `hit_count` bigint(20) NOT NULL DEFAULT '0',
+                                  `first_seen_at` bigint(20) NOT NULL,
+                                  `last_seen_at` bigint(20) NOT NULL,
+                                  `recent_audit_id` bigint(20) NOT NULL,
+                                  `recent_subscription_id` bigint(20) DEFAULT NULL,
+                                  `recent_request_ip` varchar(45) NOT NULL,
+                                  `recent_decision` varchar(16) NOT NULL DEFAULT 'allowed',
+                                  `created_at` int(11) NOT NULL,
+                                  `updated_at` int(11) NOT NULL,
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `user_ua_hash` (`user_id`,`ua_hash`),
+                                  KEY `last_seen_at` (`last_seen_at`),
+                                  KEY `recent_audit_id` (`recent_audit_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 DROP TABLE IF EXISTS `v2_subscribe_block_rule`;
 CREATE TABLE `v2_subscribe_block_rule` (
                                   `id` bigint(20) NOT NULL AUTO_INCREMENT,

@@ -119024,6 +119024,7 @@
             constructor(props) {
                 super(props),
                 this.state = {
+                    view: "ip",
                     rows: [],
                     pagination: {
                         current: 1,
@@ -119065,7 +119066,16 @@
                     historyVisible: !1,
                     historyLoading: !1,
                     historyRule: null,
-                    history: []
+                    history: [],
+                    detailVisible: !1,
+                    detailLoading: !1,
+                    detailRecord: null,
+                    detailError: "",
+                    detailSource: null,
+                    detailPagination: {
+                        current: 1,
+                        pageSize: 20
+                    }
                 },
                 this.filterTimer = null,
                 this.ruleFilterTimer = null,
@@ -119088,11 +119098,12 @@
             }
             fetch() {
                 var state = this.state
-                  , filters = state.filters;
+                  , filters = state.filters
+                  , path = "ua" === state.view ? "/risk/gateway/ua-summaries" : "/risk/gateway/ip-summaries";
                 this.setState({
                     loading: !0
                 }),
-                gatewayGet("/risk/gateway/fetch", i()({
+                gatewayGet(path, i()({
                     user_filter: filters.user,
                     subscription_id: filters.subscription_id,
                     request_ip: filters.request_ip,
@@ -119144,7 +119155,81 @@
                     pagination: i()({}, this.state.pagination, gatewayPage(pagination))
                 }, ()=>this.fetch())
             }
+            switchView(view) {
+                if (view === this.state.view)
+                    return;
+                this.setState({
+                    view: view,
+                    rows: [],
+                    pagination: i()({}, this.state.pagination, {
+                        current: 1,
+                        total: 0
+                    })
+                }, ()=>this.fetch())
+            }
+            openAuditDetail(record, pagination) {
+                var source = record || this.state.detailSource
+                  , auditId = Number(source && (source.latest_audit_id || source.id));
+                if (!(auditId > 0))
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "该汇总记录没有可追溯的原始审计记录"
+                    });
+                var page = gatewayPage(pagination || this.state.detailPagination);
+                this.setState({
+                    detailVisible: !0,
+                    detailLoading: !0,
+                    detailRecord: null,
+                    detailError: "",
+                    detailSource: source,
+                    detailPagination: page
+                }),
+                gatewayGet("/risk/gateway/audit-detail", {
+                    id: auditId,
+                    summary_type: source && source.ua_hash ? "ua" : "ip",
+                    current: page.current,
+                    pageSize: page.pageSize
+                }).then(res=>{
+                    if (this.unmounted)
+                        return;
+                    if (200 !== res.code || !res.data)
+                        return void this.setState({
+                            detailLoading: !1,
+                            detailError: res.msg || res.error || "无法读取原始拉取明细"
+                        });
+                    this.setState({
+                        detailLoading: !1,
+                        detailRecord: res.data,
+                        detailError: ""
+                    })
+                }).catch(error=>this.unmounted || this.setState({
+                    detailLoading: !1,
+                    detailError: error && error.message || "无法读取原始拉取明细，请稍后重试"
+                }))
+            }
+            closeAuditDetail() {
+                this.setState({
+                    detailVisible: !1,
+                    detailLoading: !1,
+                    detailRecord: null,
+                    detailError: "",
+                    detailSource: null,
+                    detailPagination: {
+                        current: 1,
+                        pageSize: 20
+                    }
+                })
+            }
             openBlock(record) {
+                var auditId = Number(record && (record.latest_audit_id || record.id));
+                if (!(auditId > 0))
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "该汇总记录没有可用于阻断的原始审计记录"
+                    });
+                record = i()({}, record, {
+                    id: auditId
+                }),
                 this.setState({
                     blockVisible: !0,
                     blockRecord: record,
@@ -119511,6 +119596,107 @@
                     }
                 }))
             }
+            renderIpLocation(location) {
+                var value = location && typeof location === "object" ? location : {}
+                  , area = [value.country_name || value.country || value.country_code, value.province || value.region, value.city, value.district].filter(item=>item).join(" / ")
+                  , operator = value.operator_code || "-"
+                  , asn = value.asn ? "AS" + value.asn : "-"
+                  , organization = value.organization || "-"
+                  , network = value.network_type || "-"
+                  , connection = value.connection_type || "-"
+                  , idc = null === value.is_idc || void 0 === value.is_idc ? "未知" : value.is_idc ? "是" : "否"
+                  , residential = null === value.is_residential || void 0 === value.is_residential ? "未知" : value.is_residential ? "是" : "否"
+                  , confidence = null === value.geo_confidence || void 0 === value.geo_confidence || "" === value.geo_confidence ? "-" : (100 * Number(value.geo_confidence)).toFixed(2) + "%"
+                  , radius = null === value.accuracy_radius || void 0 === value.accuracy_radius || "" === value.accuracy_radius ? "-" : value.accuracy_radius + " km";
+                return p.a.createElement("div", {
+                    className: "font-size-sm",
+                    style: {
+                        lineHeight: "1.7",
+                        minWidth: 230
+                    }
+                }, p.a.createElement("div", null, "归属地：", area || "-"), p.a.createElement("div", null, "ISP：", value.isp || "-", "　运营商：", operator), p.a.createElement("div", null, "ASN / 组织：", asn, " / ", organization), p.a.createElement("div", null, "网络 / 连接：", network, " / ", connection), p.a.createElement("div", null, "IDC / 住宅：", idc, " / ", residential), p.a.createElement("div", null, "置信度 / 半径：", confidence, " / ", radius))
+            }
+            renderAuditDetail() {
+                var state = this.state
+                  , record = state.detailRecord || {}
+                  , rows = [["时间", gatewayTime(record.requested_at)], ["用户", (record.user_email || "-") + (record.user_id ? " (#" + record.user_id + ")" : "")], ["订阅", record.subscription_id ? (record.subscription_plan_name || "未命名套餐") + " (#" + record.subscription_id + ")" : "-"], ["IP", record.request_ip || "-"], ["User-Agent", record.user_agent || "-"], ["结果", gatewayDecisionText(record.decision)], ["命中范围", gatewayScopeText(record.block_scope)], ["原因", record.block_reason || "-"]]
+                  , rawColumns = [{
+                    title: "时间",
+                    dataIndex: "requested_at",
+                    width: 170,
+                    render: gatewayTime
+                }, {
+                    title: "IP",
+                    dataIndex: "request_ip",
+                    width: 150,
+                    render: value=>value || "-"
+                }, {
+                    title: "User-Agent",
+                    dataIndex: "user_agent",
+                    render: value=>p.a.createElement("span", {
+                        style: {
+                            wordBreak: "break-all"
+                        }
+                    }, value || "-")
+                }, {
+                    title: "结果",
+                    dataIndex: "decision",
+                    width: 90,
+                    render: gatewayDecisionText
+                }]
+                  , content = state.detailLoading ? p.a.createElement(g["a"], null) : state.detailError ? p.a.createElement("div", {
+                    className: "alert alert-danger mb-0",
+                    role: "alert"
+                }, state.detailError) : p.a.createElement("div", {
+                    className: "table-responsive"
+                }, p.a.createElement("table", {
+                    className: "table table-bordered table-vcenter mb-3"
+                }, p.a.createElement("tbody", null, rows.map((item, index)=>p.a.createElement("tr", {
+                    key: index
+                }, p.a.createElement("th", {
+                    style: {
+                        width: 130
+                    }
+                }, item[0]), p.a.createElement("td", {
+                    style: {
+                        wordBreak: "break-all"
+                    }
+                }, item[1]))))), p.a.createElement("h5", {
+                    className: "font-w600 mb-2"
+                }, "原始拉取记录（共 ", Number(record.raw_total || 0), " 条）"), p.a.createElement(o["a"], {
+                    size: "small",
+                    rowKey: raw=>raw.id,
+                    dataSource: record.raw_records || [],
+                    columns: rawColumns,
+                    pagination: i()({}, state.detailPagination, {
+                        size: "small",
+                        total: record.raw_total || 0,
+                        showSizeChanger: !0,
+                        pageSizeOptions: ["10", "20", "50", "100"]
+                    }),
+                    onChange: pagination=>this.openAuditDetail(state.detailSource || record, pagination),
+                    locale: {
+                        emptyText: "暂无原始拉取记录"
+                    },
+                    scroll: {
+                        x: 760,
+                        y: 320
+                    }
+                }), record.id ? p.a.createElement(a["a"], {
+                    type: "danger",
+                    onClick: ()=>{
+                        this.closeAuditDetail(),
+                        this.openBlock(record)
+                    }
+                }, "阻断此记录") : null);
+                return p.a.createElement(c["a"], {
+                    title: "原始拉取明细",
+                    visible: state.detailVisible,
+                    footer: null,
+                    width: 900,
+                    onCancel: ()=>this.closeAuditDetail()
+                }, content)
+            }
             renderBlock() {
                 var state = this.state
                   , record = state.blockRecord || {}
@@ -119578,12 +119764,8 @@
             render() {
                 var state = this.state
                   , filters = state.filters
+                  , isUa = "ua" === state.view
                   , columns = [{
-                    title: "时间",
-                    dataIndex: "requested_at",
-                    width: 175,
-                    render: gatewayTime
-                }, {
                     title: "用户",
                     key: "user",
                     width: 185,
@@ -119591,56 +119773,64 @@
                         style: {
                             wordBreak: "break-all"
                         }
-                    }, row.user_email || "-", row.user_id ? " (#" + row.user_id + ")" : "")
+                    }, row.user_email || "-")
                 }, {
                     title: "订阅",
                     key: "subscription",
                     width: 160,
-                    render: (value, row)=>row.subscription_id ? p.a.createElement("span", null, row.subscription_plan_name || "未命名套餐", " (#" + row.subscription_id + ")") : "-"
+                    render: (value, row)=>row.subscription_plan_name || "-"
                 }, {
-                    title: "IP",
-                    dataIndex: "request_ip",
+                    title: isUa ? "最近 IP" : "IP",
+                    key: "request_ip",
                     width: 145,
-                    render: value=>value || "-"
+                    render: (value, row)=>(isUa ? row.latest_request_ip : row.request_ip) || "-"
                 }, {
                     title: "User-Agent",
-                    dataIndex: "user_agent",
+                    key: "user_agent",
                     width: 235,
-                    render: value=>p.a.createElement("span", {
+                    render: (value, row)=>p.a.createElement("div", {
                         style: {
                             wordBreak: "break-all"
                         }
-                    }, value || "-")
+                    }, row.latest_user_agent || "-", isUa && row.ua_hash ? p.a.createElement("div", {
+                        className: "text-muted font-size-sm"
+                    }, "SHA-256: ", row.ua_hash) : null)
                 }, {
-                    title: "结果",
-                    dataIndex: "decision",
-                    width: 95,
+                    title: "次数 / 时间",
+                    key: "request_count",
+                    width: 190,
+                    render: (value, row)=>p.a.createElement("div", null, p.a.createElement("div", null, "累计 ", Number(row.request_count || 0), " 次"), p.a.createElement("div", {
+                        className: "text-muted font-size-sm"
+                    }, "首次：", gatewayTime(row.first_requested_at)), p.a.createElement("div", {
+                        className: "text-muted font-size-sm"
+                    }, "最近：", gatewayTime(row.last_requested_at)))
+                }, {
+                    title: "最近结果",
+                    dataIndex: "latest_decision",
+                    width: 100,
                     render: value=>p.a.createElement(y["a"], {
                         color: "blocked" === value ? "red" : "error" === value ? "orange" : "green"
                     }, gatewayDecisionText(value))
                 }, {
-                    title: "命中范围",
-                    dataIndex: "block_scope",
-                    width: 120,
-                    render: gatewayScopeText
-                }, {
-                    title: "原因",
-                    dataIndex: "block_reason",
-                    width: 190,
-                    render: value=>p.a.createElement("span", {
-                        style: {
-                            wordBreak: "break-all"
-                        }
-                    }, value || "-")
+                    title: "详细 IP 信息",
+                    key: "ip_location",
+                    width: 300,
+                    render: (value, row)=>this.renderIpLocation(row.ip_location)
                 }, {
                     title: "操作",
                     key: "action",
                     fixed: "right",
-                    width: 80,
-                    render: (value, row)=>p.a.createElement("a", {
+                    width: 145,
+                    render: (value, row)=>p.a.createElement("span", null, p.a.createElement("a", {
                         href: "javascript:void(0);",
+                        onClick: ()=>this.openAuditDetail(row)
+                    }, "查看明细"), p.a.createElement("a", {
+                        href: "javascript:void(0);",
+                        style: {
+                            marginLeft: 10
+                        },
                         onClick: ()=>this.openBlock(row)
-                    }, "阻断")
+                    }, "阻断"))
                 }];
                 return p.a.createElement(m["a"], i()({}, this.props, {
                     title: "订阅风控网关"
@@ -119651,7 +119841,7 @@
                     role: "alert"
                 }, p.a.createElement("p", {
                     className: "mb-0"
-                }, "订阅风控网关所需的数据表或接口尚未安装（数据库尚未升级），暂时无法读取审计与阻断规则。")) : null, !state.loading && state.error ? p.a.createElement("div", {
+                }, "订阅风控网关所需的数据表或接口尚未安装，暂时无法读取审计记录。")) : null, !state.loading && state.error ? p.a.createElement("div", {
                     className: "alert alert-danger",
                     role: "alert"
                 }, p.a.createElement("p", {
@@ -119665,7 +119855,21 @@
                     style: {
                         padding: 15
                     }
-                }, p.a.createElement(s["a"], {
+                }, p.a.createElement("div", {
+                    style: {
+                        marginRight: 18,
+                        marginBottom: 6
+                    }
+                }, p.a.createElement(a["a"], {
+                    type: isUa ? "default" : "primary",
+                    style: {
+                        marginRight: 8
+                    },
+                    onClick: ()=>this.switchView("ip")
+                }, "IP 记录"), p.a.createElement(a["a"], {
+                    type: isUa ? "primary" : "default",
+                    onClick: ()=>this.switchView("ua")
+                }, "User-Agent 记录")), p.a.createElement(s["a"], {
                     allowClear: !0,
                     placeholder: "用户 ID 或邮箱",
                     defaultValue: filters.user,
@@ -119754,7 +119958,7 @@
                         padding: "0 15px 15px"
                     }
                 }, p.a.createElement(o["a"], {
-                    rowKey: row=>row.id,
+                    rowKey: row=>isUa ? String(row.user_id) + ":" + String(row.ua_hash) : String(row.user_id) + ":" + String(row.request_ip),
                     dataSource: state.rows,
                     columns: columns,
                     pagination: i()({}, state.pagination, {
@@ -119764,12 +119968,12 @@
                     }),
                     onChange: pagination=>this.tableChange(pagination),
                     locale: {
-                        emptyText: "暂无订阅审计记录"
+                        emptyText: isUa ? "暂无 User-Agent 汇总记录" : "暂无 IP 汇总记录"
                     },
                     scroll: {
-                        x: 1450
+                        x: 1680
                     }
-                }))))), this.renderBlock(), this.renderRules(), this.renderHistory())
+                }))))), this.renderAuditDetail(), this.renderBlock(), this.renderRules(), this.renderHistory())
             }
         }
         t["default"] = RiskGatewayPage

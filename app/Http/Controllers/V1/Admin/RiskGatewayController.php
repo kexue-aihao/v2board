@@ -6,9 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\Plan;
 use App\Models\SubscribeBlockRule;
 use App\Models\SubscribeBlockRuleEvent;
+use App\Models\SubscribeIpSummary;
 use App\Models\SubscribeRequestLog;
+use App\Models\SubscribeUserAgentSummary;
 use App\Models\Subscription;
 use App\Models\User;
+use App\Services\IpLocationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -21,10 +24,212 @@ class RiskGatewayController extends Controller
     private const AUDIT_TABLE = 'v2_subscribe_request_log';
     private const RULE_TABLE = 'v2_subscribe_block_rule';
     private const EVENT_TABLE = 'v2_subscribe_block_rule_event';
+    private const IP_SUMMARY_TABLE = 'v2_subscribe_ip_summary';
+    private const USER_AGENT_SUMMARY_TABLE = 'v2_subscribe_user_agent_summary';
     private const PAGE_SIZE_DEFAULT = 20;
     private const PAGE_SIZE_MAX = 100;
 
     public function fetch(Request $request)
+    {
+        // The gateway landing view is deliberately aggregated by account and IP.
+        // Raw audit evidence remains available through auditRecords() and detail().
+        return $this->ipRecords($request);
+    }
+
+    /**
+     * Per-account IP summaries. One row is the latest evidence for a single
+     * user_id + request_ip pair, so latest_audit_id is always safe to pass to
+     * the existing block endpoint.
+     */
+    public function ipRecords(Request $request)
+    {
+        if (!$this->ipSummaryAvailable()) {
+            return $this->emptyList();
+        }
+
+        try {
+            [$page, $pageSize] = $this->pagination($request);
+            $query = SubscribeIpSummary::query();
+            if (!$this->applySummaryFilters($query, $request, [
+                'subscription' => 'recent_subscription_id',
+                'ip' => 'request_ip',
+                'user_agent' => 'recent_user_agent',
+                'decision' => 'recent_decision'
+            ])) {
+                return $this->emptyAvailableList();
+            }
+            $this->applyTimeWindow($query, $request, 'last_seen_at');
+
+            $total = (int)(clone $query)->count();
+            $rows = $query->orderByDesc('last_seen_at')->orderByDesc('recent_audit_id')
+                ->forPage($page, $pageSize)->get($this->ipSummaryColumns());
+
+            $users = $this->usersById($rows->pluck('user_id')->filter()->all());
+            [$subscriptions, $plans] = $this->subscriptionsAndPlans(
+                $rows->pluck('latest_subscription_id')->filter()->all()
+            );
+            $audits = $this->auditsById($rows->pluck('latest_audit_id')->filter()->all());
+            $rules = $this->rulesById($audits->pluck('block_rule_id')->filter()->all());
+            $locations = (new IpLocationService())->lookupMany(
+                $rows->pluck('request_ip')->filter()->unique()->values()->all()
+            );
+
+            $data = [];
+            foreach ($rows as $summary) {
+                $userId = (int)$summary->user_id;
+                $subscriptionId = (int)$summary->latest_subscription_id;
+                $audit = $audits->get((int)$summary->latest_audit_id);
+                $subscription = $subscriptions->get($subscriptionId);
+                $row = $this->summaryRow($summary->getAttributes(), $this->ipSummaryColumns());
+                // IP summaries intentionally do not duplicate the UA hash; the
+                // latest immutable audit is the authoritative value for it.
+                $row['latest_ua_hash'] = $audit ? (string)$audit->ua_hash : null;
+                $row['user_email'] = ($users->get($userId))->email ?? null;
+                $row['subscription_plan_name'] = $subscription
+                    ? (($plans->get((int)$subscription->plan_id))->name ?? null) : null;
+                $row['ip_location'] = $this->publicIpLocation(
+                    $locations[(string)$summary->request_ip] ?? []
+                );
+                $row['block_rule'] = $audit && $audit->block_rule_id
+                    ? ($rules->get((int)$audit->block_rule_id)
+                        ? $this->ruleSummary($rules->get((int)$audit->block_rule_id)) : null)
+                    : null;
+                $data[] = $row;
+            }
+
+            return response(['data' => $data, 'total' => $total, 'available' => true]);
+        } catch (\Throwable $e) {
+            report($e);
+            return $this->runtimeErrorList();
+        }
+    }
+
+    /**
+     * Per-account User-Agent summaries. The latest IP is enriched with the
+     * same public location shape as the IP view for comparable investigations.
+     */
+    public function userAgentRecords(Request $request)
+    {
+        if (!$this->userAgentSummaryAvailable()) {
+            return $this->emptyList();
+        }
+
+        try {
+            [$page, $pageSize] = $this->pagination($request);
+            $query = SubscribeUserAgentSummary::query();
+            if (!$this->applySummaryFilters($query, $request, [
+                'subscription' => 'recent_subscription_id',
+                'ip' => 'recent_request_ip',
+                'user_agent' => 'user_agent',
+                'decision' => 'recent_decision'
+            ])) {
+                return $this->emptyAvailableList();
+            }
+            $this->applyTimeWindow($query, $request, 'last_seen_at');
+
+            $total = (int)(clone $query)->count();
+            $rows = $query->orderByDesc('last_seen_at')->orderByDesc('recent_audit_id')
+                ->forPage($page, $pageSize)->get($this->userAgentSummaryColumns());
+
+            $users = $this->usersById($rows->pluck('user_id')->filter()->all());
+            [$subscriptions, $plans] = $this->subscriptionsAndPlans(
+                $rows->pluck('latest_subscription_id')->filter()->all()
+            );
+            $audits = $this->auditsById($rows->pluck('latest_audit_id')->filter()->all());
+            $rules = $this->rulesById($audits->pluck('block_rule_id')->filter()->all());
+            $locations = (new IpLocationService())->lookupMany(
+                $rows->pluck('latest_request_ip')->filter()->unique()->values()->all()
+            );
+
+            $data = [];
+            foreach ($rows as $summary) {
+                $userId = (int)$summary->user_id;
+                $subscriptionId = (int)$summary->latest_subscription_id;
+                $audit = $audits->get((int)$summary->latest_audit_id);
+                $subscription = $subscriptions->get($subscriptionId);
+                $row = $this->summaryRow($summary->getAttributes(), $this->userAgentSummaryColumns());
+                $row['user_email'] = ($users->get($userId))->email ?? null;
+                $row['subscription_plan_name'] = $subscription
+                    ? (($plans->get((int)$subscription->plan_id))->name ?? null) : null;
+                $row['ip_location'] = $this->publicIpLocation(
+                    $locations[(string)$summary->latest_request_ip] ?? []
+                );
+                $row['block_rule'] = $audit && $audit->block_rule_id
+                    ? ($rules->get((int)$audit->block_rule_id)
+                        ? $this->ruleSummary($rules->get((int)$audit->block_rule_id)) : null)
+                    : null;
+                $data[] = $row;
+            }
+
+            return response(['data' => $data, 'total' => $total, 'available' => true]);
+        } catch (\Throwable $e) {
+            report($e);
+            return $this->runtimeErrorList();
+        }
+    }
+
+    /**
+     * Returns one immutable raw audit row. audit_id, id, and the legacy log_id
+     * name are accepted so both API callers and summary rows can link here
+     * without client-side translation.
+     */
+    public function detail(Request $request)
+    {
+        if (!$this->rawAuditAvailable()) {
+            return $this->emptyList();
+        }
+
+        $auditId = $this->positiveIntegerInput($request, 'audit_id');
+        if ($auditId <= 0) {
+            $auditId = $this->positiveIntegerInput($request, 'log_id');
+        }
+        if ($auditId <= 0) {
+            $auditId = $this->positiveIntegerInput($request, 'id');
+        }
+        if ($auditId <= 0) {
+            abort(404, __('订阅拉取审计记录不存在'));
+        }
+
+        try {
+            $log = SubscribeRequestLog::find($auditId);
+            if (!$log) {
+                abort(404, __('订阅拉取审计记录不存在'));
+            }
+            $subscription = $this->subscriptionsAndPlans([(int)$log->subscription_id]);
+            $subscriptions = $subscription[0];
+            $plans = $subscription[1];
+            $subscriptionModel = $subscriptions->get((int)$log->subscription_id);
+            $rule = $log->block_rule_id ? $this->rulesById([(int)$log->block_rule_id])
+                ->get((int)$log->block_rule_id) : null;
+            $location = (new IpLocationService())->lookup((string)$log->request_ip);
+            $row = $this->auditRow($log);
+            $row['user_email'] = ($this->usersById([(int)$log->user_id])->get((int)$log->user_id))->email ?? null;
+            $row['subscription_plan_name'] = $subscriptionModel
+                ? (($plans->get((int)$subscriptionModel->plan_id))->name ?? null) : null;
+            $row['ip_location'] = $this->publicIpLocation($location);
+            $row['block_rule'] = $rule ? $this->ruleSummary($rule) : null;
+            $rawAudits = $this->relatedRawAudits($log, $request);
+            $row['raw_records'] = $rawAudits['data'];
+            $row['raw_total'] = $rawAudits['total'];
+            $row['raw_current'] = $rawAudits['current'];
+            $row['raw_page_size'] = $rawAudits['page_size'];
+
+            return response(['data' => $row, 'available' => true]);
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            report($e);
+            return response(['data' => null, 'available' => true,
+                'error' => __('订阅风控网关暂时无法读取数据，请查看应用日志后重试')]);
+        }
+    }
+
+    /**
+     * Retains the former paginated raw-audit feed for integrations and for the
+     * detail drawer's request history. It is intentionally no longer the
+     * gateway landing endpoint.
+     */
+    public function auditRecords(Request $request)
     {
         if (!$this->fetchAvailable()) {
             return $this->emptyList();
@@ -296,6 +501,164 @@ class RiskGatewayController extends Controller
         }
     }
 
+    private function ipSummaryAvailable(): bool
+    {
+        return $this->hasTable(self::IP_SUMMARY_TABLE) && $this->hasColumns(self::IP_SUMMARY_TABLE, [
+            'user_id', 'request_ip', 'hit_count', 'first_seen_at', 'last_seen_at', 'recent_audit_id',
+            'recent_subscription_id', 'recent_user_agent', 'recent_decision'
+        ]);
+    }
+
+    private function userAgentSummaryAvailable(): bool
+    {
+        return $this->hasTable(self::USER_AGENT_SUMMARY_TABLE)
+            && $this->hasColumns(self::USER_AGENT_SUMMARY_TABLE, [
+                'user_id', 'ua_hash', 'user_agent', 'hit_count', 'first_seen_at', 'last_seen_at',
+                'recent_audit_id', 'recent_subscription_id', 'recent_request_ip', 'recent_decision'
+            ]);
+    }
+
+    private function rawAuditAvailable(): bool
+    {
+        return $this->hasAuditTable()
+            && $this->hasColumns(self::AUDIT_TABLE, [
+                'user_id', 'subscription_id', 'user_agent', 'ua_hash', 'request_ip', 'requested_at',
+                'decision', 'block_rule_id', 'block_scope', 'block_reason'
+            ]);
+    }
+
+    /**
+     * All user-facing filters use user_filter. The Admin middleware writes the
+     * authenticated account to request.user, so `user` must never be a filter.
+     *
+     * @return bool false when an email filter has no matching account
+     */
+    private function applySummaryFilters($query, Request $request, array $columns): bool
+    {
+        $userFilter = $this->scalarInput($request, 'user_filter');
+        if ($userFilter !== '') {
+            if (ctype_digit($userFilter)) {
+                $query->where('user_id', (int)$userFilter);
+            } else {
+                $userIds = User::where('email', 'like', '%' . $userFilter . '%')
+                    ->limit(201)->pluck('id')->all();
+                if (!$userIds) {
+                    return false;
+                }
+                $query->whereIn('user_id', $userIds);
+            }
+        }
+
+        $subscriptionId = $this->positiveIntegerInput($request, 'subscription_id');
+        if ($this->scalarInput($request, 'subscription_id') !== '') {
+            if ($subscriptionId <= 0) {
+                return false;
+            }
+            $query->where($columns['subscription'], $subscriptionId);
+        }
+
+        $requestIp = $this->scalarInput($request, 'request_ip');
+        if ($requestIp !== '') {
+            $query->where($columns['ip'], $requestIp);
+        }
+
+        $userAgent = $this->scalarInput($request, 'user_agent');
+        if ($userAgent !== '') {
+            $query->where($columns['user_agent'], 'like', '%' . $userAgent . '%');
+        }
+
+        $decision = $this->scalarInput($request, 'decision');
+        if (in_array($decision, ['allowed', 'blocked', 'error'], true)) {
+            $query->where($columns['decision'], $decision);
+        }
+        return true;
+    }
+
+    private function scalarInput(Request $request, string $key): string
+    {
+        $value = $request->input($key);
+        return is_scalar($value) ? trim((string)$value) : '';
+    }
+
+    private function positiveIntegerInput(Request $request, string $key): int
+    {
+        $value = $this->scalarInput($request, $key);
+        return ctype_digit($value) ? (int)$value : 0;
+    }
+
+    private function ipSummaryColumns(): array
+    {
+        return [
+            'user_id', 'request_ip', 'hit_count as request_count',
+            'first_seen_at as first_requested_at', 'last_seen_at as last_requested_at',
+            'recent_audit_id as latest_audit_id', 'recent_subscription_id as latest_subscription_id',
+            'recent_subscription_id as subscription_id',
+            'recent_user_agent as latest_user_agent', 'recent_decision as latest_decision'
+        ];
+    }
+
+    private function userAgentSummaryColumns(): array
+    {
+        return [
+            'user_id', 'ua_hash', 'ua_hash as latest_ua_hash', 'user_agent as latest_user_agent',
+            'hit_count as request_count', 'first_seen_at as first_requested_at',
+            'last_seen_at as last_requested_at', 'recent_audit_id as latest_audit_id',
+            'recent_subscription_id as latest_subscription_id', 'recent_request_ip as latest_request_ip',
+            'recent_subscription_id as subscription_id',
+            'recent_decision as latest_decision'
+        ];
+    }
+
+    private function summaryRow(array $attributes, array $columns): array
+    {
+        // The select lists above already allow-list and normalize physical
+        // summary columns into the public request_count/latest_* names.
+        return $this->withoutTokenFields($attributes);
+    }
+
+    private function auditsById(array $ids)
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if (!$ids || !$this->rawAuditAvailable()) {
+            return collect();
+        }
+        return SubscribeRequestLog::whereIn('id', $ids)->get($this->auditColumns())->keyBy('id');
+    }
+
+    /**
+     * IP database output is intentionally allow-listed. MMDB provenance and
+     * catalog details are operational data and must not become an admin API
+     * contract or leak into the web UI.
+     */
+    private function publicIpLocation(array $location): array
+    {
+        return [
+            'status' => (string)($location['status'] ?? 'unknown'),
+            'country_code' => (string)($location['country_code'] ?? ''),
+            'country_name' => (string)($location['country_name'] ?? ''),
+            'region' => (string)($location['region'] ?? ''),
+            'province' => (string)($location['province'] ?? ''),
+            'city' => (string)($location['city'] ?? ''),
+            'district' => (string)($location['district'] ?? ''),
+            'isp' => (string)($location['isp'] ?? ''),
+            'operator_code' => (string)($location['operator_code'] ?? ''),
+            'asn' => isset($location['asn']) && $location['asn'] !== '' ? (int)$location['asn'] : null,
+            'organization' => (string)($location['organization'] ?? ''),
+            'network_type' => (string)($location['network_type'] ?? 'unknown'),
+            'connection_type' => (string)($location['connection_type'] ?? ''),
+            'idc_vendor' => (string)($location['idc_vendor'] ?? ''),
+            'is_idc' => array_key_exists('is_idc', $location) && $location['is_idc'] !== null
+                ? (bool)$location['is_idc'] : null,
+            'is_residential' => array_key_exists('is_residential', $location) && $location['is_residential'] !== null
+                ? (bool)$location['is_residential'] : null,
+            'geo_confidence' => isset($location['geo_confidence']) && $location['geo_confidence'] !== ''
+                ? (float)$location['geo_confidence'] : null,
+            'accuracy_radius' => isset($location['accuracy_radius']) && $location['accuracy_radius'] !== ''
+                ? (int)$location['accuracy_radius'] : null,
+            'division_code' => (string)($location['division_code'] ?? '')
+        ];
+    }
+
     private function fetchAvailable(): bool
     {
         return $this->hasAuditTable() && $this->hasRuleTable()
@@ -377,6 +740,37 @@ class RiskGatewayController extends Controller
     private function auditRow(SubscribeRequestLog $log): array
     {
         return $this->withoutTokenFields($log->only($this->auditColumns()));
+    }
+
+    /**
+     * Keep raw evidence in the detail drawer instead of the landing table. The
+     * selected aggregate supplies the grouping dimension: account + IP or
+     * account + User-Agent fingerprint. Results are paginated so an active
+     * account cannot produce an unbounded admin response.
+     */
+    private function relatedRawAudits(SubscribeRequestLog $log, Request $request): array
+    {
+        [$page, $pageSize] = $this->pagination($request);
+        $query = SubscribeRequestLog::where('user_id', (int)$log->user_id);
+        if ($this->scalarInput($request, 'summary_type') === 'ua') {
+            $query->where('ua_hash', (string)$log->ua_hash);
+        } else {
+            $query->where('request_ip', (string)$log->request_ip);
+        }
+
+        $total = (int)(clone $query)->count();
+        $records = $query->orderByDesc('requested_at')->orderByDesc('id')
+            ->forPage($page, $pageSize)->get($this->auditColumns())
+            ->map(function (SubscribeRequestLog $audit) {
+                return $this->auditRow($audit);
+            })->values()->all();
+
+        return [
+            'data' => $records,
+            'total' => $total,
+            'current' => $page,
+            'page_size' => $pageSize
+        ];
     }
 
     private function subscriptionsAndPlans(array $ids): array
