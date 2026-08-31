@@ -5,9 +5,11 @@ namespace App\Http\Controllers\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\OrderAssign;
 use App\Http\Requests\Admin\OrderFetch;
+use App\Http\Requests\Admin\OrderReconcile;
 use App\Http\Requests\Admin\OrderUpdate;
 use App\Models\CommissionLog;
 use App\Models\Order;
+use App\Models\PaymentAttempt;
 use App\Models\Plan;
 use App\Models\User;
 use App\Services\OrderService;
@@ -46,6 +48,16 @@ class OrderController extends Controller
         if ($order->surplus_order_ids) {
             $order['surplus_orders'] = Order::whereIn('id', $order->surplus_order_ids)->get();
         }
+        $attempt = PaymentAttempt::where('order_id', $order->id)->first();
+        $order['payment_attempt'] = $attempt ? $attempt->only([
+            'attempt_no',
+            'driver',
+            'status',
+            'gateway_amount_minor',
+            'gateway_currency',
+            'gateway_transaction_id',
+            'failure_reason'
+        ]) : null;
         return response([
             'data' => $order
         ]);
@@ -92,6 +104,30 @@ class OrderController extends Controller
         if (!$orderService->paid('manual_operation')) {
             abort(500, $orderService->lastError ? '开通失败：' . $orderService->lastError : '更新失败');
         }
+        return response([
+            'data' => true
+        ]);
+    }
+
+    public function reconcile(OrderReconcile $request)
+    {
+        $order = Order::where('trade_no', $request->input('trade_no'))->first();
+        if (!$order) {
+            abort(422, __('订单不存在'));
+        }
+
+        try {
+            (new PaymentAttemptService())->reconcileCancelledOrder(
+                $order,
+                (string)$request->input('callback_no'),
+                (int)$request->input('paid_amount_minor'),
+                (string)$request->input('remark'),
+                is_array($request->user ?? null) ? (int)($request->user['id'] ?? 0) : null
+            );
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            abort(422, $e->getMessage());
+        }
+
         return response([
             'data' => true
         ]);

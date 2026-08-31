@@ -122,7 +122,7 @@ class PaymentAttemptService
         $paymentUuid = (string)($verified['payment_uuid'] ?? '');
         $driver = (string)($verified['driver'] ?? '');
 
-        if (!preg_match('/^[A-Za-z0-9]{32}$/', $attemptNo) || $callbackNo === '' || strlen($callbackNo) > 255 || !is_int($amount) || $amount < 1
+        if (!preg_match('/^[A-Za-z0-9]{32}$/', $attemptNo) || !$this->isValidCallbackNo($callbackNo) || !is_int($amount) || $amount < 1
             || !preg_match('/^[A-Z0-9]{3,12}$/', $currency) || $paymentId < 1 || $paymentUuid === '' || $driver === '') {
             $this->securityLog('Payment callback rejected: malformed verification result', [
                 'attempt_ref' => $this->reference($attemptNo),
@@ -178,6 +178,9 @@ class PaymentAttemptService
                     'cancelled' => (int)$order->status === 2,
                     'trade_no' => $order->trade_no,
                     'amount' => (int)$order->total_amount,
+                    'attempt_no' => $attemptNo,
+                    'callback_no' => $callbackNo,
+                    'paid_amount_minor' => $amount,
                 ];
             }
 
@@ -215,7 +218,13 @@ class PaymentAttemptService
         }
         if (!empty($transition['rejected'])) {
             if (!empty($transition['cancelled'])) {
-                $this->alertCancelledCallback((string)$transition['trade_no'], (int)$transition['amount']);
+                $this->alertCancelledCallback(
+                    (string)$transition['trade_no'],
+                    (int)$transition['amount'],
+                    (string)$transition['callback_no'],
+                    (string)$transition['attempt_no'],
+                    (int)$transition['paid_amount_minor']
+                );
             }
             return false;
         }
@@ -230,6 +239,149 @@ class PaymentAttemptService
                 }
             } catch (\Throwable $e) {
                 Log::error('Payment receipt notification failed');
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Reconcile a gateway payment that arrived after the order was cancelled.
+     * The operator must verify the gateway transaction before calling this
+     * method. All local balance and entitlement changes remain one transaction.
+     */
+    public function reconcileCancelledOrder(
+        Order $order,
+        string $callbackNo,
+        int $paidAmountMinor,
+        string $remark,
+        ?int $operatorId = null
+    ): bool {
+        $callbackNo = trim($callbackNo);
+        $remark = trim($remark);
+        if (!$this->isValidCallbackNo($callbackNo)) {
+            throw new \InvalidArgumentException('Gateway transaction ID is invalid');
+        }
+        if ($paidAmountMinor < 1) {
+            throw new \InvalidArgumentException('Paid amount must be greater than zero');
+        }
+        if ($remark === '' || strlen($remark) > 255 || preg_match('/[\x00-\x1F\x7F]/', $remark)) {
+            throw new \InvalidArgumentException('Reconciliation remark is required');
+        }
+        if (!$order->id) {
+            throw new \InvalidArgumentException('Order does not exist');
+        }
+
+        $result = DB::transaction(function () use ($order, $callbackNo, $paidAmountMinor) {
+            // Match callback/cancellation lock order: attempt first, then order.
+            $attempt = PaymentAttempt::where('order_id', $order->id)->lockForUpdate()->first();
+            $lockedOrder = Order::where('id', $order->id)->lockForUpdate()->first();
+            if (!$lockedOrder) {
+                throw new \RuntimeException('Order does not exist');
+            }
+            if (!$attempt) {
+                throw new \RuntimeException('Payment attempt record was not found');
+            }
+            $callbackHash = hash('sha256', $callbackNo);
+            if ((int)$lockedOrder->status === 3) {
+                if ($attempt->status === PaymentAttempt::STATUS_PAID
+                    && (int)$attempt->gateway_amount_minor === $paidAmountMinor
+                    && hash_equals((string)$attempt->gateway_transaction_id, $callbackNo)
+                    && hash_equals((string)$attempt->gateway_transaction_hash, $callbackHash)) {
+                    return ['trade_no' => $lockedOrder->trade_no, 'already_completed' => true];
+                }
+                throw new \RuntimeException('Order has already been completed with a different payment');
+            }
+            if ((int)$lockedOrder->status !== 2) {
+                throw new \RuntimeException('Only cancelled orders can be reconciled');
+            }
+            if ($attempt->status === PaymentAttempt::STATUS_PAID) {
+                throw new \RuntimeException('Payment attempt is already marked paid but the order is cancelled');
+            }
+            if ((int)$attempt->gateway_amount_minor !== $paidAmountMinor) {
+                throw new \RuntimeException('Paid amount does not match the payment attempt');
+            }
+
+            $duplicate = PaymentAttempt::where('payment_id', $attempt->payment_id)
+                ->where('gateway_transaction_hash', $callbackHash)
+                ->where('id', '!=', $attempt->id)
+                ->lockForUpdate()
+                ->exists();
+            if ($duplicate) {
+                throw new \RuntimeException('Gateway transaction has already been reconciled');
+            }
+
+            // Cancellation may already have refunded the wallet portion of the
+            // order. Reverse that refund before restoring the entitlement.
+            if ((int)$lockedOrder->balance_amount > 0) {
+                if (!(new UserService())->addBalance(
+                    (int)$lockedOrder->user_id,
+                    -(int)$lockedOrder->balance_amount,
+                    'order_cancel_refund_reversal',
+                    [
+                        'source_type' => 'order',
+                        'source_id' => $lockedOrder->id,
+                        'unique_key' => 'order_cancel_refund_reversal:' . $lockedOrder->id,
+                        'remark' => $lockedOrder->trade_no
+                    ]
+                )) {
+                    throw new \RuntimeException('Unable to reverse the cancellation refund; check the user balance');
+                }
+            }
+            $user = User::where('id', $lockedOrder->user_id)->lockForUpdate()->first();
+            if (!$user) {
+                throw new \RuntimeException('Order user does not exist');
+            }
+
+            $attempt->gateway_transaction_id = $callbackNo;
+            $attempt->gateway_transaction_hash = $callbackHash;
+            $attempt->status = PaymentAttempt::STATUS_PAID;
+            $attempt->failure_reason = null;
+            if (!$attempt->save()) {
+                throw new \RuntimeException('Unable to save reconciled payment attempt');
+            }
+
+            $lockedOrder->status = 1;
+            $lockedOrder->paid_at = $lockedOrder->paid_at ?: time();
+            $lockedOrder->callback_no = $callbackNo;
+            if (!$lockedOrder->save()) {
+                throw new \RuntimeException('Unable to restore the cancelled order');
+            }
+
+            $orderService = new OrderService($lockedOrder);
+            if (!$orderService->open()) {
+                throw new \RuntimeException('Unable to open the reconciled order');
+            }
+
+            return ['trade_no' => $lockedOrder->trade_no, 'already_completed' => false];
+        });
+
+        Log::notice('Manual cancelled payment reconciliation completed', [
+            'trade_no' => $result['trade_no'],
+            'callback_no' => $callbackNo,
+            'paid_amount_minor' => $paidAmountMinor,
+            'operator_id' => $operatorId,
+            'remark' => $remark,
+            'already_completed' => $result['already_completed'],
+        ]);
+        if (!$result['already_completed']) {
+            try {
+                OrderHandleJob::dispatch($result['trade_no']);
+            } catch (\Throwable $e) {
+                Log::error('Reconciled order follow-up job dispatch failed', [
+                    'trade_no' => $result['trade_no'],
+                    'error' => $e->getMessage()
+                ]);
+            }
+            try {
+                $reconciledOrder = Order::where('trade_no', $result['trade_no'])->first();
+                if ($reconciledOrder) {
+                    $this->sendPaymentReceiptNotification($reconciledOrder);
+                }
+            } catch (\Throwable $e) {
+                Log::error('Manual payment receipt notification failed', [
+                    'trade_no' => $result['trade_no'],
+                    'error' => $e->getMessage()
+                ]);
             }
         }
         return true;
@@ -288,6 +440,13 @@ class PaymentAttemptService
     private function telegramValue($value): string
     {
         return str_replace(['_', '*', '[', ']', '`'], ['\_', '\*', '\[', '\]', '\`'], (string) $value);
+    }
+
+    private function isValidCallbackNo(string $callbackNo): bool
+    {
+        return $callbackNo !== ''
+            && strlen($callbackNo) <= 255
+            && preg_match('/[\x00-\x1F\x7F]/', $callbackNo) !== 1;
     }
 
     public function invalidateForPayment(int $paymentId, string $reason): int
@@ -418,13 +577,22 @@ class PaymentAttemptService
         return substr(hash('sha256', $value), 0, 16);
     }
 
-    private function alertCancelledCallback(string $tradeNo, int $amount): void
+    private function alertCancelledCallback(
+        string $tradeNo,
+        int $amount,
+        string $callbackNo,
+        string $attemptNo,
+        int $paidAmountMinor
+    ): void
     {
         try {
             (new TelegramService())->sendMessageWithAdmin(sprintf(
-                "Payment callback received for a cancelled order. Manual reconciliation required.\nOrder: %s\nAmount: %s",
-                $tradeNo,
-                $amount / 100
+                "Payment callback received for a cancelled order. Manual reconciliation required.\nOrder: %s\nAmount: %s\nGateway transaction: %s\nCheckout reference: %s\nCallback amount: %s",
+                $this->telegramValue($tradeNo),
+                $amount / 100,
+                $this->telegramValue($callbackNo),
+                $this->telegramValue($attemptNo),
+                $paidAmountMinor / 100
             ));
         } catch (\Throwable $e) {
             Log::error('Cancelled payment callback alert failed');

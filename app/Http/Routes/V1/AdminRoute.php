@@ -107,6 +107,7 @@ class AdminRoute
             $router->post('/order/update', 'V1\\Admin\\OrderController@update');
             $router->post('/order/assign', 'V1\\Admin\\OrderController@assign');
             $router->post('/order/paid', 'V1\\Admin\\OrderController@paid');
+            $router->post('/order/reconcile', 'V1\\Admin\\OrderController@reconcile');
             $router->post('/order/cancel', 'V1\\Admin\\OrderController@cancel');
             $router->post('/order/detail', 'V1\\Admin\\OrderController@detail');
             // User
