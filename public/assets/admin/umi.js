@@ -108571,7 +108571,6 @@
                     }))
                 }) : y.a.createElement(x["a"], {
                     onDragEnd: (e,t)=>{
-                        console.log(e, t),
                         F.props.dispatch({
                             type: "serverManage/sort",
                             fromIndex: e,
@@ -108580,7 +108579,7 @@
                     }
                     ,
                     nodeSelector: "tr",
-                    handleSelector: "i"
+                    handleSelector: ".server-sort-handle"
                 }, y.a.createElement(j["a"], {
                     onContextMenu: e=>{
                         this.record = e,
@@ -108599,6 +108598,7 @@
                         render: (e,t,n)=>{
                             return y.a.createElement("div", null, y.a.createElement(m["a"], {
                                 type: "menu",
+                                className: "server-sort-handle",
                                 style: {
                                     cursor: "move"
                                 },
