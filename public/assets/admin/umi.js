@@ -13656,6 +13656,7 @@
             orders: [],
             fetchLoading: !1,
             assignLoading: !1,
+            reconcileLoading: !1,
             pagination: {
                 pageSize: 10,
                 current: 0
@@ -13922,6 +13923,55 @@
                                         type: "fetch"
                                     });
                                 case 7:
+                                case "end":
+                                    return e.stop()
+                                }
+                        }, e)
+                    })()
+                },
+                reconcile(e, t) {
+                    var n = e.params
+                      , r = e.callback
+                      , s = t.put;
+                    return a().mark(function e() {
+                        var t;
+                        return a().wrap(function(e) {
+                            while (1)
+                                switch (e.prev = e.next) {
+                                case 0:
+                                    return e.next = 2,
+                                    s({
+                                        type: "setState",
+                                        payload: {
+                                            reconcileLoading: !0
+                                        }
+                                    });
+                                case 2:
+                                    return e.next = 4,
+                                    Object(o["b"])("/" + window.settings.secure_path + "/order/reconcile", n);
+                                case 4:
+                                    return t = e.sent,
+                                    e.next = 7,
+                                    s({
+                                        type: "setState",
+                                        payload: {
+                                            reconcileLoading: !1
+                                        }
+                                    });
+                                case 7:
+                                    if (200 === t.code) {
+                                        e.next = 9;
+                                        break
+                                    }
+                                    return e.abrupt("return");
+                                case 9:
+                                    return e.next = 11,
+                                    s({
+                                        type: "fetch"
+                                    });
+                                case 11:
+                                    "function" === typeof r && r();
+                                case 12:
                                 case "end":
                                     return e.stop()
                                 }
@@ -96886,7 +96936,49 @@
                     span: 6
                 }, "\u56de\u8c03\u5355\u53f7"), g.a.createElement(S["a"], {
                     span: 18
-                }, this.state.order.callback_no ? this.state.order.callback_no : "-")), g.a.createElement(_["a"], null), g.a.createElement(E["a"], {
+                }, this.state.order.callback_no ? this.state.order.callback_no : "-")), this.state.order.payment_attempt ? g.a.createElement("div", null, g.a.createElement(E["a"], {
+                    gutter: [16, 16],
+                    style: n
+                }, g.a.createElement(S["a"], {
+                    span: 6
+                }, "\u652f\u4ed8\u5c1d\u8bd5\u53f7"), g.a.createElement(S["a"], {
+                    span: 18
+                }, this.state.order.payment_attempt.attempt_no || "-")), g.a.createElement(E["a"], {
+                    gutter: [16, 16],
+                    style: n
+                }, g.a.createElement(S["a"], {
+                    span: 6
+                }, "\u652f\u4ed8\u9a71\u52a8"), g.a.createElement(S["a"], {
+                    span: 18
+                }, this.state.order.payment_attempt.driver || "-")), g.a.createElement(E["a"], {
+                    gutter: [16, 16],
+                    style: n
+                }, g.a.createElement(S["a"], {
+                    span: 6
+                }, "\u5c1d\u8bd5\u72b6\u6001"), g.a.createElement(S["a"], {
+                    span: 18
+                }, this.state.order.payment_attempt.status || "-")), g.a.createElement(E["a"], {
+                    gutter: [16, 16],
+                    style: n
+                }, g.a.createElement(S["a"], {
+                    span: 6
+                }, "\u7f51\u5173\u91d1\u989d\uff08\u5206\uff09"), g.a.createElement(S["a"], {
+                    span: 18
+                }, this.state.order.payment_attempt.gateway_amount_minor || "-")), g.a.createElement(E["a"], {
+                    gutter: [16, 16],
+                    style: n
+                }, g.a.createElement(S["a"], {
+                    span: 6
+                }, "\u7f51\u5173\u5e01\u79cd"), g.a.createElement(S["a"], {
+                    span: 18
+                }, this.state.order.payment_attempt.gateway_currency || "-")), g.a.createElement(E["a"], {
+                    gutter: [16, 16],
+                    style: n
+                }, g.a.createElement(S["a"], {
+                    span: 6
+                }, "\u7f51\u5173\u4ea4\u6613\u53f7"), g.a.createElement(S["a"], {
+                    span: 18
+                }, this.state.order.payment_attempt.gateway_transaction_id || "-"))) : "", g.a.createElement(_["a"], null), g.a.createElement(E["a"], {
                     gutter: [16, 16],
                     style: n
                 }, g.a.createElement(S["a"], {
@@ -96991,7 +97083,15 @@
         class $ extends g.a.Component {
             constructor(e) {
                 super(e),
-                this.state = {}
+                this.state = {
+                    reconcileVisible: !1,
+                    reconcileOrder: null,
+                    reconcileForm: {
+                        callback_no: "",
+                        paid_amount_minor: "",
+                        remark: ""
+                    }
+                }
             }
             componentWillUnmount() {
                 this.props.dispatch({
@@ -97026,12 +97126,63 @@
                     pagination: e
                 })
             }
+            openReconcile(e) {
+                this.setState({
+                    reconcileVisible: !0,
+                    reconcileOrder: e,
+                    reconcileForm: {
+                        callback_no: "",
+                        paid_amount_minor: "",
+                        remark: ""
+                    }
+                })
+            }
+            closeReconcile() {
+                this.setState({
+                    reconcileVisible: !1,
+                    reconcileOrder: null
+                })
+            }
+            reconcileFormChange(e, t) {
+                this.setState({
+                    reconcileForm: i()({}, this.state.reconcileForm, {
+                        [e]: t
+                    })
+                })
+            }
+            submitReconcile() {
+                var e = this.state
+                  , t = e.reconcileOrder
+                  , n = e.reconcileForm;
+                if (!t || !n.callback_no || !n.paid_amount_minor || !n.remark)
+                    return x["a"].error({
+                        title: "\u8865\u5355\u5931\u8d25",
+                        content: "\u8bf7\u5b8c\u6574\u586b\u5199\u7f51\u5173\u4ea4\u6613\u53f7\u3001\u5b9e\u4ed8\u91d1\u989d\u548c\u8865\u5355\u5907\u6ce8"
+                    });
+                var r = Number(n.paid_amount_minor);
+                if (!Number.isInteger(r) || r < 1)
+                    return x["a"].error({
+                        title: "\u8865\u5355\u5931\u8d25",
+                        content: "\u5b9e\u4ed8\u91d1\u989d\u5fc5\u987b\u662f\u5927\u4e8e 0 \u7684\u5206\u503c\u6574\u6570"
+                    });
+                this.props.dispatch({
+                    type: "order/reconcile",
+                    params: {
+                        trade_no: t.trade_no,
+                        callback_no: n.callback_no,
+                        paid_amount_minor: r,
+                        remark: n.remark
+                    },
+                    callback: ()=>this.closeReconcile()
+                })
+            }
             render() {
                 var e = this.props.order
                   , t = e.orders
                   , n = e.fetchLoading
                   , r = e.pagination
                   , a = e.filter
+                  , o = e.reconcileLoading
                   , m = [{
                     title: "# \u8ba2\u5355\u53f7",
                     dataIndex: "trade_no",
@@ -97089,9 +97240,9 @@
                     render: (e,t)=>{
                         var n = ["error", "processing", "default", "success", "default"];
                         return g.a.createElement("div", null, g.a.createElement(c["a"], {
-                            disabled: 0 !== e,
+                            disabled: 0 !== e && 2 !== e,
                             trigger: ["click"],
-                            overlay: g.a.createElement(h["a"], null, g.a.createElement(h["a"].Item, {
+                            overlay: g.a.createElement(h["a"], null, 0 === e && g.a.createElement(h["a"].Item, {
                                 key: "1",
                                 onClick: e=>{
                                     this.props.dispatch({
@@ -97099,7 +97250,7 @@
                                         tradeNo: t.trade_no
                                     })
                                 }
-                            }, "\u5df2\u652f\u4ed8"), g.a.createElement(h["a"].Item, {
+                            }, "\u5df2\u652f\u4ed8"), 0 === e && g.a.createElement(h["a"].Item, {
                                 key: "2",
                                 onClick: e=>{
                                     this.props.dispatch({
@@ -97107,12 +97258,15 @@
                                         tradeNo: t.trade_no
                                     })
                                 }
-                            }, "\u53d6\u6d88"))
+                            }, "\u53d6\u6d88"), 2 === e && g.a.createElement(h["a"].Item, {
+                                key: "3",
+                                onClick: e=>this.openReconcile(t)
+                            }, "\u8865\u5355"))
                         }, g.a.createElement("div", null, g.a.createElement(u["a"], {
                             status: n[e]
-                        }), g.a.createElement("span", null, y["a"].orderStatusText[e], " "), 0 === e && g.a.createElement("a", {
+                        }), g.a.createElement("span", null, y["a"].orderStatusText[e], " "), (0 === e || 2 === e) && g.a.createElement("a", {
                             href: "javascript:void(0);"
-                        }, "\u6807\u8bb0\u4e3a ", g.a.createElement(d["a"], {
+                        }, 2 === e ? "\u8865\u5355 " : "\u6807\u8bb0\u4e3a ", g.a.createElement(d["a"], {
                             type: "caret-down"
                         })))))
                     }
@@ -97183,7 +97337,62 @@
                     title: "\u8ba2\u5355\u7ba1\u7406"
                 }), g.a.createElement("div", {
                     className: "d-flex justify-content-between align-items-center"
-                }), g.a.createElement(I["a"], {
+                }), g.a.createElement(x["a"], {
+                    title: "\u53d6\u6d88\u8ba2\u5355\u8865\u5355",
+                    visible: this.state.reconcileVisible,
+                    onCancel: ()=>this.closeReconcile(),
+                    onOk: ()=>this.submitReconcile(),
+                    okText: "\u786e\u5b9a\u8865\u5355",
+                    cancelText: "\u53d6\u6d88",
+                    okButtonProps: {
+                        loading: o
+                    }
+                }, this.state.reconcileOrder && g.a.createElement("div", null, g.a.createElement("div", {
+                    className: "alert alert-warning"
+                }, "\u4ec5\u7528\u4e8e\u786e\u8ba4\u7528\u6237\u5df2\u652f\u4ed8\u4f46\u8ba2\u5355\u5df2\u53d6\u6d88\u7684\u60c5\u51b5\uff0c\u64cd\u4f5c\u524d\u8bf7\u6838\u5bf9\u7f51\u5173\u4ea4\u6613\u53f7\u548c\u5b9e\u4ed8\u91d1\u989d\u3002"), g.a.createElement("div", {
+                    className: "form-group"
+                }, g.a.createElement("label", {
+                    htmlFor: "order-reconcile-trade-no"
+                }, "\u8ba2\u5355\u53f7"), g.a.createElement("input", {
+                    id: "order-reconcile-trade-no",
+                    className: "form-control",
+                    readOnly: !0,
+                    value: this.state.reconcileOrder.trade_no
+                })), g.a.createElement("div", {
+                    className: "form-group"
+                }, g.a.createElement("label", {
+                    htmlFor: "order-reconcile-callback-no"
+                }, "\u7f51\u5173\u4ea4\u6613\u53f7"), g.a.createElement("input", {
+                    id: "order-reconcile-callback-no",
+                    className: "form-control",
+                    value: this.state.reconcileForm.callback_no,
+                    placeholder: "\u8bf7\u586b\u5199\u652f\u4ed8\u5e73\u53f0\u4e2d\u7684\u4ea4\u6613\u53f7",
+                    onChange: e=>this.reconcileFormChange("callback_no", e.target.value)
+                })), g.a.createElement("div", {
+                    className: "form-group"
+                }, g.a.createElement("label", {
+                    htmlFor: "order-reconcile-paid-amount"
+                }, "\u5b9e\u4ed8\u91d1\u989d\uff08\u5206\uff09"), g.a.createElement("input", {
+                    id: "order-reconcile-paid-amount",
+                    className: "form-control",
+                    type: "number",
+                    min: "1",
+                    step: "1",
+                    value: this.state.reconcileForm.paid_amount_minor,
+                    placeholder: "\u5f53\u524d\u8ba2\u5355\u91d1\u989d " + this.state.reconcileOrder.total_amount + " \u5206",
+                    onChange: e=>this.reconcileFormChange("paid_amount_minor", e.target.value)
+                })), g.a.createElement("div", {
+                    className: "form-group"
+                }, g.a.createElement("label", {
+                    htmlFor: "order-reconcile-remark"
+                }, "\u8865\u5355\u5907\u6ce8"), g.a.createElement("textarea", {
+                    id: "order-reconcile-remark",
+                    className: "form-control",
+                    rows: 3,
+                    value: this.state.reconcileForm.remark,
+                    placeholder: "\u8bf7\u8bf4\u660e\u4eba\u5de5\u6838\u5bf9\u4f9d\u636e",
+                    onChange: e=>this.reconcileFormChange("remark", e.target.value)
+                }))), g.a.createElement(I["a"], {
                     loading: n
                 }, g.a.createElement("div", {
                     className: "block block-rounded"
@@ -97280,7 +97489,7 @@
                         x: 1050
                     },
                     onChange: e=>this.tableOnChange(e)
-                })))))
+                }))))))
             }
         }
         t["default"] = Object(A["c"])(e=>{
