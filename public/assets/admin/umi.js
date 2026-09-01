@@ -97366,7 +97366,7 @@
                     title: "\u8ba2\u5355\u7ba1\u7406"
                 }), g.a.createElement("div", {
                     className: "d-flex justify-content-between align-items-center"
-                }), this.state.reconcileVisible && g.a.createElement(x["a"], {
+                }, this.state.reconcileVisible && g.a.createElement(x["a"], {
                     title: "\u53d6\u6d88\u8ba2\u5355\u8865\u5355",
                     visible: this.state.reconcileVisible,
                     onCancel: ()=>this.closeReconcile(),
@@ -97421,16 +97421,16 @@
                     value: this.state.reconcileForm.remark,
                     placeholder: "\u8bf7\u8bf4\u660e\u4eba\u5de5\u6838\u5bf9\u4f9d\u636e",
                     onChange: e=>this.reconcileFormChange("remark", e.target.value)
-                }))), e.fetchError && g.a.createElement("div", {
-                    className: "alert alert-danger mb-0",
-                    role: "alert"
-                }, e.fetchError), g.a.createElement(I["a"], {
+                })))), g.a.createElement(I["a"], {
                     loading: n
                 }, g.a.createElement("div", {
                     className: "block block-rounded"
                 }, g.a.createElement("div", {
                     className: "bg-white"
-                }, g.a.createElement("div", {
+                }, e.fetchError && g.a.createElement("div", {
+                    className: "alert alert-danger mb-0",
+                    role: "alert"
+                }, e.fetchError), g.a.createElement("div", {
                     style: {
                         padding: 15
                     }
