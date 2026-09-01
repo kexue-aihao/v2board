@@ -30,6 +30,9 @@ class StatController extends Controller
             ->where('record_at', '>=', strtotime(date('Y-m-1')))
             ->orderBy('record_at', 'DESC');
         $traffic = $builder->get()->map(function ($row) {
+            $row->u = (int)$row->u;
+            $row->d = (int)$row->d;
+            $row->server_rate = (float)$row->server_rate;
             $row->record_type = 'traffic';
             $row->reward_label = null;
             $row->increase_bytes = 0;
@@ -45,12 +48,10 @@ class StatController extends Controller
                 $label = $this->rewardLabel((string)$row->source, $metadata);
                 $change = TrafficRewardService::splitTrafficChange((int)$row->reward_bytes);
                 return [
-                    // Signature's restored stock traffic table only renders
-                    // u/d. Mirror the signed ledger change here so check-in
-                    // and game records remain visible without altering theme
-                    // assets or injecting a reward-specific view.
-                    'u' => $change['increase_bytes'],
-                    'd' => $change['deducted_bytes'],
+                    // Reward changes are separate from node upload/download
+                    // usage so the client cannot charge a reward as traffic.
+                    'u' => 0,
+                    'd' => 0,
                     'record_at' => (int)$row->getRawOriginal('created_at'),
                     'user_id' => (int)$row->user_id,
                     'server_rate' => 1,

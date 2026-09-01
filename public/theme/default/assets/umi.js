@@ -30701,8 +30701,9 @@
                     }),
                     dataIndex: "record_at",
                     key: "record_at",
-                    render: e=>{
-                        return e ? h()(1e3 * e).format("YYYY/MM/DD") : "-"
+                    render: (e,t)=>{
+                        var n = e ? h()(1e3 * e).format("YYYY/MM/DD") : "-";
+                        return "reward" === t.record_type && t.reward_label ? t.reward_label + " / " + n : n
                     }
                 }, {
                     title: Object(v["formatMessage"])({
@@ -30711,7 +30712,7 @@
                     dataIndex: "u",
                     key: "u",
                     align: "right",
-                    render: (e,t)=>t.server_rate ? Object(p["b"])(parseInt(e)) : 0
+                    render: (e,t)=>"reward" === t.record_type ? Object(p["b"])(0) : t.server_rate ? Object(p["b"])(parseInt(e)) : 0
                 }, {
                     title: Object(v["formatMessage"])({
                         id: "\u5b9e\u9645\u4e0b\u884c"
@@ -30719,7 +30720,7 @@
                     dataIndex: "d",
                     key: "d",
                     align: "right",
-                    render: (e,t)=>t.server_rate ? Object(p["b"])(parseInt(e)) : 0
+                    render: (e,t)=>"reward" === t.record_type ? Object(p["b"])(0) : t.server_rate ? Object(p["b"])(parseInt(e)) : 0
                 }, {
                     title: Object(v["formatMessage"])({
                         id: "\u6263\u8d39\u500d\u7387"
@@ -30727,12 +30728,12 @@
                     dataIndex: "server_rate",
                     key: "server_rate",
                     align: "center",
-                    render: e=>{
+                    render: (e,t)=>{
                         return l.a.createElement(c["a"], {
                             style: {
                                 minWidth: 60
                             }
-                        }, parseFloat(e) ? parseFloat(e).toFixed(2) + " x" : "-")
+                        }, "reward" === t.record_type ? "-" : parseFloat(e) ? parseFloat(e).toFixed(2) + " x" : "-")
                     }
                 }, {
                     title: l.a.createElement(a["a"], {
@@ -30748,10 +30749,18 @@
                     dataIndex: "total",
                     key: "total",
                     align: "right",
-                    fixed: "right",
                     render: (e,t)=>{
-                        return Object(p["b"])((parseInt(t.u) + parseInt(t.d)) * t.server_rate)
+                        var n = t.deducted_bytes;
+                        if (null === n || void 0 === n) n = (parseInt(t.u) + parseInt(t.d)) * parseFloat(t.server_rate || 0);
+                        return Object(p["b"])(parseInt(n || 0))
                     }
+                }, {
+                    title: "\u589e\u52a0\u6d41\u91cf",
+                    dataIndex: "increase_bytes",
+                    key: "increase_bytes",
+                    align: "right",
+                    fixed: "right",
+                    render: e=>Object(p["b"])(parseInt(e || 0))
                 }];
                 return l.a.createElement(f["a"], o()({}, this.props, {
                     title: Object(v["formatMessage"])({
