@@ -13655,6 +13655,7 @@
         var s = {
             orders: [],
             fetchLoading: !1,
+            fetchError: "",
             assignLoading: !1,
             reconcileLoading: !1,
             pagination: {
@@ -13693,7 +13694,8 @@
                                     n({
                                         type: "setState",
                                         payload: {
-                                            fetchLoading: !0
+                                            fetchLoading: !0,
+                                            fetchError: ""
                                         }
                                     });
                                 case 5:
@@ -13702,7 +13704,7 @@
                                         filter: t.filter
                                     }, t.pagination));
                                 case 7:
-                                    return s = e.sent,
+                                    return s = e.sent || {},
                                     e.next = 10,
                                     n({
                                         type: "setState",
@@ -13712,29 +13714,38 @@
                                     });
                                 case 10:
                                     if (200 === s.code) {
-                                        e.next = 12;
+                                        e.next = 14;
                                         break
                                     }
-                                    return e.abrupt("return");
-                                case 12:
-                                    return e.next = 14,
+                                    return e.next = 12,
                                     n({
                                         type: "setState",
                                         payload: {
-                                            orders: s.data
+                                            fetchError: "订单列表加载失败，请稍后重试"
                                         }
                                     });
+                                case 12:
+                                    return e.abrupt("return");
                                 case 14:
                                     return e.next = 16,
                                     n({
                                         type: "setState",
                                         payload: {
-                                            pagination: i()({}, t.pagination, {
-                                                total: s.total
-                                            })
+                                            orders: Array.isArray(s.data) ? s.data : [],
+                                            fetchError: Array.isArray(s.data) ? "" : "订单数据格式异常，请稍后重试"
                                         }
                                     });
                                 case 16:
+                                    return e.next = 18,
+                                    n({
+                                        type: "setState",
+                                        payload: {
+                                            pagination: i()({}, t.pagination, {
+                                                total: Number(s.total) || 0
+                                            })
+                                        }
+                                    });
+                                case 18:
                                 case "end":
                                     return e.stop()
                                 }
@@ -97084,6 +97095,7 @@
             constructor(e) {
                 super(e),
                 this.state = {
+                    renderError: "",
                     reconcileVisible: !1,
                     reconcileOrder: null,
                     reconcileForm: {
@@ -97092,6 +97104,11 @@
                         remark: ""
                     }
                 }
+            }
+            componentDidCatch() {
+                this.setState({
+                    renderError: "订单列表渲染失败，请刷新页面后重试"
+                })
             }
             componentWillUnmount() {
                 this.props.dispatch({
@@ -97177,22 +97194,34 @@
                 })
             }
             render() {
-                var e = this.props.order
-                  , t = e.orders
-                  , n = e.fetchLoading
-                  , r = e.pagination
-                  , a = e.filter
-                  , q = e.reconcileLoading
+                if (this.state.renderError)
+                    return g.a.createElement(v["a"], i()({}, this.props, {
+                        title: "订单管理"
+                    }), g.a.createElement("div", {
+                        className: "alert alert-danger",
+                        role: "alert"
+                    }, this.state.renderError));
+                var e = this.props.order || {}
+                  , t = Array.isArray(e.orders) ? e.orders : []
+                  , n = !!e.fetchLoading
+                  , r = i()({
+                    pageSize: 10,
+                    current: 1,
+                    total: 0
+                }, e.pagination && "object" === typeof e.pagination ? e.pagination : {})
+                  , a = Array.isArray(e.filter) ? e.filter : []
+                  , q = !!e.reconcileLoading
                   , m = [{
                     title: "# \u8ba2\u5355\u53f7",
                     dataIndex: "trade_no",
                     key: "trade_no",
                     render: (e,t)=>{
+                        var n = String(e || "");
                         return g.a.createElement(M, {
                             orderId: t.id
                         }, g.a.createElement("a", {
                             href: "javascript:void(0);"
-                        }, e.substr(0, 3), "...", e.substr(-3)))
+                        }, n.substr(0, 3), "...", n.substr(-3)))
                     }
                 }, {
                     title: "\u7c7b\u578b",
@@ -97392,7 +97421,10 @@
                     value: this.state.reconcileForm.remark,
                     placeholder: "\u8bf7\u8bf4\u660e\u4eba\u5de5\u6838\u5bf9\u4f9d\u636e",
                     onChange: e=>this.reconcileFormChange("remark", e.target.value)
-                }))), g.a.createElement(I["a"], {
+                }))), e.fetchError && g.a.createElement("div", {
+                    className: "alert alert-danger mb-0",
+                    role: "alert"
+                }, e.fetchError), g.a.createElement(I["a"], {
                     loading: n
                 }, g.a.createElement("div", {
                     className: "block block-rounded"

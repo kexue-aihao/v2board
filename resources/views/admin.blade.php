@@ -3,19 +3,22 @@
 
 <head>
     @php
-        // app.version 是固定值，管理端编译产物是就地打补丁的，版本号不会跟着变，
-        // 浏览器和 CDN 会一直复用旧的 umi.js。改用实际文件时间戳，与 modern 主题一致。
+        // app.version 是固定值，管理端编译产物是就地打补丁的，版本号不会跟着变。
+        // 不能只依赖修改时间：Git 检出和就地补丁可能复用相同秒级时间戳，
+        // 浏览器或 CDN 就会继续使用旧的 umi.js。使用资源内容指纹确保 URL 随内容变化。
         // i18n.*.js 是各语种字典文件（引擎按 localStorage 语言就地加载），用 glob
         // 一并纳入版本计算：任一字典更新都要让全套 ?v= 换新。
         $adminAssetFiles = array_merge(
             ['umi.js', 'umi.css', 'custom.css', 'vendors.async.js', 'components.async.js', 'i18n.js'],
             array_map('basename', glob(public_path('assets/admin/i18n.*.js')) ?: [])
         );
-        $adminAssetVersions = array_filter(array_map(function ($file) {
+        $adminAssetFingerprints = array_filter(array_map(function ($file) {
             $path = public_path("assets/admin/{$file}");
-            return is_file($path) ? filemtime($path) : null;
+            return is_file($path) ? $file . ':' . hash_file('sha256', $path) : null;
         }, $adminAssetFiles));
-        $adminAssetVersion = $adminAssetVersions ? max($adminAssetVersions) : $version;
+        $adminAssetVersion = $adminAssetFingerprints
+            ? substr(hash('sha256', implode('|', $adminAssetFingerprints)), 0, 16)
+            : $version;
     @endphp
     <link rel="stylesheet" href="/assets/admin/components.chunk.css?v={{$adminAssetVersion}}">
     <link rel="stylesheet" href="/assets/admin/umi.css?v={{$adminAssetVersion}}">
