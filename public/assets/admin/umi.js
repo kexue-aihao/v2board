@@ -6912,7 +6912,7 @@
                     placeholder: "0000000000:xxxxxxxxx_xxxxxxxxxxxxxxx",
                     defaultValue: y.telegram_bot_token,
                     onChange: e=>this.set("telegram", "telegram_bot_token", e.target.value)
-                })), y.telegram_bot_token && f.a.createElement(m, {
+                })), (y.telegram_bot_token_configured || y.telegram_bot_token) && f.a.createElement(m, {
                     title: "\u8bbe\u7f6eWebhook",
                     description: "\u5bf9\u673a\u5668\u4eba\u8fdb\u884cWebhook\u8bbe\u7f6e\uff0c\u4e0d\u8bbe\u7f6e\u5c06\u65e0\u6cd5\u6536\u5230Telegram\u901a\u77e5\u3002"
                 }, f.a.createElement(o["a"], {
