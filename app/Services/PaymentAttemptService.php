@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log;
 
 class PaymentAttemptService
 {
-    private const HIGH_RISK_DRIVERS = ['BTCPay', 'Coinbase', 'MGate'];
+    private const HIGH_RISK_DRIVERS = ['BTCPay', 'Coinbase', 'MGate', 'PaytaroQR'];
 
     /**
      * An external checkout is immutable. A second payment link for the same
@@ -105,6 +105,28 @@ class PaymentAttemptService
             $locked->status = PaymentAttempt::STATUS_FAILED;
             $locked->failure_reason = $this->safeReason($reason);
             $locked->save();
+        });
+    }
+
+    public function bindProviderReference(PaymentAttempt $attempt, string $reference): PaymentAttempt
+    {
+        if ($reference === '' || strlen($reference) > 128 || preg_match('/[\x00-\x1F\x7F]/', $reference) === 1) {
+            throw new \RuntimeException('Payment provider reference is invalid');
+        }
+
+        return DB::transaction(function () use ($attempt, $reference) {
+            $locked = PaymentAttempt::where('id', $attempt->id)->lockForUpdate()->first();
+            if (!$locked || $locked->status !== PaymentAttempt::STATUS_PENDING) {
+                throw new \RuntimeException('Payment attempt is no longer available');
+            }
+            if ($locked->provider_reference !== null && !hash_equals((string)$locked->provider_reference, $reference)) {
+                throw new \RuntimeException('Payment provider reference cannot be changed');
+            }
+            $locked->provider_reference = $reference;
+            if (!$locked->save()) {
+                throw new \RuntimeException('Unable to bind payment provider reference');
+            }
+            return $locked;
         });
     }
 

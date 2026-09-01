@@ -42,6 +42,7 @@ class SiteStatus
         // Payment providers and Telegram need to finish already-created callbacks.
         if ($path === 'api/v1/guest/telegram/webhook'
             || preg_match('#^api/v1/guest/payment/notify/[^/]+/[^/]+$#', $path)
+            || preg_match('#^api/v1/guest/payment/paytaro-qr/[A-Za-z0-9]{32}/[0-9a-f-]{36}(?:/status)?$#i', $path)
             || preg_match('#^api/v1/store/[^/]+/payment/notify/[^/]+$#', $path)) {
             return true;
         }

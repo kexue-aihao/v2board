@@ -1440,6 +1440,7 @@ class SchemaUpgradeService
             `order_amount_cents` int(11) NOT NULL,
             `gateway_amount_minor` bigint(20) DEFAULT NULL,
             `gateway_currency` varchar(12) DEFAULT NULL,
+            `provider_reference` varchar(128) DEFAULT NULL,
             `gateway_transaction_id` varchar(255) DEFAULT NULL,
             `gateway_transaction_hash` char(64) DEFAULT NULL,
             `status` enum('initializing','pending','paid','failed','invalidated') NOT NULL,
@@ -1458,6 +1459,7 @@ class SchemaUpgradeService
             'order_amount_cents' => 'int(11) NOT NULL',
             'gateway_amount_minor' => 'bigint(20) DEFAULT NULL',
             'gateway_currency' => 'varchar(12) DEFAULT NULL',
+            'provider_reference' => 'varchar(128) DEFAULT NULL',
             'gateway_transaction_id' => 'varchar(255) DEFAULT NULL',
             'gateway_transaction_hash' => 'char(64) DEFAULT NULL',
             'status' => "enum('initializing','pending','paid','failed','invalidated') NOT NULL",
@@ -1470,6 +1472,7 @@ class SchemaUpgradeService
 
         $this->ensureIndex('v2_payment_attempt', 'uniq_order', ['order_id'], true);
         $this->ensureIndex('v2_payment_attempt', 'uniq_attempt_no', ['attempt_no'], true);
+        $this->ensureIndex('v2_payment_attempt', 'uniq_provider_reference', ['provider_reference'], true);
         $this->ensureIndex('v2_payment_attempt', 'uniq_gateway_transaction', ['payment_id', 'gateway_transaction_hash'], true);
         $this->ensureIndex('v2_payment_attempt', 'payment_status', ['payment_id', 'status']);
 
@@ -1477,7 +1480,7 @@ class SchemaUpgradeService
         // immutable attempt. Quarantine the known unsafe drivers on first upgrade.
         if ($freshTable) {
             DB::table('v2_payment')
-                ->whereIn('payment', ['BTCPay', 'Coinbase', 'MGate'])
+                ->whereIn('payment', ['BTCPay', 'Coinbase', 'MGate', 'PaytaroQR'])
                 ->update(['enable' => 0, 'updated_at' => time()]);
         }
     }

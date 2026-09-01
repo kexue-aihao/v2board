@@ -272,6 +272,9 @@ class OrderController extends Controller
             $checkout['gateway_amount_minor'] = (int)$attempt->gateway_amount_minor;
             $checkout['gateway_currency'] = (string)$attempt->gateway_currency;
             $result = $paymentService->pay($checkout);
+            if (!empty($result['provider_reference'])) {
+                $attempt = $attemptService->bindProviderReference($attempt, (string)$result['provider_reference']);
+            }
         } catch (\Throwable $e) {
             $attemptService->markFailed($attempt, 'payment gateway initialization failed');
             abort(500, __('Payment gateway request failed'));

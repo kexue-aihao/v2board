@@ -6165,6 +6165,32 @@
                     checked: parseInt(_.safe_mode_enable),
                     onChange: e=>this.set("safe", "safe_mode_enable", e ? 1 : 0)
                 })), f.a.createElement(m, {
+                    title: "\u9ad8\u98ce\u9669\u652f\u4ed8\u9a71\u52a8\u767d\u540d\u5355",
+                    description: "\u53ea\u5728\u5b8c\u6210\u6c99\u7bb1\u9a8c\u8bc1\u540e\u542f\u7528\u3002PaytaroQR \u9700\u989d\u5916\u9a8c\u8bc1\u56de\u8c03\u3001\u91d1\u989d\u548c\u5e01\u79cd\u3002"
+                }, f.a.createElement("div", null, ["BTCPay", "Coinbase", "PaytaroQR"].map(e=>f.a.createElement("label", {
+                    key: e,
+                    style: {
+                        display: "block",
+                        marginBottom: "6px"
+                    }
+                }, f.a.createElement("input", {
+                    type: "checkbox",
+                    checked: (Array.isArray(_.payment_secure_driver_allowlist) ? _.payment_secure_driver_allowlist : []).indexOf(e) > -1,
+                    onChange: t=> {
+                        var n = Array.isArray(_.payment_secure_driver_allowlist) ? _.payment_secure_driver_allowlist : [];
+                        this.set("safe", "payment_secure_driver_allowlist", t.target.checked ? n.indexOf(e) > -1 ? n : n.concat([e]) : n.filter(t=>t !== e))
+                    }
+                }), " ", e)))), f.a.createElement(m, {
+                    isChildren: !0,
+                    title: "\u652f\u4ed8\u56de\u8df3\u524d\u7aef\u57df\u540d",
+                    description: "\u6bcf\u884c\u4e00\u4e2a\u5141\u8bb8\u7684 Origin\uff08\u4f8b\u5982 https://app.example.com\uff09\u3002\u53ea\u6709\u8bf7\u6c42 Origin \u7cbe\u786e\u5339\u914d\u65f6\u624d\u4f1a\u7528\u5b83\u751f\u6210\u652f\u4ed8\u56de\u8df3\u5730\u5740\u3002"
+                }, f.a.createElement("textarea", {
+                    rows: "3",
+                    className: "form-control",
+                    placeholder: "https://app.example.com",
+                    defaultValue: Array.isArray(_.payment_return_url_allowlist) ? _.payment_return_url_allowlist.join("\n") : "",
+                    onChange: e=>this.set("safe", "payment_return_url_allowlist", e.target.value.split(/\r?\n/))
+                })), f.a.createElement(m, {
                     title: "\u7ba1\u7406\u5458\u4e8c\u6b65\u9a8c\u8bc1",
                     description: "\u517c\u5bb9 Google Authenticator \u548c Microsoft Authenticator\uff0c\u7ed1\u5b9a\u540e\u767b\u5f55\u9700\u8981\u52a8\u6001\u9a8c\u8bc1\u7801\u3002"
                 }, f.a.createElement(A, null)), f.a.createElement(m, {
@@ -75064,9 +75090,9 @@
                         this.setState({
                             visible: !0,
                             paymentMethods: e,
-                            selectPaymentMethod: this.state.submit.payment || e[0]
+                            selectPaymentMethod: this.state.selectPaymentMethod || e[0]
                         }, ()=>{
-                            this.onSelectPaymentMethod(this.state.submit.payment || e[0])
+                            this.onSelectPaymentMethod(this.state.selectPaymentMethod || e[0])
                         }
                         )
                     }
@@ -107956,9 +107982,9 @@
                     value: "httpupgrade"
                 }, "HTTPUpgrade"), e.protocol != "trojan" && y.a.createElement(N["a"].Option, {
                     value: "xhttp"
-                }, "XHTTP")))), y.a.createElement("div", {
+                }, "XHTTP")))), e.network != null && (e.network == "xhttp" || e.network == "ws" || e.network == "grpc") && y.a.createElement("div", {
                     className: "form-group"
-                }, e.network != null && (e.network == "xhttp" || e.network == "ws" || e.network == "grpc") && y.a.createElement("label", null, "\u4fe1\u4efb\u7684XFF\u5934\u90e8(\u83b7\u53d6\u771f\u5b9eIP)"), y.a.createElement(N["a"], {
+                }, y.a.createElement("label", null, "\u4fe1\u4efb\u7684XFF\u5934\u90e8(\u83b7\u53d6\u771f\u5b9eIP)"), y.a.createElement(N["a"], {
                     mode: "tags",
                     value: e.trusted_x_forwarded_for || [],
                     style: {

@@ -14,6 +14,8 @@ class GuestRoute
             $router->post('/telegram/webhook', 'V1\\Guest\\TelegramController@webhook');
             // Payment
             $router->match(['get', 'post'], '/payment/notify/{method}/{uuid}', 'V1\\Guest\\PaymentController@notify');
+            $router->get('/payment/paytaro-qr/{attemptNo}/{invoiceUuid}', 'V1\\Guest\\PaytaroQRController@page');
+            $router->get('/payment/paytaro-qr/{attemptNo}/{invoiceUuid}/status', 'V1\\Guest\\PaytaroQRController@status');
             // Comm
             $router->get ('/comm/config', 'V1\\Guest\\CommController@config');
             $router->get ('/comm/arithmetic', 'V1\\Guest\\CommController@arithmetic');

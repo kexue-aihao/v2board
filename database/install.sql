@@ -187,6 +187,7 @@ CREATE TABLE `v2_payment_attempt` (
     `order_amount_cents` int(11) NOT NULL,
     `gateway_amount_minor` bigint(20) DEFAULT NULL,
     `gateway_currency` varchar(12) DEFAULT NULL,
+    `provider_reference` varchar(128) DEFAULT NULL,
     `gateway_transaction_id` varchar(255) DEFAULT NULL,
     `gateway_transaction_hash` char(64) DEFAULT NULL,
     `status` enum('initializing','pending','paid','failed','invalidated') NOT NULL,
@@ -196,6 +197,7 @@ CREATE TABLE `v2_payment_attempt` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uniq_order` (`order_id`),
     UNIQUE KEY `uniq_attempt_no` (`attempt_no`),
+    UNIQUE KEY `uniq_provider_reference` (`provider_reference`),
     UNIQUE KEY `uniq_gateway_transaction` (`payment_id`, `gateway_transaction_hash`),
     KEY `payment_status` (`payment_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

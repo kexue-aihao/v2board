@@ -10,6 +10,7 @@ use App\Models\UserTwoFactor;
 use App\Services\SubscribeAuditRetentionService;
 use App\Services\TelegramBindingService;
 use App\Services\TelegramService;
+use App\Services\PaymentReturnUrlService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
@@ -209,6 +210,7 @@ class ConfigController extends Controller
                 'reseller_enable' => (int)config('v2board.reseller_enable', 0),
                 'reseller_allowed_payment_drivers' => array_values((array)config('v2board.reseller_allowed_payment_drivers', [])),
                 'payment_secure_driver_allowlist' => array_values((array)config('v2board.payment_secure_driver_allowlist', [])),
+                'payment_return_url_allowlist' => array_values((array)config('v2board.payment_return_url_allowlist', [])),
                 'oauth_google_enable' => (int)config('v2board.oauth_google_enable', 0),
                 'oauth_google_client_id' => config('v2board.oauth_google_client_id'),
                 'oauth_google_client_secret_configured' => (bool)config('v2board.oauth_google_client_secret'),
@@ -259,11 +261,36 @@ class ConfigController extends Controller
                 unset($data[$secret]);
             }
         }
+        if (array_key_exists('reseller_allowed_payment_drivers', $data)) {
+            $data['reseller_allowed_payment_drivers'] = array_values(array_filter(
+                (array)$data['reseller_allowed_payment_drivers'],
+                function ($driver) {
+                    return $driver !== 'PaytaroQR';
+                }
+            ));
+        }
         if (array_key_exists('payment_secure_driver_allowlist', $data)) {
             $data['payment_secure_driver_allowlist'] = array_values(array_intersect(
-                ['BTCPay', 'Coinbase'],
+                ['BTCPay', 'Coinbase', 'PaytaroQR'],
                 (array)$data['payment_secure_driver_allowlist']
             ));
+        }
+        if (array_key_exists('payment_return_url_allowlist', $data)) {
+            $configuredOrigins = (array)$data['payment_return_url_allowlist'];
+            $returnUrlService = new PaymentReturnUrlService();
+            $normalizedOrigins = [];
+            foreach ($configuredOrigins as $origin) {
+                $origin = trim((string)$origin);
+                if ($origin === '') {
+                    continue;
+                }
+                $normalized = $returnUrlService->normalizeOrigin($origin);
+                if ($normalized === null) {
+                    abort(422, 'Payment return URL allowlist contains an invalid origin');
+                }
+                $normalizedOrigins[] = $normalized;
+            }
+            $data['payment_return_url_allowlist'] = $returnUrlService->normalizeAllowlist($normalizedOrigins);
         }
         if ((int)($data['admin_2fa_force_enable'] ?? config('v2board.admin_2fa_force_enable', 0)) === 1) {
             $hasUnprotectedStaff = User::where(function ($query) {

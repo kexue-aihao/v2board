@@ -16,6 +16,9 @@ class ResellerPaymentService
     public function __construct(ResellerPayment $payment, bool $allowInactive = false)
     {
         $this->driver = $payment->driver;
+        if ($this->driver === 'PaytaroQR') {
+            abort(422, 'Paytaro QR is only supported by payment attempts');
+        }
         $allowed = (array)config('v2board.reseller_allowed_payment_drivers', []);
         if (!PaymentAttemptService::isDriverAvailable($payment->driver)) {
             abort(422, 'Payment driver is not allowlisted');
@@ -47,7 +50,7 @@ class ResellerPaymentService
         $drivers = [];
         foreach (glob(base_path('app/Payments') . '/*.php') as $file) {
             $driver = pathinfo($file, PATHINFO_FILENAME);
-            if (PaymentAttemptService::isDriverAvailable($driver)) {
+            if ($driver !== 'PaytaroQR' && PaymentAttemptService::isDriverAvailable($driver)) {
                 $drivers[] = $driver;
             }
         }
@@ -117,7 +120,7 @@ class ResellerPaymentService
         if ($this->driver === 'AlipayF2F' && isset($params['total_amount'])) {
             return (int)round((float)$params['total_amount'] * 100);
         }
-        if ($this->driver === 'EPay' && isset($params['money'])) {
+        if (in_array($this->driver, ['EPay', 'EPayQrcode'], true) && isset($params['money'])) {
             return (int)round((float)$params['money'] * 100);
         }
         if (in_array($this->driver, ['Bepusdt', 'Epusdt'], true) && isset($params['amount'])) {

@@ -99,12 +99,13 @@ class PaymentService
 
         return $this->payment->pay([
             'notify_url' => $notifyUrl,
-            'return_url' => url('/#/order/' . ($order['display_trade_no'] ?? $order['trade_no'])),
+            'return_url' => (new PaymentReturnUrlService())->forOrder((string)($order['display_trade_no'] ?? $order['trade_no'])),
             'trade_no' => $order['trade_no'],
             'display_trade_no' => $order['display_trade_no'] ?? $order['trade_no'],
             'total_amount' => $order['total_amount'],
             'gateway_amount_minor' => $order['gateway_amount_minor'],
             'gateway_currency' => $order['gateway_currency'],
+            'paytaro_qr_page_base' => $this->publicBaseUrl($notifyUrl),
             'user_id' => $order['user_id'],
             'stripe_token' => $order['stripe_token']
         ]);
@@ -118,5 +119,14 @@ class PaymentService
             if (isset($this->config[$key])) $form[$key]['value'] = $this->config[$key];
         }
         return $form;
+    }
+
+    private function publicBaseUrl(string $url): string
+    {
+        $parts = parse_url($url);
+        if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
+            throw new \RuntimeException('Payment public URL cannot be determined');
+        }
+        return $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
     }
 }
