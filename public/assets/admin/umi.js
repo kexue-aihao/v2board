@@ -97366,7 +97366,7 @@
                     title: "\u8ba2\u5355\u7ba1\u7406"
                 }), g.a.createElement("div", {
                     className: "d-flex justify-content-between align-items-center"
-                }), g.a.createElement(x["a"], {
+                }), this.state.reconcileVisible && g.a.createElement(x["a"], {
                     title: "\u53d6\u6d88\u8ba2\u5355\u8865\u5355",
                     visible: this.state.reconcileVisible,
                     onCancel: ()=>this.closeReconcile(),
