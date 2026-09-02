@@ -213,27 +213,46 @@ class TelegramController extends Controller
     private function formatMessage(array $data)
     {
         if (!isset($data['message'])) return;
-        if (!isset($data['message']['text'])) return;
-        $chatType = (string)($data['message']['chat']['type'] ?? '');
+        $message = $data['message'];
+        $text = isset($message['text']) ? (string)$message['text'] : '';
+        $nativeDice = isset($message['dice']) && is_array($message['dice'])
+            ? $message['dice']
+            : null;
+        $nativeEmoji = is_array($nativeDice) ? (string)($nativeDice['emoji'] ?? '') : '';
+        $emoji = trim($text);
+        if ($emoji !== '🎲' && $emoji !== '🎰'
+            && $nativeEmoji !== '🎲' && $nativeEmoji !== '🎰'
+            && $text === '') {
+            return;
+        }
+        $chatType = (string)($message['chat']['type'] ?? '');
         if (in_array($chatType, ['group', 'supergroup'], true)
-            && (isset($data['message']['sender_chat']) || empty($data['message']['from']['id']))) {
+            && (isset($message['sender_chat']) || empty($message['from']['id']))) {
             return;
         }
         $obj = new \StdClass();
-        $text = explode(' ', $data['message']['text']);
-        $obj->command = $text[0];
-        $obj->args = array_slice($text, 1);
-        $obj->chat_id = $data['message']['chat']['id'];
-        $obj->telegram_user_id = $data['message']['from']['id'] ?? $obj->chat_id;
-        $obj->message_id = $data['message']['message_id'];
+        if ($emoji === '🎲' || $nativeEmoji === '🎲') {
+            $obj->command = '/dice';
+            $obj->args = [];
+        } elseif ($emoji === '🎰' || $nativeEmoji === '🎰') {
+            $obj->command = '/slots';
+            $obj->args = [];
+        } else {
+            $parts = explode(' ', $text);
+            $obj->command = $parts[0];
+            $obj->args = array_slice($parts, 1);
+        }
+        $obj->chat_id = $message['chat']['id'];
+        $obj->telegram_user_id = $message['from']['id'] ?? $obj->chat_id;
+        $obj->message_id = $message['message_id'];
         $obj->update_id = $data['update_id'] ?? null;
         $obj->message_type = 'message';
-        $obj->text = $data['message']['text'];
+        $obj->text = $text;
         $obj->chat_type = $chatType;
         $obj->is_private = $obj->chat_type === 'private';
-        if (isset($data['message']['reply_to_message']['text'])) {
+        if (isset($message['reply_to_message']['text'])) {
             $obj->message_type = 'reply_message';
-            $obj->reply_text = $data['message']['reply_to_message']['text'];
+            $obj->reply_text = $message['reply_to_message']['text'];
         }
         $this->msg = $obj;
     }
