@@ -49,6 +49,9 @@ class TelegramController extends Controller
             (new TelegramRewardService($this->telegramService))->handleCallback((array)$data['callback_query']);
             return response(['data' => true]);
         }
+        if ($this->handleNativeDice($data)) {
+            return response(['data' => true]);
+        }
         $this->formatMessage($data);
         $this->handle();
         return response(['data' => true]);
@@ -210,18 +213,50 @@ class TelegramController extends Controller
         return $response->result->username;
     }
 
+    private function handleNativeDice(array $data): bool
+    {
+        $message = (array)($data['message'] ?? []);
+        $dice = $message['dice'] ?? null;
+        if (!is_array($dice)) return false;
+
+        $emoji = (string)($dice['emoji'] ?? '');
+        if ($emoji !== '🎲' && $emoji !== '🎰') return false;
+        $chat = (array)($message['chat'] ?? []);
+        $chatId = (int)($chat['id'] ?? 0);
+        $chatType = (string)($chat['type'] ?? '');
+        if (in_array($chatType, ['group', 'supergroup'], true)
+            && (isset($message['sender_chat']) || empty($message['from']['id']))) {
+            return true;
+        }
+
+        try {
+            (new TelegramRewardService($this->telegramService))->settleNativeEmoji(
+                $chatId,
+                $message['from']['id'] ?? '',
+                $emoji,
+                $dice['value'] ?? null,
+                $message['message_id'] ?? null,
+                $data['update_id'] ?? null
+            );
+        } catch (\Throwable $e) {
+            report($e);
+            if ($chatId !== 0) {
+                $message = $e instanceof \RuntimeException ? $e->getMessage() : '服务暂时不可用，请稍后重试';
+                try {
+                    $this->telegramService->sendMessage($chatId, '操作失败：' . $message);
+                } catch (\Throwable $ignored) {}
+            }
+        }
+        return true;
+    }
+
     private function formatMessage(array $data)
     {
         if (!isset($data['message'])) return;
         $message = $data['message'];
         $text = isset($message['text']) ? (string)$message['text'] : '';
-        $nativeDice = isset($message['dice']) && is_array($message['dice'])
-            ? $message['dice']
-            : null;
-        $nativeEmoji = is_array($nativeDice) ? (string)($nativeDice['emoji'] ?? '') : '';
         $emoji = trim($text);
         if ($emoji !== '🎲' && $emoji !== '🎰'
-            && $nativeEmoji !== '🎲' && $nativeEmoji !== '🎰'
             && $text === '') {
             return;
         }
@@ -231,10 +266,10 @@ class TelegramController extends Controller
             return;
         }
         $obj = new \StdClass();
-        if ($emoji === '🎲' || $nativeEmoji === '🎲') {
+        if ($emoji === '🎲') {
             $obj->command = '/dice';
             $obj->args = [];
-        } elseif ($emoji === '🎰' || $nativeEmoji === '🎰') {
+        } elseif ($emoji === '🎰') {
             $obj->command = '/slots';
             $obj->args = [];
         } else {

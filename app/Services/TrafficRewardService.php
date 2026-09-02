@@ -330,6 +330,35 @@ class TrafficRewardService
         }, $requestId, $subscriptionId);
     }
 
+    /**
+     * Settle a game using a result supplied by a trusted external provider.
+     * Telegram native dice messages are the current caller. The provider's
+     * result is deliberately retained verbatim in the reward log instead of
+     * being re-rolled locally.
+     */
+    public function settleExternalGameResult(User $user, string $game, int $result, string $source, ?string $requestId = null, ?int $subscriptionId = null, array $metadata = []): array
+    {
+        if ($game === 'dice') {
+            if ($result < 1 || $result > 6) throw new RuntimeException('骰子结果必须为 1-6');
+        } elseif ($game === 'slots') {
+            if ($result < 1 || $result > 64) throw new RuntimeException('老虎机结果必须为 1-64');
+        } else {
+            throw new RuntimeException('不支持的游戏项目');
+        }
+
+        return $this->playSingle(
+            $user,
+            $game,
+            $source,
+            static function () use ($result) {
+                return $result;
+            },
+            $requestId,
+            $subscriptionId,
+            $metadata
+        );
+    }
+
     private function playSingle(User $user, string $game, string $source, callable $resultFactory, ?string $requestId = null, ?int $subscriptionId = null, array $settlementMetadata = []): array
     {
         return DB::transaction(function () use ($user, $game, $source, $resultFactory, $requestId, $subscriptionId, $settlementMetadata) {
@@ -422,7 +451,11 @@ class TrafficRewardService
             ? (int)$result === ($diceGuess === null
                 ? min(6, max(1, (int)config('v2board.reward_dice_win_face', 6)))
                 : $diceGuess)
-            : is_array($result) && count(array_unique($result)) === 1;
+            : (is_array($result)
+                ? count(array_unique($result)) === 1
+                // Telegram's native slot animation returns a stable value in
+                // the 1-64 range. Value 64 is its jackpot combination.
+                : (int)$result === 64);
         $won = $matched && $this->chanceHit($rule['win_probability_basis_points']);
         $payoutGb = $won ? $bet * (float)$rule['payout_multiplier'] : 0;
         $probabilityScope = $probabilityScope ?? 'after_trigger';

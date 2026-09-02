@@ -37,7 +37,7 @@ class TelegramEmojiInputTest extends TestCase
         $this->assertSame([], $message->args);
     }
 
-    public function testNativeTelegramDiceEmojiIsAcceptedWithoutText(): void
+    public function testNativeTelegramDiceIsNotConvertedIntoAGameCommand(): void
     {
         $message = $this->formatMessage([
             'message' => [
@@ -48,8 +48,7 @@ class TelegramEmojiInputTest extends TestCase
             ],
         ]);
 
-        $this->assertSame('/slots', $message->command);
-        $this->assertSame([], $message->args);
+        $this->assertNull($message);
     }
 
     private function formatMessage(array $update)

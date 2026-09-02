@@ -138,6 +138,64 @@ class TelegramRewardService
         $this->play($chatId, $telegramUserId, 'dice', $requestId, $guess);
     }
 
+    public function settleNativeEmoji(int $chatId, $telegramUserId, string $emoji, $value, $messageId, $updateId = null): array
+    {
+        $this->assertGroupAvailable($chatId);
+        $telegramUserId = trim((string)$telegramUserId);
+        if ($telegramUserId === '' || !ctype_digit($telegramUserId)) {
+            throw new RuntimeException('无法识别 Telegram 用户');
+        }
+        $messageId = filter_var($messageId, FILTER_VALIDATE_INT);
+        if ($messageId === false || $messageId <= 0) {
+            throw new RuntimeException('无法识别 Telegram 消息');
+        }
+        $value = filter_var($value, FILTER_VALIDATE_INT);
+        if ($value === false) throw new RuntimeException('Telegram 原生结果无效');
+
+        $games = ['🎲' => 'dice', '🎰' => 'slots'];
+        if (!isset($games[$emoji])) throw new RuntimeException('不支持的 Telegram 原生表情');
+        $game = $games[$emoji];
+        // Telegram subscription bindings are scoped to their group. Private
+        // conversations still resolve the user's active binding globally.
+        $context = $this->boundContext($telegramUserId, $chatId < 0 ? $chatId : null);
+        $entrypoint = 'telegram-native:' . $chatId . ':' . $messageId;
+        $metadata = [
+            'result_source' => 'telegram_native',
+            'telegram_native_emoji' => $emoji,
+            'telegram_dice_value' => (int)$value,
+            'telegram_chat_id' => $chatId,
+            'telegram_message_id' => (int)$messageId,
+        ];
+        if ($updateId !== null && $updateId !== '') {
+            $metadata['telegram_update_id'] = (string)$updateId;
+        }
+        $result = $this->rewards->settleExternalGameResult(
+            $context['user'],
+            $game,
+            (int)$value,
+            $entrypoint,
+            $entrypoint,
+            $context['subscription_id'],
+            $metadata
+        );
+        if (!empty($result['replayed'])) return $result;
+
+        $nativeResult = $game === 'dice'
+            ? '骰子点数：' . (int)$result['result']
+            : '老虎机结果：' . (int)$result['result'] . ((int)$result['result'] === 64 ? '（Jackpot）' : '');
+        $net = array_key_exists('net_bytes', $result) ? (int)$result['net_bytes'] : (int)($result['reward_bytes'] ?? 0);
+        $this->send($chatId, sprintf(
+            "Telegram 原生结果\n%s\n%s\n赌注：%s GB\n赔付：%s GB\n流量变化：%s%s GB",
+            $nativeResult,
+            !empty($result['won']) ? '本局中奖' : '本局未中奖',
+            $this->number($result['bet_gb'] ?? 0),
+            $this->number($result['payout_gb'] ?? $result['reward_gb'] ?? 0),
+            $net >= 0 ? '+' : '-',
+            $this->number(abs($net) / TrafficRewardService::GB)
+        ));
+        return $result;
+    }
+
     public function setBet(int $chatId, $telegramUserId, string $game, int $bet): void
     {
         if (!in_array($bet, self::BET_OPTIONS, true)) throw new RuntimeException('赌注选项无效');
@@ -344,10 +402,10 @@ class TelegramRewardService
         ]);
     }
 
-    private function boundContext($telegramUserId): array
+    private function boundContext($telegramUserId, $chatId = null): array
     {
         $context = Schema::hasTable('v2_telegram_subscription_binding')
-            ? $this->rewards->telegramBindingContext($telegramUserId)
+            ? $this->rewards->telegramBindingContext($telegramUserId, $chatId)
             : null;
         if ($context && empty($context['user']->banned)) return $context;
 

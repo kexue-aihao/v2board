@@ -32,6 +32,7 @@ class SchemaUpgradeService
         'order_client_ip_schema' => 'order_client_ip_schema_v1',
         'traffic_reward_schema' => 'traffic_reward_schema_v1',
         'traffic_reward_signed_bytes_schema' => 'traffic_reward_signed_bytes_schema_v1',
+        'traffic_reward_native_entrypoint_schema' => 'traffic_reward_native_entrypoint_schema_v1',
         'telegram_login_link_schema' => 'telegram_login_link_schema_v1'
     ];
 
@@ -140,6 +141,9 @@ class SchemaUpgradeService
                 return;
             case 'traffic_reward_signed_bytes_schema':
                 $this->applyTrafficRewardSignedBytesSchema();
+                return;
+            case 'traffic_reward_native_entrypoint_schema':
+                $this->applyTrafficRewardNativeEntrypointSchema();
                 return;
             case 'telegram_login_link_schema':
                 $this->applyTelegramLoginLinkSchema();
@@ -1595,7 +1599,7 @@ class SchemaUpgradeService
             `user_id` int(11) NOT NULL,
             `subscription_id` bigint(20) NOT NULL,
             `source` varchar(32) NOT NULL COMMENT 'checkin|game',
-            `entrypoint` varchar(32) NOT NULL COMMENT 'web|telegram|telegram_group',
+            `entrypoint` varchar(128) NOT NULL COMMENT 'web|telegram|telegram_group|telegram-native',
             `reward_bytes` bigint(20) NOT NULL DEFAULT '0',
             `unique_key` varchar(128) NOT NULL,
             `metadata` json DEFAULT NULL,
@@ -1651,6 +1655,21 @@ class SchemaUpgradeService
         $column = DB::selectOne("SHOW COLUMNS FROM `v2_traffic_reward_log` LIKE 'reward_bytes'");
         if (!$column || stripos((string)$column->Type, 'unsigned') !== false) {
             throw new RuntimeException('v2_traffic_reward_log.reward_bytes must be a signed BIGINT.');
+        }
+    }
+
+    private function applyTrafficRewardNativeEntrypointSchema(): void
+    {
+        $this->requireTable('v2_traffic_reward_log');
+        $column = DB::selectOne("SHOW COLUMNS FROM `v2_traffic_reward_log` LIKE 'entrypoint'");
+        if (!$column) {
+            throw new RuntimeException('Required column v2_traffic_reward_log.entrypoint is missing.');
+        }
+        if (preg_match('/^varchar\\((\\d+)\\)$/', strtolower((string)$column->Type), $match) !== 1) {
+            throw new RuntimeException('v2_traffic_reward_log.entrypoint must be a VARCHAR column.');
+        }
+        if ((int)$match[1] < 128) {
+            DB::statement("ALTER TABLE `v2_traffic_reward_log` MODIFY `entrypoint` varchar(128) NOT NULL COMMENT 'web|telegram|telegram_group|telegram-native'");
         }
     }
 }
