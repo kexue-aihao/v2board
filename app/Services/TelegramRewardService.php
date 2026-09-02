@@ -124,6 +124,7 @@ class TelegramRewardService
             $result = $this->rewards->playPokerSolo($context['user'], $entrypoint, $requestId, $context['subscription_id']);
             $headline = '炸金花结果：' . implode(' | ', (array)$result['result']);
         }
+        if (!empty($result['replayed'])) return;
         $net = array_key_exists('net_bytes', $result) ? (int)$result['net_bytes'] : (int)($result['reward_bytes'] ?? 0);
         $this->send($chatId, sprintf(
             "%s\n%s\n赌注：%s GB\n赔付：%s GB\n净变化：%s%s GB",

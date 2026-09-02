@@ -160,6 +160,25 @@ class TelegramRewardServiceTest extends TestCase
         $this->assertStringContainsString('骰子点数：6', $telegram->messages[0]['text']);
     }
 
+    public function testRepeatedDiceCallbackDoesNotSendTheSettledResultAgain(): void
+    {
+        DB::table('v2_user')->insert(['id' => 11, 'telegram_id' => null, 'banned' => 0, 'is_admin' => 0]);
+        $telegram = new FailingCallbackTelegramService();
+        $rewards = new CallbackRewardService(User::findOrFail(11));
+        $rewards->replayed = true;
+        $service = new TelegramRewardService($telegram, $rewards);
+
+        $service->handleCallback([
+            'id' => 'repeated-dice-callback',
+            'from' => ['id' => 10011],
+            'message' => ['message_id' => 99, 'chat' => ['id' => 10011, 'type' => 'private']],
+            'data' => 'rw:dg:2',
+        ]);
+
+        $this->assertSame(1, $rewards->dicePlays);
+        $this->assertCount(0, $telegram->messages);
+    }
+
     public function testGroupPokerUsesTheBoundSubscriptionAndPublishesJoinState(): void
     {
         config(['v2board.reward_group_enable' => 1]);
@@ -312,6 +331,7 @@ class FailingCallbackTelegramService extends TelegramService
 class CallbackRewardService extends TrafficRewardService
 {
     public $dicePlays = 0;
+    public $replayed = false;
     public $diceSource;
     public $diceSubscriptionId;
     public $diceRequestId;
@@ -356,6 +376,7 @@ class CallbackRewardService extends TrafficRewardService
             'bet_gb' => 1,
             'payout_gb' => 2,
             'net_bytes' => 2 * TrafficRewardService::GB,
+            'replayed' => $this->replayed,
         ];
     }
 }

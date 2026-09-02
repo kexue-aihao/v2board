@@ -357,6 +357,7 @@ class TrafficRewardService
                 $metadata = (array)$existing->metadata;
                 return [
                     'game' => $game,
+                    'replayed' => true,
                     'result' => $metadata['result'] ?? [],
                     'won' => (bool)($metadata['won'] ?? false),
                     'reward_gb' => (int)($metadata['payout_gb'] ?? $metadata['gb'] ?? 0),
@@ -377,7 +378,7 @@ class TrafficRewardService
             $settlement = $this->gameSettlement($game, $result, $user, null, $diceGuess);
             $metadata = array_merge(['game' => $game, 'result' => $result, 'won' => $settlement['won'], 'trigger_matched' => $settlement['trigger_matched'], 'probability_scope' => $settlement['probability_scope'], 'win_probability' => $settlement['win_probability'], 'payout_multiplier' => $settlement['payout_multiplier']], $settlementMetadata);
             $netBytes = $this->settleWager($user, $subscription, $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, $metadata);
-            return ['game' => $game, 'result' => $result, 'won' => $settlement['won'], 'payout_gb' => $settlement['payout_gb'], 'net_bytes' => $netBytes, 'reward_gb' => $settlement['payout_gb'], 'reward_bytes' => $netBytes, 'bet_gb' => $settlement['bet_gb'], 'win_probability' => $settlement['win_probability'], 'payout_multiplier' => $settlement['payout_multiplier'], 'guess' => $diceGuess, 'expires_at' => $this->expiresAt($subscription)];
+            return ['game' => $game, 'replayed' => false, 'result' => $result, 'won' => $settlement['won'], 'payout_gb' => $settlement['payout_gb'], 'net_bytes' => $netBytes, 'reward_gb' => $settlement['payout_gb'], 'reward_bytes' => $netBytes, 'bet_gb' => $settlement['bet_gb'], 'win_probability' => $settlement['win_probability'], 'payout_multiplier' => $settlement['payout_multiplier'], 'guess' => $diceGuess, 'expires_at' => $this->expiresAt($subscription)];
         });
     }
 
