@@ -41,10 +41,7 @@ class TelegramRewardService
                 $this->button('每日签到', 'rw:c'),
                 $this->button('骰子', 'rw:g:d'),
             ],
-            [
-                $this->button('老虎机', 'rw:g:s'),
-                $this->button($chatId < 0 ? '群组炸金花' : '炸金花', 'rw:g:p'),
-            ],
+            [$this->button('老虎机', 'rw:g:s')],
         ];
         if ($context['is_admin']) {
             $buttons[] = [$this->button('管理员游戏规则', 'rw:a')];
@@ -117,12 +114,9 @@ class TelegramRewardService
             if ($diceGuess === null) throw new RuntimeException('请选择猜测点数');
             $result = $this->rewards->playDice($context['user'], $entrypoint, $requestId, $context['subscription_id'], $diceGuess);
             $headline = '猜测点数：' . (int)($result['guess'] ?? $diceGuess) . "\n骰子点数：" . (int)$result['result'];
-        } elseif ($game === 'slots') {
+        } else {
             $result = $this->rewards->playSlots($context['user'], $entrypoint, $requestId, $context['subscription_id']);
             $headline = '老虎机结果：' . implode(' | ', (array)$result['result']);
-        } else {
-            $result = $this->rewards->playPokerSolo($context['user'], $entrypoint, $requestId, $context['subscription_id']);
-            $headline = '炸金花结果：' . implode(' | ', (array)$result['result']);
         }
         if (!empty($result['replayed'])) return;
         $net = array_key_exists('net_bytes', $result) ? (int)$result['net_bytes'] : (int)($result['reward_bytes'] ?? 0);
@@ -144,41 +138,6 @@ class TelegramRewardService
         $this->play($chatId, $telegramUserId, 'dice', $requestId, $guess);
     }
 
-    public function playGroupPoker(int $chatId, $telegramUserId, bool $start = false): void
-    {
-        if ($chatId === 0) throw new RuntimeException('群组标识无效');
-        $this->assertGroupAvailable($chatId);
-
-        $context = $this->boundContext($telegramUserId);
-        $result = $this->rewards->playPoker(
-            $context['user'],
-            (string)$chatId,
-            $start ? 'start' : 'join',
-            'telegram_group',
-            $context['subscription_id']
-        );
-
-        if (($result['status'] ?? '') === 'open') {
-            $this->send($chatId, sprintf(
-                "炸金花牌局已加入\n当前玩家：%d 人\n%s\n其他玩家发送 /poker 加入，任意已加入玩家发送 /poker start 开始。",
-                (int)($result['players'] ?? 0),
-                $this->gameRulesText('poker', null, true)
-            ));
-            return;
-        }
-
-        $net = (int)($result['net_bytes'] ?? 0);
-        $this->send($chatId, sprintf(
-            "炸金花牌局已结算\n%s\n获胜用户：%d\n%s\n获胜方赔付：%s GB\n获胜方净变化：%s%s GB",
-            $this->gameRulesText('poker', null, true),
-            (int)($result['winner_user_id'] ?? 0),
-            !empty($result['won']) ? '获胜方中奖' : '获胜方未中奖',
-            $this->number($result['payout_gb'] ?? 0),
-            $net >= 0 ? '+' : '-',
-            $this->number(abs($net) / TrafficRewardService::GB)
-        ));
-    }
-
     public function setBet(int $chatId, $telegramUserId, string $game, int $bet): void
     {
         if (!in_array($bet, self::BET_OPTIONS, true)) throw new RuntimeException('赌注选项无效');
@@ -195,7 +154,7 @@ class TelegramRewardService
     {
         $this->administrator($telegramUserId);
         $this->send($chatId, "管理员游戏规则\n请选择需要调整的项目。", [
-            [$this->button('骰子', 'rw:e:d'), $this->button('老虎机', 'rw:e:s'), $this->button('炸金花', 'rw:e:p')],
+            [$this->button('骰子', 'rw:e:d'), $this->button('老虎机', 'rw:e:s')],
             [$this->button('返回娱乐中心', 'rw:m')],
         ]);
     }
@@ -307,11 +266,7 @@ class TelegramRewardService
         if ($data === 'rw:m') { $this->showMenu($chatId, $telegramUserId); return; }
         if ($data === 'rw:c') { $this->checkin($chatId, $telegramUserId); return; }
         if ($data === 'rw:a') { $this->showAdminMenu($chatId, $telegramUserId); return; }
-        if (preg_match('/^rw:g:([dsp])$/', $data, $match)) {
-            if ($chatId < 0 && $match[1] === 'p') {
-                $this->playGroupPoker($chatId, $telegramUserId);
-                return;
-            }
+        if (preg_match('/^rw:g:([ds])$/', $data, $match)) {
             $this->showGame($chatId, $telegramUserId, $match[1]);
             return;
         }
@@ -320,7 +275,7 @@ class TelegramRewardService
             $this->showBets($chatId, $telegramUserId, $match[1]);
             return;
         }
-        if (preg_match('/^rw:e:([dsp])$/', $data, $match)) {
+        if (preg_match('/^rw:e:([ds])$/', $data, $match)) {
             $this->beginRuleEdit($chatId, $telegramUserId, $match[1]);
             return;
         }
@@ -347,7 +302,7 @@ class TelegramRewardService
             $this->saveRule($chatId, $telegramUserId, $match[1]);
             return;
         }
-        if (preg_match('/^rw:go:([dsp])(?::([A-Za-z0-9_-]{8,16}))?$/', $data, $match)) {
+        if (preg_match('/^rw:go:([ds])(?::([A-Za-z0-9_-]{8,16}))?$/', $data, $match)) {
             $this->assertGameActionOwner($chatId, $telegramUserId, $match[1], $match[2] ?? '');
             if ($match[1] === 'd') {
                 $this->showGame($chatId, $telegramUserId, 'dice');
@@ -375,7 +330,7 @@ class TelegramRewardService
             $limitButtons[] = $this->button($option === 0 ? '不限' : $option . '次', 'rw:l:' . $token . ':' . $option);
         }
         $this->send($chatId, sprintf(
-            "%s规则\n状态：%s\n每日次数：%s\n条件后中奖概率：%s%%\n赔付倍率：%sx\n骰子和老虎机需先满足触发条件；单人炸金花直接判定，群组炸金花需先胜出。",
+            "%s规则\n状态：%s\n每日次数：%s\n条件后中奖概率：%s%%\n赔付倍率：%sx\n骰子和老虎机需先满足触发条件。",
             $this->label($state['game']), $state['enabled'] ? '已启用' : '已停用', $this->dailyLimit($state['daily_limit'] ?? 0), $state['probability'], $state['multiplier']
         ), [
             [$this->button($state['enabled'] ? '停用项目' : '启用项目', 'rw:n:' . $token . ':' . ($state['enabled'] ? '0' : '1'))],
@@ -492,7 +447,7 @@ class TelegramRewardService
         return '签到规则：每日一次，随机增加 1-10 GB；流量发放至当前绑定的有效订阅。';
     }
 
-    private function gameRulesText(string $game, ?int $betGb, bool $groupPoker = false): string
+    private function gameRulesText(string $game, ?int $betGb): string
     {
         $rules = $this->rewards->gameRules();
         $rule = (array)($rules[$game] ?? []);
@@ -526,16 +481,7 @@ class TelegramRewardService
             );
         }
 
-        $qualification = $groupPoker
-            ? '三张相同优先，其次为一对，随后比较最大点数；同分时最后加入牌局的玩家获胜。牌面最高者取得结算资格，随后按中奖概率判定。'
-            : '单人模式的牌面仅作展示，单局直接按中奖概率判定。';
-        return sprintf(
-            "游戏规则\n%s\n%s 中奖概率：%s%%。\n%s\n未中奖扣除当前赌注。",
-            $betLine,
-            $qualification,
-            $probability,
-            $limitLine
-        );
+        throw new RuntimeException('不支持的游戏项目');
     }
 
     private function newState($telegramUserId, array $context, string $game, array $rule): string
@@ -582,19 +528,19 @@ class TelegramRewardService
 
     private function game(string $code): string
     {
-        $games = ['d' => 'dice', 's' => 'slots', 'p' => 'poker', 'dice' => 'dice', 'slots' => 'slots', 'poker' => 'poker'];
+        $games = ['d' => 'dice', 's' => 'slots', 'dice' => 'dice', 'slots' => 'slots'];
         if (!isset($games[$code])) throw new RuntimeException('不支持的游戏项目');
         return $games[$code];
     }
 
     private function code(string $game): string
     {
-        return ['dice' => 'd', 'slots' => 's', 'poker' => 'p'][$game];
+        return ['dice' => 'd', 'slots' => 's'][$game];
     }
 
     private function label(string $game): string
     {
-        return ['dice' => '骰子', 'slots' => '老虎机', 'poker' => '炸金花'][$game];
+        return ['dice' => '骰子', 'slots' => '老虎机'][$game];
     }
 
     private function button(string $text, string $callbackData): array

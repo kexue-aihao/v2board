@@ -153,22 +153,4 @@ class TrafficRewardPolicyTest extends TestCase
         $this->assertFalse($method->invoke($service, 'dice', 2, null, null, 3)['won']);
     }
 
-    public function testGroupPokerProbabilityIsAppliedOnlyAfterWinningTheHand(): void
-    {
-        config([
-            'v2board.reward_poker_win_probability' => '100.00',
-            'v2board.reward_poker_payout_multiplier' => '1.00',
-        ]);
-        $service = new TrafficRewardService();
-        $method = (new \ReflectionClass($service))->getMethod('gameSettlement');
-        $method->setAccessible(true);
-
-        $loser = $method->invoke($service, 'poker', false, null, 'after_win');
-        $winner = $method->invoke($service, 'poker', true, null, 'after_win');
-
-        $this->assertFalse($loser['won']);
-        $this->assertSame('after_win', $loser['probability_scope']);
-        $this->assertTrue($winner['won']);
-        $this->assertSame('after_win', $winner['probability_scope']);
-    }
 }

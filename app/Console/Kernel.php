@@ -60,7 +60,6 @@ class Kernel extends ConsoleKernel
             ->cron('*/' . $telegramBindingMinutes . ' * * * *')
             ->withoutOverlapping();
         $schedule->command('telegram:prune-login-links')->hourly()->withoutOverlapping();
-        $schedule->command('reward:prune-rooms')->everyTenMinutes()->withoutOverlapping();
     }
 
     /**

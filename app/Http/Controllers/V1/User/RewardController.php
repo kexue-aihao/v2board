@@ -25,7 +25,6 @@ class RewardController extends Controller
             $data = $request->validate([
                 'dice_bet_gb' => 'required|integer|min:1|max:' . TrafficRewardService::MAX_GAME_GB,
                 'slots_bet_gb' => 'required|integer|min:1|max:' . TrafficRewardService::MAX_GAME_GB,
-                'poker_bet_gb' => 'required|integer|min:1|max:' . TrafficRewardService::MAX_GAME_GB,
             ]);
             return response(['data' => (new TrafficRewardService())->saveGameSettings(\App\Models\User::findOrFail($request->user['id']), $data)]);
         } catch (RuntimeException $exception) {

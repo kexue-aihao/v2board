@@ -1622,21 +1622,6 @@ class SchemaUpgradeService
             KEY `user_id` (`user_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
-        DB::statement("CREATE TABLE IF NOT EXISTS `v2_game_room` (
-            `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-            `chat_id` varchar(64) NOT NULL,
-            `game` varchar(32) NOT NULL,
-            `status` varchar(16) NOT NULL DEFAULT 'open',
-            `players` json DEFAULT NULL,
-            `result` json DEFAULT NULL,
-            `expires_at` int(11) DEFAULT NULL,
-            `created_at` int(11) NOT NULL,
-            `updated_at` int(11) NOT NULL,
-            PRIMARY KEY (`id`),
-            KEY `chat_game_status` (`chat_id`, `game`, `status`),
-            KEY `status_expires` (`status`, `expires_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
         DB::statement("CREATE TABLE IF NOT EXISTS `v2_user_game_setting` (
             `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
             `user_id` int(11) NOT NULL,

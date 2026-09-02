@@ -440,7 +440,6 @@ class StatController extends Controller
         return [
             'dice' => '骰子娱乐',
             'slots' => '老虎机娱乐',
-            'poker' => '炸金花娱乐',
         ][$metadata['game'] ?? ''] ?? '游戏娱乐';
     }
 
@@ -456,8 +455,6 @@ class StatController extends Controller
         $result = $metadata['result'] ?? null;
         if (is_array($result)) {
             $result = implode(' | ', $result);
-        } elseif ($result === null && isset($metadata['hands'])) {
-            $result = '群组牌局';
         }
         $outcome = !empty($metadata['won']) ? '中奖' : '未中奖';
         $betGb = $metadata['bet_gb'] ?? 0;

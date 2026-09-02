@@ -32,14 +32,9 @@ class RewardController extends Controller
             'reward_slots_payout_multiplier' => 'nullable|numeric|min:1|max:1000',
             'reward_slots_odds' => 'nullable|integer|min:0|max:100',
             'reward_slots_jackpot_rate' => 'required|integer|min:1|max:10000',
-            'reward_poker_daily_limit' => 'required|integer|min:0|max:100',
-            'reward_poker_enable' => 'nullable|in:0,1',
-            'reward_poker_win_probability' => ['nullable', 'numeric', 'min:0', 'max:100', 'regex:/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?$/'],
-            'reward_poker_payout_multiplier' => 'nullable|numeric|min:1|max:1000',
-            'reward_poker_odds' => 'nullable|integer|min:0|max:100',
             'reward_group_enable' => 'required|in:0,1',
         ]);
-        foreach (['dice', 'slots', 'poker'] as $game) {
+        foreach (['dice', 'slots'] as $game) {
             $probability = 'reward_' . $game . '_win_probability';
             $legacyOdds = 'reward_' . $game . '_odds';
             if (!array_key_exists($probability, $data) && array_key_exists($legacyOdds, $data)) {
@@ -114,10 +109,6 @@ class RewardController extends Controller
             'reward_slots_win_probability' => number_format((float)config('v2board.reward_slots_win_probability', config('v2board.reward_slots_odds', 10)), 2, '.', ''),
             'reward_slots_payout_multiplier' => number_format((float)config('v2board.reward_slots_payout_multiplier', 1), 2, '.', ''),
             'reward_slots_jackpot_rate' => (int)config('v2board.reward_slots_jackpot_rate', 100),
-            'reward_poker_daily_limit' => (int)config('v2board.reward_poker_daily_limit', 0),
-            'reward_poker_enable' => (int)config('v2board.reward_poker_enable', config('v2board.reward_enable', 1)),
-            'reward_poker_win_probability' => number_format((float)config('v2board.reward_poker_win_probability', config('v2board.reward_poker_odds', 5)), 2, '.', ''),
-            'reward_poker_payout_multiplier' => number_format((float)config('v2board.reward_poker_payout_multiplier', 1), 2, '.', ''),
             'reward_group_enable' => (int)config('v2board.reward_group_enable', 0),
         ];
     }

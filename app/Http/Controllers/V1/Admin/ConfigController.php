@@ -173,11 +173,6 @@ class ConfigController extends Controller
                 'reward_slots_payout_multiplier' => number_format((float)config('v2board.reward_slots_payout_multiplier', 1), 2, '.', ''),
                 'reward_slots_odds' => (int)config('v2board.reward_slots_odds', 10),
                 'reward_slots_jackpot_rate' => (int)config('v2board.reward_slots_jackpot_rate', 100),
-                'reward_poker_daily_limit' => (int)config('v2board.reward_poker_daily_limit', 0),
-                'reward_poker_enable' => (int)config('v2board.reward_poker_enable', config('v2board.reward_enable', 1)),
-                'reward_poker_win_probability' => number_format((float)config('v2board.reward_poker_win_probability', config('v2board.reward_poker_odds', 5)), 2, '.', ''),
-                'reward_poker_payout_multiplier' => number_format((float)config('v2board.reward_poker_payout_multiplier', 1), 2, '.', ''),
-                'reward_poker_odds' => (int)config('v2board.reward_poker_odds', 5),
                 'reward_group_enable' => (int)config('v2board.reward_group_enable', 0)
             ],
             'telegram' => [
@@ -300,7 +295,7 @@ class ConfigController extends Controller
                 abort(422, __('请先为全部管理员和员工绑定二步验证'));
             }
         }
-        foreach (['dice', 'slots', 'poker'] as $game) {
+        foreach (['dice', 'slots'] as $game) {
             $probability = 'reward_' . $game . '_win_probability';
             $legacyOdds = 'reward_' . $game . '_odds';
             if (!array_key_exists($probability, $data) && array_key_exists($legacyOdds, $data)) {

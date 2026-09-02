@@ -76,7 +76,7 @@ class StatController extends Controller
     private function rewardLabel(string $source, array $metadata): string
     {
         if ($source === 'checkin') return '每日签到';
-        return ['dice' => '骰子娱乐', 'slots' => '老虎机娱乐', 'poker' => '炸金花娱乐'][$metadata['game'] ?? ''] ?? '游戏娱乐';
+        return ['dice' => '骰子娱乐', 'slots' => '老虎机娱乐'][$metadata['game'] ?? ''] ?? '游戏娱乐';
     }
 
     private function rewardDetail(string $source, array $metadata, int $rewardBytes): string
@@ -88,7 +88,7 @@ class StatController extends Controller
             $rewardGb = $metadata['reward_gb'] ?? round($rewardBytes / TrafficRewardService::GB, 2);
             return "签到奖励 {$rewardGb} GB；入口 {$entrypoint}；净变化 {$netGb} GB";
         }
-        $result = $metadata['result'] ?? (isset($metadata['hands']) ? '群组牌局' : '');
+        $result = $metadata['result'] ?? '';
         if (is_array($result)) $result = implode(' | ', $result);
         $guessText = ($metadata['game'] ?? '') === 'dice' && array_key_exists('guess', $metadata)
             ? '猜测 ' . (int)$metadata['guess'] . ' 点；'

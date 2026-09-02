@@ -94,11 +94,6 @@ class ConfigSave extends FormRequest
         'reward_slots_payout_multiplier' => 'numeric|min:1|max:1000',
         'reward_slots_odds' => 'integer|min:0|max:100',
         'reward_slots_jackpot_rate' => 'integer|min:1|max:10000',
-        'reward_poker_daily_limit' => 'integer|min:0|max:100',
-        'reward_poker_enable' => 'in:0,1',
-        'reward_poker_win_probability' => ['numeric', 'min:0', 'max:100', 'regex:/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?$/'],
-        'reward_poker_payout_multiplier' => 'numeric|min:1|max:1000',
-        'reward_poker_odds' => 'integer|min:0|max:100',
         'reward_group_enable' => 'in:0,1',
         // telegram
         'telegram_bot_enable' => 'in:0,1',

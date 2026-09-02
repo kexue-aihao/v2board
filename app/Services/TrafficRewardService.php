@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\DailyCheckin;
-use App\Models\GameRoom;
 use App\Models\Subscription;
 use App\Models\TelegramSubscriptionBinding;
 use App\Models\TrafficRewardLog;
@@ -87,7 +86,7 @@ class TrafficRewardService
     public function saveGameRuleForAdministrator(User $actor, string $game, $probability, $multiplier, ?int $subscriptionId = null, $enabled = null, $dailyLimit = null): array
     {
         $this->assertGameRuleAdministrator($actor, $subscriptionId);
-        if (!in_array($game, ['dice', 'slots', 'poker'], true)) {
+        if (!in_array($game, ['dice', 'slots'], true)) {
             throw new RuntimeException('不支持的游戏项目');
         }
 
@@ -165,7 +164,7 @@ class TrafficRewardService
     public function gameRules(): array
     {
         $rules = [];
-        foreach (['dice', 'slots', 'poker'] as $game) {
+        foreach (['dice', 'slots'] as $game) {
             $rules[$game] = $this->gameRule($game);
         }
         return $rules;
@@ -241,7 +240,6 @@ class TrafficRewardService
         return [
             'dice_bet_gb' => self::normalizeGameGb($settings['dice'] ?? 1),
             'slots_bet_gb' => self::normalizeGameGb($settings['slots'] ?? 1),
-            'poker_bet_gb' => self::normalizeGameGb($settings['poker'] ?? 1),
         ];
     }
 
@@ -249,7 +247,7 @@ class TrafficRewardService
     {
         return DB::transaction(function () use ($user, $values) {
             $user = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
-            foreach (['dice', 'slots', 'poker'] as $game) {
+            foreach (['dice', 'slots'] as $game) {
                 UserGameSetting::updateOrCreate(
                     ['user_id' => $user->id, 'game' => $game],
                     ['bet_gb' => self::normalizeGameGb($values[$game . '_bet_gb'] ?? 1), 'updated_at' => time()]
@@ -261,7 +259,7 @@ class TrafficRewardService
 
     public function saveGameWager(User $user, string $game, $betGb, ?int $subscriptionId = null): array
     {
-        if (!in_array($game, ['dice', 'slots', 'poker'], true)) throw new RuntimeException('不支持的游戏项目');
+        if (!in_array($game, ['dice', 'slots'], true)) throw new RuntimeException('不支持的游戏项目');
         $betGb = filter_var($betGb, FILTER_VALIDATE_INT);
         if ($betGb === false || $betGb < self::MIN_GB || $betGb > self::MAX_GAME_GB) {
             throw new RuntimeException('赌注流量必须为 1-1000 GB');
@@ -329,15 +327,6 @@ class TrafficRewardService
             $a = random_int(1, 7); $b = random_int(1, 7);
             $c = $a === $b ? (($a % 7) + 1) : random_int(1, 7);
             return [$a, $b, $c];
-        }, $requestId, $subscriptionId);
-    }
-
-    public function playPokerSolo(User $user, string $source = 'web', ?string $requestId = null, ?int $subscriptionId = null): array
-    {
-        return $this->playSingle($user, 'poker', $source, function () {
-            $cards = [random_int(1, 13), random_int(1, 13), random_int(1, 13)];
-            sort($cards);
-            return $cards;
         }, $requestId, $subscriptionId);
     }
 
@@ -433,10 +422,10 @@ class TrafficRewardService
             ? (int)$result === ($diceGuess === null
                 ? min(6, max(1, (int)config('v2board.reward_dice_win_face', 6)))
                 : $diceGuess)
-            : ($game === 'poker' ? (bool)$result : is_array($result) && count(array_unique($result)) === 1);
+            : is_array($result) && count(array_unique($result)) === 1;
         $won = $matched && $this->chanceHit($rule['win_probability_basis_points']);
         $payoutGb = $won ? $bet * (float)$rule['payout_multiplier'] : 0;
-        $probabilityScope = $probabilityScope ?? ($game === 'poker' ? 'per_round' : 'after_trigger');
+        $probabilityScope = $probabilityScope ?? 'after_trigger';
         return [
             'bet_gb' => $bet,
             'payout_gb' => $payoutGb,
@@ -450,7 +439,7 @@ class TrafficRewardService
 
     private function gameRule(string $game): array
     {
-        $defaults = ['dice' => 10, 'slots' => 10, 'poker' => 5];
+        $defaults = ['dice' => 10, 'slots' => 10];
         if (!array_key_exists($game, $defaults)) throw new RuntimeException('不支持的游戏项目');
         $probabilityKey = 'reward_' . $game . '_win_probability';
         $legacyKey = 'reward_' . $game . '_odds';
@@ -534,88 +523,10 @@ class TrafficRewardService
         $query = TrafficRewardLog::where('user_id', $userId)
             ->where('source', 'game')
             ->whereBetween('created_at', [strtotime($day), strtotime($day . ' +1 day') - 1]);
-        if ($game === 'poker') {
-            $query->where(function ($query) use ($prefix) {
-                $query->where('unique_key', 'like', $prefix . '%')
-                    ->orWhere('unique_key', 'like', 'poker:%');
-            });
-        } else {
-            $query->where('unique_key', 'like', $prefix . '%');
-        }
+        $query->where('unique_key', 'like', $prefix . '%');
         $count = $query->count();
-        $labels = ['dice' => '骰子', 'slots' => '老虎机', 'poker' => '炸金花'];
+        $labels = ['dice' => '骰子', 'slots' => '老虎机'];
         if ($count >= $limit) throw new RuntimeException('今日' . ($labels[$game] ?? '游戏') . '次数已用完');
-    }
-
-    public function playPoker(User $user, string $chatId, string $action = 'join', string $source = 'telegram_group', ?int $subscriptionId = null): array
-    {
-        return DB::transaction(function () use ($user, $chatId, $action, $source, $subscriptionId) {
-            if ((int)config('v2board.reward_enable', 1) !== 1 || (int)config('v2board.reward_group_enable', 0) !== 1) throw new RuntimeException('群组娱乐已关闭');
-            $action = strtolower(trim($action));
-            if (!in_array($action, ['join', 'start'], true)) throw new RuntimeException('牌局操作无效');
-            $user = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
-            $subscription = $this->activeSubscription($user, $subscriptionId);
-            $this->assertGameEnabled('poker');
-            $room = GameRoom::where('chat_id', (string)$chatId)->where('game', 'poker')->where('status', 'open')->where(function ($q) { $q->whereNull('expires_at')->orWhere('expires_at', '>', time()); })->lockForUpdate()->first();
-            if (!$room) {
-                if ($action === 'start') throw new RuntimeException('没有可开始的开放牌局');
-                $lockKey = 'poker:create:' . $chatId;
-                $locked = \Illuminate\Support\Facades\Cache::lock($lockKey, 10)->get();
-                if (!$locked) throw new RuntimeException('牌局创建中，请稍后重试');
-                try {
-                    $room = GameRoom::where('chat_id', (string)$chatId)->where('game', 'poker')->where('status', 'open')->where(function ($q) { $q->whereNull('expires_at')->orWhere('expires_at', '>', time()); })->lockForUpdate()->first();
-                    if (!$room) {
-                        $room = GameRoom::create(['chat_id' => (string)$chatId, 'game' => 'poker', 'status' => 'open', 'players' => [], 'expires_at' => time() + 1800, 'created_at' => time(), 'updated_at' => time()]);
-                    }
-                } finally {
-                    \Illuminate\Support\Facades\Cache::lock($lockKey)->forceRelease();
-                }
-            }
-            $players = (array)$room->players;
-            $ids = array_map('intval', array_column($players, 'user_id'));
-            if (!in_array((int)$user->id, $ids, true)) {
-                if ($action === 'start') throw new RuntimeException('请先发送 /poker 加入牌局');
-                if (count($players) >= 6) throw new RuntimeException('牌局人数已满');
-                $players[] = ['user_id' => (int)$user->id, 'subscription_id' => (int)$subscription->id];
-                $room->players = $players; $room->save();
-            }
-            if ($action !== 'start') return ['status' => 'open', 'room_id' => $room->id, 'players' => count($players)];
-            if (count($players) < 2) throw new RuntimeException('至少需要两名玩家才能开始');
-            $hands = []; $winner = null; $winnerScore = -1;
-            foreach ($players as $player) {
-                $cards = [random_int(1, 13), random_int(1, 13), random_int(1, 13)];
-                sort($cards); $score = count(array_unique($cards)) === 1 ? 100 + $cards[0] : (count(array_unique($cards)) === 2 ? 50 + max($cards) : max($cards));
-                $hands[$player['user_id']] = ['cards' => $cards, 'score' => $score];
-                if ($score >= $winnerScore) { $winnerScore = $score; $winner = (int)$player['user_id']; }
-            }
-            $playerIds = array_map('intval', array_column($players, 'user_id'));
-            $playerUsers = User::whereIn('id', $playerIds)->orderBy('id')->lockForUpdate()->get()->keyBy('id');
-            $playerSubscriptions = [];
-            foreach ($playerIds as $playerId) {
-                if (!$playerUsers->has($playerId)) throw new RuntimeException('牌局中存在无效玩家');
-                $player = collect($players)->firstWhere('user_id', $playerId);
-                $playerSubscriptions[$playerId] = $this->activeSubscription($playerUsers->get($playerId), (int)($player['subscription_id'] ?? 0));
-                $this->assertPokerDailyLimit($playerId, date('Y-m-d'));
-            }
-            $winnerSettlement = null;
-            $winnerNetBytes = 0;
-            foreach ($playerIds as $playerId) {
-                $settlement = $this->gameSettlement('poker', $playerId === $winner, $playerUsers->get($playerId), 'after_win');
-                $key = 'poker:' . $room->id . ':' . $playerId . ':' . bin2hex(random_bytes(8));
-                $netBytes = $this->settleWager($playerUsers->get($playerId), $playerSubscriptions[$playerId], $settlement['bet_gb'], $settlement['payout_gb'], 'game', $source, $key, ['game' => 'poker', 'room_id' => $room->id, 'hands' => $hands, 'winner_user_id' => $winner, 'won' => $settlement['won'], 'trigger_matched' => $settlement['trigger_matched'], 'probability_scope' => $settlement['probability_scope'], 'win_probability' => $settlement['win_probability'], 'payout_multiplier' => $settlement['payout_multiplier']]);
-                if ($playerId === $winner) {
-                    $winnerSettlement = $settlement;
-                    $winnerNetBytes = $netBytes;
-                }
-            }
-            $room->status = 'settled'; $room->result = ['winner' => $winner, 'hands' => $hands]; $room->save();
-            return ['status' => 'settled', 'room_id' => $room->id, 'winner_user_id' => $winner, 'won' => $winnerSettlement['won'], 'payout_gb' => $winnerSettlement['payout_gb'], 'net_bytes' => $winnerNetBytes, 'reward_gb' => $winnerSettlement['payout_gb'], 'reward_bytes' => $winnerNetBytes, 'bet_gb' => $winnerSettlement['bet_gb'], 'win_probability' => $winnerSettlement['win_probability'], 'payout_multiplier' => $winnerSettlement['payout_multiplier']];
-        });
-    }
-
-    private function assertPokerDailyLimit(int $userId, string $day): void
-    {
-        $this->assertGameDailyLimit($userId, 'poker', $day);
     }
 
     private function expiresAt(Subscription $subscription): ?int
