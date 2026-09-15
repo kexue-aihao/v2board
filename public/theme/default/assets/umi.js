@@ -35665,6 +35665,7 @@
                     type: "passport/sendEmailVerify",
                     email: this.getEmail(),
                     isforget: 0,
+                    inviteCode: this.refs.invite.value,
                     recaptchaData: e,
                     callback: ()=>{
                         n()
@@ -57917,6 +57918,7 @@
                                     l["email"] = r,
                                     a && (l["recaptcha_data"] = a),
                                     l["isforget"] = e.isforget,
+                                    l["invite_code"] = e.inviteCode,
                                     n.next = 9,
                                     Object(i["b"])("/passport/comm/sendEmailVerify", l);
                                 case 9:

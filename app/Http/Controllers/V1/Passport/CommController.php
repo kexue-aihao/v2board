@@ -45,7 +45,23 @@ class CommController extends Controller
         }
         $email = $request->input('email');
         $cacheKeyEmail = strtolower(trim((string)$email));
-        $isforget = $request->input('isforget');
+        $isForget = filter_var(
+            $request->input('isforget', $request->input('isForgetPassword', false)),
+            FILTER_VALIDATE_BOOLEAN
+        );
+
+        if ((int)config('v2board.email_verify', 0)
+            && (int)config('v2board.invite_force', 0)
+            && !$isForget) {
+            $inviteCode = trim((string)$request->input('invite_code', ''));
+            if ($inviteCode === '') {
+                abort(500, __('You must use the invitation code to register'));
+            }
+            if (!InviteCode::where('code', $inviteCode)->where('status', 0)->exists()) {
+                abort(500, __('Invalid invitation code'));
+            }
+        }
+
         $email_exists = User::where('email', $email)->exists();
         //检查是否在白名单内
         if ((int)config('v2board.email_whitelist_enable', 0)) {
@@ -63,13 +79,11 @@ class CommController extends Controller
                 abort(500, __('Gmail alias is not supported'));
             }
         }
-        if (isset($isforget)) {
-            if ($isforget == 0 && $email_exists) {
-                abort(500, __('This email is registered'));
-            } 
-            if ($isforget == 1 && !$email_exists) {
-                abort(500, __('This email is not registered in the system'));
-            }
+        if (!$isForget && $email_exists) {
+            abort(500, __('This email is registered'));
+        }
+        if ($isForget && !$email_exists) {
+            abort(500, __('This email is not registered in the system'));
         }
         if (Cache::get(CacheKey::get('LAST_SEND_EMAIL_VERIFY_TIMESTAMP', $cacheKeyEmail))) {
             abort(500, __('Email verification code has been sent, please request again later'));
