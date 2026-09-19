@@ -52,7 +52,7 @@ class OrderService
     {
         $order = $this->order;
         if ((int)$order->status === 3) return true;
-        $this->user = User::find($order->user_id);
+        $this->user = User::where('id', $order->user_id)->lockForUpdate()->firstOrFail();
         if ((int)$order->type === 9) {
             // 充值入账走加锁的 addBalance（内部 User::lockForUpdate + 基于新鲜值加减）。
             // 原实现对 $this->user（第 55 行 User::find，未加锁）做 balance += 后整行 save()，
@@ -214,6 +214,16 @@ class OrderService
         } else { // 新购
             $order->type = 1;
         }
+
+        // Type 1 also covers buying again after expiry. Persist the existing
+        // target so an async opening job can distinguish that from an explicitly
+        // requested independent subscription after this service is discarded.
+        $subscriptionService = new SubscriptionService();
+        if ((int)$order->type !== 9 && !$order->subscription_id
+            && !($this->newSubscription && $subscriptionService->multiEnabled())) {
+            $primary = $subscriptionService->ensurePrimary($user);
+            if ($primary) $order->subscription_id = $primary->id;
+        }
     }
 
     public function setVipDiscount(User $user)
@@ -367,6 +377,9 @@ class OrderService
             if (!$order) return null;
 
             $this->order = $order;
+            // A previous callback may have committed payment before dispatch failed.
+            // Retry opening without replacing the original payment metadata.
+            if ((int)$order->status === 1) return $order->trade_no;
             if ((int)$order->status !== 0) return false;
 
             $order->status = 1;
@@ -380,8 +393,7 @@ class OrderService
         });
 
         if ($tradeNo === null) return false;
-        // A prior payment or cancellation won the lock. Preserve the callback's
-        // idempotent success response without reactivating the order.
+        // Completed, cancelled, and discounted orders must not be reopened.
         if ($tradeNo === false) return true;
 
         try {
@@ -540,6 +552,8 @@ class OrderService
         }
         $subscriptionService = new SubscriptionService();
         $multiEnabled = $subscriptionService->multiEnabled();
+        // Repair legacy primary flags and the user mirror before opening a renewal.
+        $primary = $subscriptionService->ensurePrimary($this->user);
         $target = null;
         if ($order->subscription_id) {
             $target = Subscription::where('id', $order->subscription_id)
@@ -552,14 +566,14 @@ class OrderService
             }
         }
         if (!$target && (!$multiEnabled || in_array((int)$order->type, [2, 3], true))) {
-            $target = $subscriptionService->primary($this->user);
+            $target = $primary;
         }
         if ($order->period === 'reset_price') {
-            if (!$target) $target = $subscriptionService->primary($this->user);
+            if (!$target) $target = $primary;
             if (!$target) abort(422, __('No active subscription'));
             return $subscriptionService->reset($target);
         }
-        if ($target && (!$multiEnabled || in_array((int)$order->type, [2, 3], true))) {
+        if ($target) {
             return $subscriptionService->renew($target, $plan, $order->period);
         }
         return $subscriptionService->create($this->user, $plan, $order->period);

@@ -35,33 +35,48 @@ class SubscriptionService
 
     public function ensurePrimary(User $user): ?Subscription
     {
-        if (!$this->available() || !$user->plan_id) return null;
-        $subscription = Subscription::where('user_id', $user->id)->first();
-        if (!$subscription) {
-            $subscription = new Subscription();
-            $subscription->user_id = $user->id;
-            $subscription->plan_id = $user->plan_id;
-            $subscription->token = $user->token;
-            $subscription->uuid = $user->uuid;
-            $subscription->node_user_id = 2000000000 + $user->id;
-            $subscription->group_id = $user->group_id;
-            $subscription->speed_limit = $user->speed_limit;
-            $subscription->device_limit = $user->device_limit;
-            $subscription->transfer_enable = $user->transfer_enable;
-            $subscription->u = $user->u;
-            $subscription->d = $user->d;
-            $subscription->status = 'active';
-            $subscription->is_primary = true;
-            $subscription->auto_renewal = $user->auto_renewal;
-            $subscription->started_at = $user->created_at ?: time();
-            $subscription->expired_at = $user->expired_at ?: null;
-            $subscription->save();
-        }
-        if (!$subscription->is_primary) {
-            $this->setPrimary($user, $subscription);
-        }
-        $this->syncUser($user, $subscription);
-        return $subscription->fresh();
+        if (!$this->available()) return null;
+
+        // 读取接口也会修复用户镜像，必须与订单开通一样先锁用户、再锁订阅。
+        // 调用方传入的 User 可能已过时，不能据此迁移旧套餐或回写旧权益。
+        return DB::transaction(function () use ($user) {
+            $lockedUser = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
+            $subscription = Subscription::where('user_id', $lockedUser->id)
+                ->where('status', '!=', 'revoked')
+                ->orderByDesc('is_primary')
+                ->orderByRaw("CASE WHEN status = 'active' AND (expired_at IS NULL OR expired_at >= ?) THEN 1 ELSE 0 END DESC", [time()])
+                ->orderByDesc('id')
+                ->lockForUpdate()
+                ->first();
+
+            if (!$subscription) {
+                // 仅迁移完全没有订阅记录的老用户，不能把已撤销的订阅从镜像重新建回来。
+                if (!$lockedUser->plan_id || Subscription::where('user_id', $lockedUser->id)->exists()) return null;
+                $subscription = new Subscription();
+                $subscription->user_id = $lockedUser->id;
+                $subscription->plan_id = $lockedUser->plan_id;
+                $subscription->token = $lockedUser->token;
+                $subscription->uuid = $lockedUser->uuid;
+                $subscription->node_user_id = 2000000000 + $lockedUser->id;
+                $subscription->group_id = $lockedUser->group_id;
+                $subscription->speed_limit = $lockedUser->speed_limit;
+                $subscription->device_limit = $lockedUser->device_limit;
+                $subscription->transfer_enable = $lockedUser->transfer_enable;
+                $subscription->u = $lockedUser->u;
+                $subscription->d = $lockedUser->d;
+                $subscription->status = 'active';
+                $subscription->is_primary = true;
+                $subscription->auto_renewal = $lockedUser->auto_renewal;
+                $subscription->started_at = $lockedUser->created_at ?: time();
+                $subscription->expired_at = $lockedUser->expired_at ?: null;
+                $subscription->save();
+            }
+            if (!$subscription->is_primary) {
+                return $this->setPrimary($lockedUser, $subscription);
+            }
+            $this->syncUser($lockedUser, $subscription);
+            return $subscription->fresh();
+        });
     }
 
     /**
@@ -169,19 +184,29 @@ class SubscriptionService
 
     public function setPrimary(User $user, Subscription $subscription): Subscription
     {
-        if ((int)$subscription->user_id !== (int)$user->id) {
-            abort(403, __('Subscription does not belong to the user'));
-        }
-        if ($subscription->status === 'revoked') {
-            abort(422, __('Revoked subscription cannot be primary'));
-        }
-        DB::transaction(function () use ($user, $subscription) {
-            Subscription::where('user_id', $user->id)->update(['is_primary' => false]);
-            $subscription->is_primary = true;
-            $subscription->save();
-            $this->syncUser($user, $subscription);
+        return DB::transaction(function () use ($user, $subscription) {
+            // Match order opening: lock the user before reading the subscription.
+            // A caller's models may predate a completed payment or revocation.
+            $lockedUser = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
+            $lockedSubscription = Subscription::where('id', $subscription->id)->lockForUpdate()->firstOrFail();
+            if ((int)$lockedSubscription->user_id !== (int)$lockedUser->id) {
+                abort(403, __('Subscription does not belong to the user'));
+            }
+            if ($lockedSubscription->status === 'revoked') {
+                abort(422, __('Revoked subscription cannot be primary'));
+            }
+
+            // Do not clear the selected row: if its model already holds true,
+            // Eloquent will not write that unchanged attribute back on save().
+            Subscription::where('user_id', $lockedUser->id)
+                ->where('id', '!=', $lockedSubscription->id)
+                ->where('is_primary', true)
+                ->update(['is_primary' => false]);
+            $lockedSubscription->is_primary = true;
+            $lockedSubscription->save();
+            $this->syncUser($lockedUser, $lockedSubscription);
+            return $lockedSubscription->fresh();
         });
-        return $subscription->fresh();
     }
 
     public function revoke(User $user, Subscription $subscription): bool

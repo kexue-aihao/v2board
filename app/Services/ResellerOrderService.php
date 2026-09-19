@@ -200,7 +200,7 @@ class ResellerOrderService
             && (int)$result['payment_amount_cents'] !== (int)$mapping->amount_snapshot) {
             abort(422, 'Payment amount does not match order');
         }
-        if ((int)$order->status === 0) {
+        if (in_array((int)$order->status, [0, 1], true)) {
             if (!(new OrderService($order))->paid((string)($result['callback_no'] ?? 'reseller_callback'))) {
                 abort(500, 'Order opening failed');
             }
