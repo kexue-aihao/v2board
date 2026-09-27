@@ -143,7 +143,7 @@ class ConfigController extends Controller
             ],
             'server' => [
                 'server_api_url' => config('v2board.server_api_url'),
-                'server_token_configured' => !empty(config('v2board.server_token')),
+                'server_token' => config('v2board.server_token'),
                 'server_pull_interval' => config('v2board.server_pull_interval', 60),
                 'server_push_interval' => config('v2board.server_push_interval', 60),
                 'server_node_report_min_traffic' => config('v2board.server_node_report_min_traffic', 0),
@@ -256,8 +256,8 @@ class ConfigController extends Controller
                 unset($data[$secret]);
             }
         }
-        // 通讯密钥同样留空即保留原值：前端不回显（只给 server_token_configured），
-        // 空串经 ConvertEmptyStringsToNull 变 null 后 nullable 会放行，落盘就成了
+        // 通讯密钥留空即保留原值：输入框每次改动都会防抖自动保存，清空或编辑到一半时
+        // 提交的空串经 ConvertEmptyStringsToNull 变 null 后 nullable 会放行，落盘就成了
         // server_token => NULL，所有节点鉴权失败。
         if (array_key_exists('server_token', $data) && trim((string)$data['server_token']) === '') {
             unset($data['server_token']);
