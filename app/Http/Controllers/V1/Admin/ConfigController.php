@@ -256,6 +256,12 @@ class ConfigController extends Controller
                 unset($data[$secret]);
             }
         }
+        // 通讯密钥同样留空即保留原值：前端不回显（只给 server_token_configured），
+        // 空串经 ConvertEmptyStringsToNull 变 null 后 nullable 会放行，落盘就成了
+        // server_token => NULL，所有节点鉴权失败。
+        if (array_key_exists('server_token', $data) && trim((string)$data['server_token']) === '') {
+            unset($data['server_token']);
+        }
         if (array_key_exists('reseller_allowed_payment_drivers', $data)) {
             $data['reseller_allowed_payment_drivers'] = array_values(array_filter(
                 (array)$data['reseller_allowed_payment_drivers'],
