@@ -38,9 +38,16 @@ class UserTelegramBindingService
         return OAuthIdentity::where('user_id', $user->id)->exists();
     }
 
+    /**
+     * 豁免范围：OAuth 账号（有第三方登录，不依赖密码找回）、管理员与员工
+     * （他们本来就能进后台处置账号，强制绑定只会挡住自己人）。
+     */
     public function required(User $user): bool
     {
         if (!$this->enabled()) {
+            return false;
+        }
+        if ($user->is_admin || $user->is_staff) {
             return false;
         }
         if ((string)($user->telegram_id ?? '') !== '') {
