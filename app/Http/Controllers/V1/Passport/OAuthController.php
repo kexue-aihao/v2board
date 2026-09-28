@@ -134,6 +134,14 @@ class OAuthController extends Controller
             }
 
             $isTelegram = ($profile['provider'] ?? '') === 'telegram';
+            // Google / GitHub 只保留存量账号登录：能走到这里说明该身份还没绑定过任何账号，
+            // 也就是「注册」。注册入口已收敛到 Telegram 机器人（含邀请码与邮箱唯一性校验），
+            // 这里放行等于绕开机器人开了一个注册后门。
+            $registerProvider = (string)($profile['provider'] ?? '');
+            if ($registerProvider === 'google' || $registerProvider === 'github') {
+                abort(403, '该登录方式已停止注册新账号，请前往 Telegram 机器人注册；已有账号可继续用本方式登录');
+            }
+
             $isGithub = ($profile['provider'] ?? '') === 'github';
             $email = strtolower(trim((string)($profile['email'] ?? '')));
             if ($isTelegram) {

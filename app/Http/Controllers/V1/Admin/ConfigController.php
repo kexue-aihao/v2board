@@ -206,6 +206,14 @@ class ConfigController extends Controller
                 'payment_secure_driver_allowlist' => array_values((array)config('v2board.payment_secure_driver_allowlist', [])),
                 'payment_return_url_allowlist' => array_values((array)config('v2board.payment_return_url_allowlist', [])),
                 'oauth_telegram_enable' => (int)config('v2board.oauth_telegram_enable', 0),
+                'oauth_google_enable' => (int)config('v2board.oauth_google_enable', 0),
+                'oauth_google_client_id' => config('v2board.oauth_google_client_id'),
+                'oauth_google_client_secret_configured' => (bool)config('v2board.oauth_google_client_secret'),
+                'oauth_google_redirect_uri' => config('v2board.oauth_google_redirect_uri'),
+                'oauth_github_enable' => (int)config('v2board.oauth_github_enable', 0),
+                'oauth_github_client_id' => config('v2board.oauth_github_client_id'),
+                'oauth_github_client_secret_configured' => (bool)config('v2board.oauth_github_client_secret'),
+                'oauth_github_redirect_uri' => config('v2board.oauth_github_redirect_uri'),
                 'oauth_telegram_login_domain' => config('v2board.oauth_telegram_login_domain'),
                 'oauth_telegram_bot_username' => config('v2board.oauth_telegram_bot_username'),
                 'recaptcha_key' => config('v2board.recaptcha_key'),
@@ -241,6 +249,13 @@ class ConfigController extends Controller
         $data = $request->validated();
         $previousTelegramBindingEnabled = (int)config('v2board.telegram_subscription_binding_enable', 0);
         $previousTelegramDiscussId = trim((string)config('v2board.telegram_discuss_id', ''));
+        foreach (['google', 'github'] as $provider) {
+            $secret = 'oauth_' . $provider . '_client_secret';
+            if (array_key_exists($secret, $data) && trim((string)$data[$secret]) === '') {
+                unset($data[$secret]);
+            }
+        }
+
         // 通讯密钥留空即保留原值：输入框每次改动都会防抖自动保存，清空或编辑到一半时
         // 提交的空串经 ConvertEmptyStringsToNull 变 null 后 nullable 会放行，落盘就成了
         // server_token => NULL，所有节点鉴权失败。

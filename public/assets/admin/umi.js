@@ -6227,7 +6227,13 @@
                      onChange: e=>this.set("safe", "reseller_enable", e ? 1 : 0)
                  })), f.a.createElement(f.a.Fragment, null, f.a.createElement("div", {
                      className: "v2board-config-section-title mt-4 mb-2"
-                 }, "OAuth 登录"), _.oauth_google_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                 }, "OAuth 登录"), f.a.createElement(m, {
+                     title: "Google 登录",
+                     description: "启用 Google 账号登录和注册。"
+                 }, f.a.createElement(l["a"], {
+                     checked: parseInt(_.oauth_google_enable),
+                     onChange: e=>this.set("safe", "oauth_google_enable", e ? 1 : 0)
+                 })), _.oauth_google_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                      isChildren: !0,
                      title: "Google Client ID",
                      description: "OAuth 回调地址必须与 Google 应用配置完全一致。"
@@ -6255,7 +6261,13 @@
                      className: "form-control",
                      defaultValue: _.oauth_google_redirect_uri,
                      onChange: e=>this.set("safe", "oauth_google_redirect_uri", e.target.value)
-                 }))) : "", _.oauth_github_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                 }))) : "", f.a.createElement(m, {
+                     title: "GitHub 登录",
+                     description: "启用 GitHub 账号登录和注册。"
+                 }, f.a.createElement(l["a"], {
+                     checked: parseInt(_.oauth_github_enable),
+                     onChange: e=>this.set("safe", "oauth_github_enable", e ? 1 : 0)
+                 })), _.oauth_github_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                      isChildren: !0,
                      title: "GitHub Client ID",
                      description: "请填写 GitHub OAuth App 的 Client ID。"

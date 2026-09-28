@@ -10,9 +10,9 @@ use RuntimeException;
 
 class OAuthService
 {
-    // Register 收敛到 Telegram 机器人后，Google / GitHub 登录一并下线（见 2026-09-28 需求文档）。
-    // 这里是所有 OAuth 入口的唯一校验点，移除后二者的 redirect/state/callback 一律 404。
-    public const PROVIDERS = ['telegram'];
+    // Google / GitHub 保留为存量账号的登录方式（注册已在 OAuthController::consumeTicket
+    // 里对这两个渠道关闭），Telegram 是唯一允许创建新账号的渠道。
+    public const PROVIDERS = ['google', 'github', 'telegram'];
     private const STATE_TTL = 600;
     private const TICKET_TTL = 300;
     private const TELEGRAM_AUTH_MAX_AGE = 86400;

@@ -59,9 +59,9 @@ class CommController extends Controller
                 'telegram_register_enabled' => (new TelegramRegistrationService())->enabled(),
                 'telegram_bot_username' => (string)config('v2board.oauth_telegram_bot_username', ''),
                 'oauth' => [
-                    // 已下线：恒为 false，主题据此不再渲染这两个登录按钮
-                    'google' => false,
-                    'github' => false,
+                    // 存量账号仍可用这两个渠道登录（注册已在 OAuthController 里关闭）
+                    'google' => (int)config('v2board.oauth_google_enable', 0) === 1,
+                    'github' => (int)config('v2board.oauth_github_enable', 0) === 1,
                     'telegram' => (int)config('v2board.oauth_telegram_enable', 0) === 1,
                     'telegram_bot_username' => config('v2board.oauth_telegram_bot_username'),
                     'telegram_login_domain' => config('v2board.oauth_telegram_login_domain')
