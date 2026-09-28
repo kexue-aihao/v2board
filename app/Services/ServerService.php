@@ -412,19 +412,25 @@ class ServerService
                 $servers[$k]['padding_scheme'] = json_encode($v['padding_scheme']);
             }
 
-            $apiHost = config('v2board.server_api_url', config('v2board.app_url'));
-            $apiKey = config('v2board.server_token', '');
-            $nodeId = (int) $v['id'];
-            $apiHostArg = escapeshellarg((string) $apiHost);
-            $apiKeyArg = escapeshellarg((string) $apiKey);
-            $servers[$k]['install_command'] = sprintf(
-                'wget -N https://raw.githubusercontent.com/kexue-aihao/v2node/master/script/install.sh && bash install.sh --api-host %s --node-id %d --api-key %s',
-                $apiHostArg,
-                $nodeId,
-                $apiKeyArg
-            );
+            $servers[$k]['install_command'] = self::buildV2nodeInstallCommand((int) $v['id']);
         }
         return $servers;
+    }
+
+    /**
+     * v2node 一键安装命令。节点列表与新增节点成功后的响应共用这一份拼接逻辑，
+     * 避免两处各写一遍后逐渐走样。
+     */
+    public static function buildV2nodeInstallCommand(int $nodeId): string
+    {
+        $apiHost = config('v2board.server_api_url', config('v2board.app_url'));
+        $apiKey = config('v2board.server_token', '');
+        return sprintf(
+            'wget -N https://raw.githubusercontent.com/kexue-aihao/v2node/master/script/install.sh && bash install.sh --api-host %s --node-id %d --api-key %s',
+            escapeshellarg((string) $apiHost),
+            $nodeId,
+            escapeshellarg((string) $apiKey)
+        );
     }
 
     private function mergeData(&$servers)

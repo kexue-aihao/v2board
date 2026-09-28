@@ -4,6 +4,7 @@ namespace App\Http\Controllers\V1\Admin\Server;
 
 use App\Http\Controllers\Controller;
 use App\Models\ServerV2node;
+use App\Services\ServerService;
 use Illuminate\Http\Request;
 use ParagonIE_Sodium_Compat as SodiumCompat;
 use App\Utils\Helper;
@@ -249,11 +250,17 @@ class V2nodeController extends Controller
             ]);
         }
 
-        if (!ServerV2node::create($params)) {
+        $server = ServerV2node::create($params);
+        if (!$server) {
             abort(500, __('创建失败'));
         }
+        // 新增成功后直接把安装命令回给前端：抽屉保持打开并显示命令，一键即可复制，
+        // 不必先提交、再进编辑页手动选中文本。
         return response([
-            'data' => true
+            'data' => [
+                'id' => $server->id,
+                'install_command' => ServerService::buildV2nodeInstallCommand((int) $server->id)
+            ]
         ]);
     }
 

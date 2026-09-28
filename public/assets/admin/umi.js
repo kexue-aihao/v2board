@@ -82355,7 +82355,7 @@
                                         type: "serverManage/getNodes"
                                     });
                                 case 11:
-                                    "function" === typeof r && r();
+                                    "function" === typeof r && r(t);
                                 case 12:
                                 case "end":
                                     return e.stop()
@@ -107618,10 +107618,18 @@
                 this.props.dispatch({
                     type: "serverV2node/save",
                     params: e,
-                    callback: ()=>{
-                        this.onShow()
+                    callback: (res)=>{
+                        var d = res && res.data;
+                        !this.state.server.id && d && d.install_command ? (this.state.server.id = d.id, this.state.server.install_command = d.install_command, this.setState({
+                            server: this.state.server
+                        })) : this.onShow()
                     }
                 })
+            }
+            copyInstallCommand() {
+                var e = this.state.server.install_command;
+                if (!e) return void c["a"].error("\u6682\u65e0\u53ef\u590d\u5236\u7684\u5b89\u88c5\u547d\u4ee4");
+                S()(e) ? c["a"].success("\u590d\u5236\u6210\u529f") : c["a"].error("\u590d\u5236\u5931\u8d25\uff0c\u8bf7\u624b\u52a8\u9009\u62e9\u547d\u4ee4\u6587\u672c")
             }
             showChildDrawer(e, t) {
                 this.setState({
@@ -108222,7 +108230,14 @@
                         backgroundColor: "#f5f5f5a0",
                         cursor: "text"
                     }
-                }))), y.a.createElement("div", {
+                }), e.install_command && y.a.createElement("div", {
+                    style: {
+                        marginTop: 8
+                    }
+                }, y.a.createElement(l["a"], {
+                    size: "small",
+                    onClick: ()=>this.copyInstallCommand()
+                }, "\u4e00\u952e\u590d\u5236\u5b89\u88c5\u547d\u4ee4")))), y.a.createElement("div", {
                     className: "v2board-drawer-action"
                 },
                 y.a.createElement(l["a"], {
