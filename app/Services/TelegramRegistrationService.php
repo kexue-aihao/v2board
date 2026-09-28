@@ -38,9 +38,21 @@ class TelegramRegistrationService
     private const RESEND_THROTTLE = 60;
     private const MAX_ATTEMPTS = 5;
 
+    /**
+     * 站点级注册总闸（后台「停止注册」）。旧的邮箱注册与 OAuth 注册都受它管；机器人是现在
+     * 唯一的注册入口，不认这个开关等于管理员根本关不掉注册。
+     */
+    public function closed(): bool
+    {
+        return (int)config('v2board.stop_register', 0) === 1;
+    }
+
     public function enabled(): bool
     {
         if ((int)config('v2board.telegram_register_enable', 0) !== 1) {
+            return false;
+        }
+        if ($this->closed()) {
             return false;
         }
         return trim((string)config('v2board.telegram_bot_token', '')) !== '';
@@ -87,7 +99,7 @@ class TelegramRegistrationService
     public function apply(int $chatId, ?string $username, string $email, ?string $inviteCode = null): array
     {
         if (!$this->enabled()) {
-            return $this->fail('注册功能尚未开启，请联系管理员');
+            return $this->fail('本站当前未开放注册，请联系管理员');
         }
         $email = strtolower(trim($email));
         if (filter_var($email, FILTER_VALIDATE_EMAIL) === false || mb_strlen($email) > 64) {
@@ -164,7 +176,7 @@ class TelegramRegistrationService
     public function register(string $email, string $code): User
     {
         if (!$this->enabled()) {
-            abort(503, '注册功能尚未开启，请联系管理员');
+            abort(503, '本站当前未开放注册，请联系管理员');
         }
         $email = strtolower(trim($email));
         if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
@@ -308,9 +320,13 @@ class TelegramRegistrationService
         return $base . '/#/register?tg_email=' . rawurlencode($email);
     }
 
+    /**
+     * 发码延迟：需求是「核验通过后 10 秒发码」，所以默认 10；填 0 即恢复立即发码。
+     * 延迟走队列（SendTelegramJob::delay），QUEUE_CONNECTION=sync 时会被忽略，实际立即发出。
+     */
     private function codeDelay(): int
     {
-        $delay = (int)config('v2board.telegram_register_code_delay', 0);
+        $delay = (int)config('v2board.telegram_register_code_delay', 10);
         if ($delay < 0) {
             return 0;
         }

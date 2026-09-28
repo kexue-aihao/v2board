@@ -57,6 +57,9 @@ class CommController extends Controller
                 'telegram_forget_enabled' => (new UserTelegramBindingService())->enabled(),
                 // Telegram 机器人注册：注册页据此把邮箱注册表单换成机器人引导
                 'telegram_register_enabled' => (new TelegramRegistrationService())->enabled(),
+                // 后台「停止注册」：注册页据此直接回「未开放注册」，
+                // 而不是留下一个后端早已不存在的邮箱注册表单让用户白填
+                'telegram_register_closed' => (new TelegramRegistrationService())->closed(),
                 'telegram_bot_username' => (string)config('v2board.oauth_telegram_bot_username', ''),
                 'oauth' => [
                     // 存量账号仍可用这两个渠道登录（注册已在 OAuthController 里关闭）

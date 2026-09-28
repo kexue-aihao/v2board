@@ -90,7 +90,12 @@ class TelegramController extends Controller
 
         // 注册深链 t.me/bot?start=reg：不进娱乐菜单，直接进入等待邮箱状态
         if (preg_match('#^/start(@\w+)?\s+reg$#i', $text)) {
-            if (!$service->enabled()) return false;
+            if (!$service->enabled()) {
+                // 不能 return false 放它走：后面是娱乐菜单，而菜单对未绑定用户只会抛
+                // 「请先在网站绑定有效订阅」，用户看到的是一条报错而不是答复。
+                $this->telegramService->sendMessage($chatId, '本站当前未开放注册，请联系管理员。');
+                return true;
+            }
             if (\App\Models\User::where('telegram_id', $chatId)->exists()) {
                 $this->telegramService->sendMessage(
                     $chatId,

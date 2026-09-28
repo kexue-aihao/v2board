@@ -134,13 +134,30 @@ class OAuthController extends Controller
             }
 
             $isTelegram = ($profile['provider'] ?? '') === 'telegram';
-            // Google / GitHub 只保留存量账号登录：能走到这里说明该身份还没绑定过任何账号，
-            // 也就是「注册」。注册入口已收敛到 Telegram 机器人（含邀请码与邮箱唯一性校验），
-            // 这里放行等于绕开机器人开了一个注册后门。
-            $registerProvider = (string)($profile['provider'] ?? '');
-            if ($registerProvider === 'google' || $registerProvider === 'github') {
-                abort(403, '该登录方式已停止注册新账号，请前往 Telegram 机器人注册；已有账号可继续用本方式登录');
+            // Telegram 与机器人共用同一个 UID。机器人注册出来的账号只有 v2_user.telegram_id，
+            // 没有 OAuth 身份行，走不到上面的 $identity 分支 —— 于是同一个 Telegram 会被拆成
+            // 两个账号：OAuth 这边凭空开一个没有 telegram_id 的新号（机器人的 /get_traffic、
+            // /login、/reset 全按 telegram_id 查库，对它等于查无此人），而 /regedit 的去重
+            // 同样只看 telegram_id，用户还能再注册第二个。这里按 UID 认领：Telegram 的签名
+            // 校验已经证明了「控制该 Telegram 账号」，这与在机器人里发 /login 属同一信任级别。
+            // 刻意不补写 OAuthIdentity 行：认领要跟着 telegram_id 的当前值走，写死了会在用户
+            // 解绑、换绑之后继续放行旧账号。
+            if ($isTelegram) {
+                $claimed = User::where('telegram_id', (int)($profile['subject'] ?? 0))->first();
+                if ($claimed) {
+                    if ($claimed->banned) abort(403, 'Your account has been suspended');
+                    $service->forgetTicket($ticket);
+                    return $this->loginResponse($claimed, $request);
+                }
             }
+
+            // 走到这里说明这个第三方身份既没绑过账号、也认领不到任何机器人账号 —— 也就是
+            // 「注册」。注册入口已收敛到 Telegram 机器人：登录邮箱由用户自己在机器人里提交、
+            // 邀请码与后台的「停止注册」都在那边把关，而 OAuth 这边只能用合成邮箱注册，
+            // 用户根本没选过登录邮箱。放行等于给机器人开了一个后门。
+            // 下面的注册流程（registrationRequirements / validateRegistration / createUser）
+            // 因此不再可达：保留是为了日后要恢复第三方注册时，删掉这一行 abort 即可。
+            abort(403, '该登录方式已停止注册新账号，请前往 Telegram 机器人发送 /regedit 注册；已有账号可继续用本方式登录');
 
             $isGithub = ($profile['provider'] ?? '') === 'github';
             $email = strtolower(trim((string)($profile['email'] ?? '')));

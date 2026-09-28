@@ -179,7 +179,7 @@ class ConfigController extends Controller
                 'telegram_bot_enable' => config('v2board.telegram_bot_enable', 0),
                 'telegram_account_binding_enable' => (int)config('v2board.telegram_account_binding_enable', 0),
                 'telegram_register_enable' => (int)config('v2board.telegram_register_enable', 0),
-                'telegram_register_code_delay' => (int)config('v2board.telegram_register_code_delay', 0),
+                'telegram_register_code_delay' => (int)config('v2board.telegram_register_code_delay', 10),
                 'telegram_bot_token_configured' => !empty(config('v2board.telegram_bot_token')),
                 'telegram_discuss_id' => config('v2board.telegram_discuss_id'),
                 'telegram_discuss_link' => config('v2board.telegram_discuss_link'),

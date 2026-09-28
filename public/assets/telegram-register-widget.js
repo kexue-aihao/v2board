@@ -4,10 +4,11 @@
  * 注册入口收敛到机器人之后，注册页只剩一条路径：
  *   打开机器人 → 发送 /regedit → 提交邮箱 → 收验证码 → 回网页输入。
  *
- * 本文件做三件事：
+ * 本文件做四件事：
  *   1) 注册页（#/register）打开时，尽力隐藏主题自带的邮箱注册表单，改由本弹窗承载引导
  *   2) 机器人发来的深链（#/register?tg_email=...）自动跳到「输入验证码」这一步
  *   3) 提交「邮箱 + 验证码」，成功后写入登录态并跳转面板
+ *   4) 后台「停止注册」时，同样藏掉表单并直接说明注册未开放
  *
  * 与主题解耦：三套主题只是在 dashboard.blade.php 里挂一行 script，不碰主题产物。
  */
@@ -160,6 +161,21 @@
 
     /* ---------------- 引导弹窗与验证码弹窗 ---------------- */
 
+    /**
+     * 后台「停止注册」：主题自带的邮箱表单在后端已经没有对应接口，留着只会让用户白填
+     * 一遍再报错。给个出口按钮 —— 没有按钮的弹窗在这页是不可关闭的。
+     */
+    function openClosed() {
+        ensureModal('注册暂未开放',
+            '<p>本站当前未开放注册。已有账号可直接登录；如需注册，请稍后再试或联系客服。</p>');
+        var actions = modal.querySelector('.v2b-tgr-actions');
+        actions.appendChild(actionButton('去登录', function () {
+            closeModal();
+            window.location.hash = '#/login';
+        }));
+        hideLegacyForm();
+    }
+
     function openIntro() {
         var link = botLink();
         var content = '<p>本站注册已改为通过 Telegram 机器人完成，邮箱只作为登录账号使用，不会再收到验证码邮件。</p>'
@@ -255,10 +271,19 @@
         return Boolean(config && config.telegram_register_enabled);
     }
 
+    function closed() {
+        return Boolean(config && config.telegram_register_closed);
+    }
+
     function check() {
         if (!isRegisterPage()) {
             closeModal();
             restoreLegacyForm();
+            return;
+        }
+        if (closed()) {
+            hideLegacyForm();
+            if (!modal) openClosed();
             return;
         }
         if (!enabled()) return;

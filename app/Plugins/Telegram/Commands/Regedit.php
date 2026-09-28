@@ -20,7 +20,7 @@ class Regedit extends Telegram
 
         $service = new TelegramRegistrationService();
         if (!$service->enabled()) {
-            $this->telegramService->sendMessage($message->chat_id, '注册功能尚未开启，请联系管理员。');
+            $this->telegramService->sendMessage($message->chat_id, '本站当前未开放注册，请联系管理员。');
             return;
         }
         if (User::where('telegram_id', $message->chat_id)->exists()) {
