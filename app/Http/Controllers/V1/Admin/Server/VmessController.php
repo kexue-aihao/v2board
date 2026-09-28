@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\ServerVmessSave;
 use App\Http\Requests\Admin\ServerVmessUpdate;
 use App\Models\ServerVmess;
+use App\Services\ServerIdService;
 use Illuminate\Http\Request;
 
 class VmessController extends Controller
@@ -14,13 +15,22 @@ class VmessController extends Controller
     {
         $params = $request->validated();
 
+        $nodeId = isset($params['node_id']) ? (int)$params['node_id'] : null;
+        unset($params['node_id']);
+
         if ($request->input('id')) {
             $server = ServerVmess::find($request->input('id'));
             if (!$server) {
                 abort(500, __('服务器不存在'));
             }
+            if ($nodeId !== null && $nodeId !== (int)$server->id) {
+                ServerIdService::assertIdAvailable('vmess', $nodeId);
+            }
             try {
                 $server->update($params);
+                if ($nodeId !== null && $nodeId !== (int)$server->id) {
+                    ServerIdService::changeId('vmess', $server, $nodeId);
+                }
             } catch (\Exception $e) {
                 abort(500, __('保存失败'));
             }
@@ -29,7 +39,11 @@ class VmessController extends Controller
             ]);
         }
 
-        if (!ServerVmess::create($params)) {
+        // 新增：填了 node_id 就用指定 ID 落库，留空走自增。
+        $server = $nodeId !== null
+            ? ServerIdService::createWithId('vmess', $params, $nodeId)
+            : ServerVmess::create($params);
+        if (!$server) {
             abort(500, __('创建失败'));
         }
 

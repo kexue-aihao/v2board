@@ -4,6 +4,7 @@ namespace App\Http\Controllers\V1\Admin\Server;
 
 use App\Http\Controllers\Controller;
 use App\Models\ServerVless;
+use App\Services\ServerIdService;
 use Illuminate\Http\Request;
 use ParagonIE_Sodium_Compat as SodiumCompat;
 use App\Utils\Helper;
@@ -13,6 +14,7 @@ class VlessController extends Controller
     public function save(Request $request)
     {
         $params = $request->validate([
+            'node_id' => 'nullable|integer|min:1',
             'group_id' => 'required',
             'route_id' => 'nullable|array',
             'name' => 'required',
@@ -98,13 +100,22 @@ class VlessController extends Controller
                 $params['encryption_settings']['password'] = Helper::base64EncodeUrlSafe(SodiumCompat::crypto_box_publickey($keyPair));
             }
         }
+        $nodeId = isset($params['node_id']) ? (int)$params['node_id'] : null;
+        unset($params['node_id']);
+
         if ($request->input('id')) {
             $server = ServerVless::find($request->input('id'));
             if (!$server) {
                 abort(500, __('服务器不存在'));
             }
+            if ($nodeId !== null && $nodeId !== (int)$server->id) {
+                ServerIdService::assertIdAvailable('vless', $nodeId);
+            }
             try {
                 $server->update($params);
+                if ($nodeId !== null && $nodeId !== (int)$server->id) {
+                    ServerIdService::changeId('vless', $server, $nodeId);
+                }
             } catch (\Exception $e) {
                 abort(500, __('保存失败'));
             }
@@ -113,7 +124,11 @@ class VlessController extends Controller
             ]);
         }
 
-        if (!ServerVless::create($params)) {
+        // 新增：填了 node_id 就用指定 ID 落库，留空走自增。
+        $server = $nodeId !== null
+            ? ServerIdService::createWithId('vless', $params, $nodeId)
+            : ServerVless::create($params);
+        if (!$server) {
             abort(500, __('创建失败'));
         }
 

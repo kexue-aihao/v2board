@@ -4,6 +4,7 @@ namespace App\Http\Controllers\V1\Admin\Server;
 
 use App\Http\Controllers\Controller;
 use App\Models\ServerAnytls;
+use App\Services\ServerIdService;
 use Illuminate\Http\Request;
 
 class AnyTLSController extends Controller
@@ -11,6 +12,7 @@ class AnyTLSController extends Controller
     public function save(Request $request)
     {
         $params = $request->validate([
+            'node_id' => 'nullable|integer|min:1',
             'show' => '',
             'name' => 'required',
             'group_id' => 'required|array',
@@ -30,13 +32,22 @@ class AnyTLSController extends Controller
             $params['padding_scheme'] = json_decode($params['padding_scheme']);
         }
 
+        $nodeId = isset($params['node_id']) ? (int)$params['node_id'] : null;
+        unset($params['node_id']);
+
         if ($request->input('id')) {
             $server = ServerAnytls::find($request->input('id'));
             if (!$server) {
                 abort(500, __('服务器不存在'));
             }
+            if ($nodeId !== null && $nodeId !== (int)$server->id) {
+                ServerIdService::assertIdAvailable('anytls', $nodeId);
+            }
             try {
                 $server->update($params);
+                if ($nodeId !== null && $nodeId !== (int)$server->id) {
+                    ServerIdService::changeId('anytls', $server, $nodeId);
+                }
             } catch (\Exception $e) {
                 abort(500, __('保存失败'));
             }
@@ -45,7 +56,11 @@ class AnyTLSController extends Controller
             ]);
         }
 
-        if (!ServerAnytls::create($params)) {
+        // 新增：填了 node_id 就用指定 ID 落库，留空走自增。
+        $server = $nodeId !== null
+            ? ServerIdService::createWithId('anytls', $params, $nodeId)
+            : ServerAnytls::create($params);
+        if (!$server) {
             abort(500, __('创建失败'));
         }
 

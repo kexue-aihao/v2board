@@ -13049,7 +13049,7 @@
                     placeholder: "\u8bf7\u8f93\u5165\u8282\u70b9\u540d\u79f0",
                     value: e.name,
                     onChange: e=>this.formChange("name", e.target.value)
-                })), d.a.createElement("div", {
+                })), d.a.createElement("div", {    className: "form-group col-12"}, d.a.createElement("label", null, "\u8282\u70b9ID", d.a.createElement("span", {    style: {        marginLeft: 8,        fontSize: 12,        color: "#999"    }}, "\u4fee\u6539\u540e\u9700\u540c\u6b65\u8282\u70b9\u7aef\u914d\u7f6e")), d.a.createElement(s["a"], {    placeholder: "\u7559\u7a7a\u81ea\u52a8\u5206\u914d",    value: e.node_id != null ? e.node_id : (e.id || ""),    onChange: e=>this.formChange("node_id", e.target.value)})), d.a.createElement("div", {
                     className: "form-group col-4"
                 }, d.a.createElement("label", null, "\u500d\u7387"), d.a.createElement(s["a"], {
                     addonAfter: "x",
@@ -28918,7 +28918,7 @@
                     placeholder: "\u8bf7\u8f93\u5165\u8282\u70b9\u540d\u79f0",
                     value: e.name,
                     onChange: e=>this.formChange("name", e.target.value)
-                })), h.a.createElement("div", {
+                })), h.a.createElement("div", {    className: "form-group col-12"}, h.a.createElement("label", null, "\u8282\u70b9ID", h.a.createElement("span", {    style: {        marginLeft: 8,        fontSize: 12,        color: "#999"    }}, "\u4fee\u6539\u540e\u9700\u540c\u6b65\u8282\u70b9\u7aef\u914d\u7f6e")), h.a.createElement(s["a"], {    placeholder: "\u7559\u7a7a\u81ea\u52a8\u5206\u914d",    value: e.node_id != null ? e.node_id : (e.id || ""),    onChange: e=>this.formChange("node_id", e.target.value)})), h.a.createElement("div", {
                     className: "form-group col-4"
                 }, h.a.createElement("label", null, "\u500d\u7387"), h.a.createElement(s["a"], {
                     addonAfter: "x",
@@ -106004,7 +106004,7 @@
                     placeholder: "\u8bf7\u8f93\u5165\u8282\u70b9\u540d\u79f0",
                     value: e.name,
                     onChange: e=>this.formChange("name", e.target.value)
-                })), y.a.createElement("div", {
+                })), y.a.createElement("div", {    className: "form-group col-12"}, y.a.createElement("label", null, "\u8282\u70b9ID", y.a.createElement("span", {    style: {        marginLeft: 8,        fontSize: 12,        color: "#999"    }}, "\u4fee\u6539\u540e\u9700\u540c\u6b65\u8282\u70b9\u7aef\u914d\u7f6e")), y.a.createElement(s["a"], {    placeholder: "\u7559\u7a7a\u81ea\u52a8\u5206\u914d",    value: e.node_id != null ? e.node_id : (e.id || ""),    onChange: e=>this.formChange("node_id", e.target.value)})), y.a.createElement("div", {
                     className: "form-group col-4"
                 }, y.a.createElement("label", null, "\u500d\u7387"), y.a.createElement(s["a"], {
                     addonAfter: "x",
@@ -106734,7 +106734,7 @@
                     placeholder: "\u8bf7\u8f93\u5165\u8282\u70b9\u540d\u79f0",
                     value: e.name,
                     onChange: e=>this.formChange("name", e.target.value)
-                })), y.a.createElement("div", {
+                })), y.a.createElement("div", {    className: "form-group col-12"}, y.a.createElement("label", null, "\u8282\u70b9ID", y.a.createElement("span", {    style: {        marginLeft: 8,        fontSize: 12,        color: "#999"    }}, "\u4fee\u6539\u540e\u9700\u540c\u6b65\u8282\u70b9\u7aef\u914d\u7f6e")), y.a.createElement(s["a"], {    placeholder: "\u7559\u7a7a\u81ea\u52a8\u5206\u914d",    value: e.node_id != null ? e.node_id : (e.id || ""),    onChange: e=>this.formChange("node_id", e.target.value)})), y.a.createElement("div", {
                     className: "form-group col-4"
                 }, y.a.createElement("label", null, "\u500d\u7387"), y.a.createElement(s["a"], {
                     addonAfter: "x",
@@ -107023,7 +107023,7 @@
                     placeholder: "\u8bf7\u8f93\u5165\u8282\u70b9\u540d\u79f0",
                     value: e.name,
                     onChange: e=>this.formChange("name", e.target.value)
-                })), y.a.createElement("div", {
+                })), y.a.createElement("div", {    className: "form-group col-12"}, y.a.createElement("label", null, "\u8282\u70b9ID", y.a.createElement("span", {    style: {        marginLeft: 8,        fontSize: 12,        color: "#999"    }}, "\u4fee\u6539\u540e\u9700\u540c\u6b65\u8282\u70b9\u7aef\u914d\u7f6e")), y.a.createElement(s["a"], {    placeholder: "\u7559\u7a7a\u81ea\u52a8\u5206\u914d",    value: e.node_id != null ? e.node_id : (e.id || ""),    onChange: e=>this.formChange("node_id", e.target.value)})), y.a.createElement("div", {
                     className: "form-group col-4"
                 },
                 y.a.createElement("label", null, "\u500d\u7387"), y.a.createElement(s["a"], {
@@ -107392,7 +107392,7 @@
                     placeholder: "\u8bf7\u8f93\u5165\u8282\u70b9\u540d\u79f0",
                     value: e.name,
                     onChange: e=>this.formChange("name", e.target.value)
-                })), y.a.createElement("div", {
+                })), y.a.createElement("div", {    className: "form-group col-12"}, y.a.createElement("label", null, "\u8282\u70b9ID", y.a.createElement("span", {    style: {        marginLeft: 8,        fontSize: 12,        color: "#999"    }}, "\u4fee\u6539\u540e\u9700\u540c\u6b65\u8282\u70b9\u7aef\u914d\u7f6e")), y.a.createElement(s["a"], {    placeholder: "\u7559\u7a7a\u81ea\u52a8\u5206\u914d",    value: e.node_id != null ? e.node_id : (e.id || ""),    onChange: e=>this.formChange("node_id", e.target.value)})), y.a.createElement("div", {
                     className: "form-group col-4"
                 },
                 y.a.createElement("label", null, "\u500d\u7387"), y.a.createElement(s["a"], {
@@ -107819,7 +107819,7 @@
                     placeholder: "\u8bf7\u8f93\u5165\u8282\u70b9\u540d\u79f0",
                     value: e.name,
                     onChange: e=>this.formChange("name", e.target.value)
-                })), y.a.createElement("div", {
+                })), y.a.createElement("div", {    className: "form-group col-12"}, y.a.createElement("label", null, "\u8282\u70b9ID", y.a.createElement("span", {    style: {        marginLeft: 8,        fontSize: 12,        color: "#999"    }}, "\u4fee\u6539\u540e\u9700\u540c\u6b65\u8282\u70b9\u7aef\u914d\u7f6e")), y.a.createElement(s["a"], {    placeholder: "\u7559\u7a7a\u81ea\u52a8\u5206\u914d",    value: e.node_id != null ? e.node_id : (e.id || ""),    onChange: e=>this.formChange("node_id", e.target.value)})), y.a.createElement("div", {
                     className: "form-group col-4"
                 },
                 y.a.createElement("label", null, "\u500d\u7387"), y.a.createElement(s["a"], {
@@ -115253,7 +115253,7 @@
                     placeholder: "\u8bf7\u8f93\u5165\u8282\u70b9\u540d\u79f0",
                     value: e.name,
                     onChange: e=>this.formChange("name", e.target.value)
-                })), f.a.createElement("div", {
+                })), f.a.createElement("div", {    className: "form-group col-12"}, f.a.createElement("label", null, "\u8282\u70b9ID", f.a.createElement("span", {    style: {        marginLeft: 8,        fontSize: 12,        color: "#999"    }}, "\u4fee\u6539\u540e\u9700\u540c\u6b65\u8282\u70b9\u7aef\u914d\u7f6e")), f.a.createElement(l["a"], {    placeholder: "\u7559\u7a7a\u81ea\u52a8\u5206\u914d",    value: e.node_id != null ? e.node_id : (e.id || ""),    onChange: e=>this.formChange("node_id", e.target.value)})), f.a.createElement("div", {
                     className: "form-group col-4"
                 }, f.a.createElement("label", null, "\u500d\u7387"), f.a.createElement(l["a"], {
                     addonAfter: "x",

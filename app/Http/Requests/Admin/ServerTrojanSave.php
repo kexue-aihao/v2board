@@ -14,6 +14,7 @@ class ServerTrojanSave extends FormRequest
     public function rules()
     {
         return [
+            'node_id' => 'nullable|integer|min:1',
             'show' => '',
             'name' => 'required',
             'group_id' => 'required|array',

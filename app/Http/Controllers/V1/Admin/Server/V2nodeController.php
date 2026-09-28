@@ -5,6 +5,7 @@ namespace App\Http\Controllers\V1\Admin\Server;
 use App\Http\Controllers\Controller;
 use App\Models\ServerV2node;
 use App\Services\ServerService;
+use App\Services\ServerIdService;
 use Illuminate\Http\Request;
 use ParagonIE_Sodium_Compat as SodiumCompat;
 use App\Utils\Helper;
@@ -14,6 +15,7 @@ class V2nodeController extends Controller
     public function save(Request $request)
     {
         $params = $request->validate([
+            'node_id' => 'nullable|integer|min:1',
             'group_id' => 'required',
             'route_id' => 'nullable|array',
             'name' => 'required',
@@ -235,13 +237,22 @@ class V2nodeController extends Controller
             $params['cipher'] = 'aes-128-gcm';
         }
 
+        $nodeId = isset($params['node_id']) ? (int)$params['node_id'] : null;
+        unset($params['node_id']);
+
         if ($request->input('id')) {
             $server = ServerV2node::find($request->input('id'));
             if (!$server) {
                 abort(500, __('服务器不存在'));
             }
+            if ($nodeId !== null && $nodeId !== (int)$server->id) {
+                ServerIdService::assertIdAvailable('v2node', $nodeId);
+            }
             try {
                 $server->update($params);
+                if ($nodeId !== null && $nodeId !== (int)$server->id) {
+                    ServerIdService::changeId('v2node', $server, $nodeId);
+                }
             } catch (\Exception $e) {
                 abort(500, __('保存失败'));
             }
@@ -250,7 +261,10 @@ class V2nodeController extends Controller
             ]);
         }
 
-        $server = ServerV2node::create($params);
+        // 新增：填了 node_id 就用指定 ID 落库，留空走自增。
+        $server = $nodeId !== null
+            ? ServerIdService::createWithId('v2node', $params, $nodeId)
+            : ServerV2node::create($params);
         if (!$server) {
             abort(500, __('创建失败'));
         }
