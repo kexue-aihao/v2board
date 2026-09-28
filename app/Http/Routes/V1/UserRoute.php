@@ -74,6 +74,9 @@ class UserRoute
             $router->get ('/telegram/binding', 'V1\\User\\TelegramController@binding');
             $router->post('/telegram/binding/prepare', 'V1\\User\\TelegramController@prepareBinding');
             $router->post('/telegram/binding/revoke', 'V1\\User\\TelegramController@revokeBinding');
+            // 账号级绑定（强制绑定弹窗 + Telegram 验证码找回密码用），与上面的订阅绑定无关
+            $router->get ('/telegram/account/status', 'V1\\User\\TelegramController@accountStatus');
+            $router->post('/telegram/account/prepare', 'V1\\User\\TelegramController@prepareAccountBinding');
             $router->post('/oauth/link', 'V1\\Passport\\OAuthController@link');
             // Comm
             $router->get ('/comm/config', 'V1\\User\\CommController@config');

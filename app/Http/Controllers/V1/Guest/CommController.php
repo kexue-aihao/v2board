@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\V1\Guest;
 
 use App\Http\Controllers\Controller;
+use App\Services\UserTelegramBindingService;
 use App\Services\ArithmeticVerificationService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
@@ -50,6 +51,9 @@ class CommController extends Controller
                 'is_arithmetic_verification' => (int)config('v2board.arithmetic_verification_enable', 0) ? 1 : 0,
                 // 仅第三方注册开关：主题注册页据此隐藏邮箱注册表单，只留 OAuth 区
                 'oauth_register_only' => (int)config('v2board.oauth_register_only', 0) ? 1 : 0,
+                // 强制绑定 Telegram：登录页的「用 Telegram 验证码找回密码」入口据此决定是否显示。
+                // 注意这里只暴露开关本身，不暴露任何账号信息。
+                'telegram_forget_enabled' => (new UserTelegramBindingService())->enabled(),
                 'oauth' => [
                     'google' => (int)config('v2board.oauth_google_enable', 0) === 1,
                     'github' => (int)config('v2board.oauth_github_enable', 0) === 1,

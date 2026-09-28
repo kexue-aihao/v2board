@@ -434,4 +434,57 @@ class AuthController extends Controller
             'data' => true
         ]);
     }
+
+    /**
+     * Telegram 验证码重置密码：与邮箱验证码那条路并行。
+     * 强制绑定 Telegram 的意义就在这里 —— 没绑定的账号走邮箱验证码。
+     */
+    public function forgetByTelegram(Request $request)
+    {
+        $email = strtolower(trim((string)$request->input('email')));
+        $inputCode = (string)$request->input('telegram_code');
+        $password = (string)$request->input('password');
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            abort(500, __('Email format is incorrect'));
+        }
+        if (!preg_match('/^\d{6}$/', $inputCode)) {
+            abort(500, __('Incorrect verification code'));
+        }
+        if (strlen($password) < 8 || strlen($password) > 64) {
+            abort(500, __('Password must be greater than 8 digits'));
+        }
+
+        $forgetRequestLimitKey = CacheKey::get('FORGET_REQUEST_LIMIT', $email);
+        $forgetRequestLimit    = (int)Cache::get($forgetRequestLimitKey);
+        if ($forgetRequestLimit >= 3) {
+            abort(500, __('Reset failed, Please try again later'));
+        }
+
+        $cachedCode = Cache::get(CacheKey::get('TELEGRAM_FORGET_CODE', $email));
+        if ($cachedCode === null || $cachedCode === '' || !hash_equals((string)$cachedCode, $inputCode)) {
+            Cache::put($forgetRequestLimitKey, $forgetRequestLimit + 1, 300);
+            abort(500, __('Incorrect verification code'));
+        }
+        $user = User::where('email', $email)->first();
+        if (!$user) {
+            abort(500, __('This email is not registered in the system'));
+        }
+        if ((string)($user->telegram_id ?? '') === '') {
+            abort(500, __('This account has not bound Telegram, please use the email verification code'));
+        }
+        $user->password      = password_hash($password, PASSWORD_DEFAULT);
+        $user->password_algo = null;
+        $user->password_salt = null;
+        if (!$user->save()) {
+            abort(500, __('Reset failed'));
+        }
+        // 与邮箱那条路一致：用户自选密码按策略要重新提醒。
+        \App\Services\PasswordPolicyService::markRequired($user);
+        Cache::forget(CacheKey::get('TELEGRAM_FORGET_CODE', $email));
+        (new AuthService($user))->removeAllSession();
+        return response([
+            'data' => true
+        ]);
+    }
 }

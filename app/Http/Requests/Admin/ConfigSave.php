@@ -97,6 +97,7 @@ class ConfigSave extends FormRequest
         'reward_group_enable' => 'in:0,1',
         // telegram
         'telegram_bot_enable' => 'in:0,1',
+        'telegram_account_binding_enable' => 'in:0,1',
         'telegram_bot_token' => '',
         'telegram_discuss_id' => '',
         'telegram_channel_id' => '',

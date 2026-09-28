@@ -7,6 +7,7 @@ use App\Models\Subscription;
 use App\Models\User;
 use App\Services\TelegramBindingService;
 use App\Services\TelegramService;
+use App\Services\UserTelegramBindingService;
 use Illuminate\Http\Request;
 
 class TelegramController extends Controller
@@ -61,5 +62,23 @@ class TelegramController extends Controller
     {
         $user = User::findOrFail($request->user['id']);
         return response(['data' => (new TelegramBindingService())->revoke($user)]);
+    }
+
+    /**
+     * 账号级绑定状态。前端 widget 靠 required 决定是否弹强制绑定弹窗。
+     */
+    public function accountStatus(Request $request)
+    {
+        $user = User::findOrFail($request->user['id']);
+        return response(['data' => (new UserTelegramBindingService())->status($user)]);
+    }
+
+    /**
+     * 生成账号绑定用的一次性深链，用户点开后对机器人发 /start 即完成绑定。
+     */
+    public function prepareAccountBinding(Request $request)
+    {
+        $user = User::findOrFail($request->user['id']);
+        return response(['data' => (new UserTelegramBindingService())->prepare($user)]);
     }
 }

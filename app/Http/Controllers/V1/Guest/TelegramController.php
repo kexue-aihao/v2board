@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\TelegramBindingService;
 use App\Services\TelegramRewardService;
 use App\Services\TelegramService;
+use App\Services\UserTelegramBindingService;
 use App\Utils\CacheKey;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -42,6 +43,9 @@ class TelegramController extends Controller
         if ($updateKey !== null) {
             Cache::put($updateKey, true, 86400);
         }
+        if ($this->handleAccountBindingUpdate($data)) {
+            return response(['data' => true]);
+        }
         if ($this->handleBindingUpdate($data)) {
             return response(['data' => true]);
         }
@@ -55,6 +59,47 @@ class TelegramController extends Controller
         $this->formatMessage($data);
         $this->handle();
         return response(['data' => true]);
+    }
+
+    /**
+     * 账号级绑定：私聊对机器人发 /start ubind_<nonce>。
+     * 前缀 ubind_ 与售后群的 bind_ 区分，且不依赖售后群绑定开关是否开启。
+     */
+    private function handleAccountBindingUpdate(array $data): bool
+    {
+        if (!isset($data['message']['text'])) return false;
+        $message = $data['message'];
+        if ((string)($message['chat']['type'] ?? '') !== 'private') return false;
+        $parts = preg_split('/\s+/', trim((string)$message['text']), 2);
+        $head = (string)($parts[0] ?? '');
+        if ($head !== '/start' && strpos($head, '/start@') !== 0) return false;
+        $argument = trim((string)($parts[1] ?? ''));
+        if (strpos($argument, 'ubind_') !== 0) return false;
+
+        $chatId = (int)($message['chat']['id'] ?? 0);
+        try {
+            (new UserTelegramBindingService())->completeFromBot(substr($argument, 6), $message['chat']['id'] ?? '');
+        } catch (\Throwable $e) {
+            report($e);
+            $this->telegramService->sendMessage($chatId, $this->accountBindingFailureReply($e));
+            return true;
+        }
+        $this->telegramService->sendMessage(
+            $chatId,
+            '绑定成功：本 Telegram 已绑定你的站点账号。忘记密码时，可在登录页用「Telegram 验证码找回密码」重置。'
+        );
+        return true;
+    }
+
+    private function accountBindingFailureReply(\Throwable $e): string
+    {
+        $known = [
+            'Binding link is invalid or expired' => '绑定失败：绑定链接已失效（每条链接仅可使用一次，10 分钟内有效），请返回网站重新生成。',
+            'This Telegram account is already bound to another account' => '绑定失败：该 Telegram 已绑定其它面板账号，请先用原账号解绑，或联系客服处理。',
+            'Telegram account binding is disabled' => '绑定失败：账号绑定功能未开启，请联系管理员。',
+            'Account does not exist' => '绑定失败：账号不存在或已注销。',
+        ];
+        return $known[$e->getMessage()] ?? '绑定失败，请返回网站重新生成绑定链接后再试。';
     }
 
     private function handleBindingUpdate(array $data): bool

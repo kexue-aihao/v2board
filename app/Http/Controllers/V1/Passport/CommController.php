@@ -10,6 +10,8 @@ use App\Models\User;
 use App\Utils\CacheKey;
 use App\Utils\Dict;
 use App\Utils\Helper;
+use App\Services\TelegramService;
+use App\Services\UserTelegramBindingService;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -104,6 +106,50 @@ class CommController extends Controller
 
         Cache::put(CacheKey::get('EMAIL_VERIFY_CODE', $cacheKeyEmail), $code, 300);
         Cache::put(CacheKey::get('LAST_SEND_EMAIL_VERIFY_TIMESTAMP', $cacheKeyEmail), time(), 60);
+        return response([
+            'data' => true
+        ]);
+    }
+
+    /**
+     * 用 Telegram 下发找回密码验证码。
+     * 只对已绑定 Telegram 的账号发送；没绑定的账号继续走原来的邮箱验证码路径。
+     */
+    public function sendTelegramForgetCode(Request $request)
+    {
+        $ip = $request->ip();
+        if (RateLimiter::tooManyAttempts($ip, 3)) {
+            abort(429, __('Too many requests, please try again later.'));
+        }
+        RateLimiter::hit($ip, 60);
+
+        if (!(new UserTelegramBindingService())->enabled()) {
+            abort(503, __('Telegram account binding is not enabled'));
+        }
+        $email = strtolower(trim((string)$request->input('email')));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            abort(500, __('Email format is incorrect'));
+        }
+        $sentKey = CacheKey::get('LAST_SEND_TELEGRAM_FORGET_TIMESTAMP', $email);
+        if (Cache::get($sentKey)) {
+            abort(500, __('Email verification code has been sent, please request again later'));
+        }
+        $user = User::where('email', $email)->first();
+        if (!$user || (string)($user->telegram_id ?? '') === '') {
+            abort(500, __('This account has not bound Telegram, please use the email verification code'));
+        }
+        $code = (string)rand(100000, 999999);
+        // 先发后存：发送抛异常时验证码不会留在缓存里，避免「已下发」的假象。
+        (new TelegramService())->sendMessage(
+            (int)$user->telegram_id,
+            sprintf(
+                '【%s】找回密码验证码：%s，5 分钟内有效。如非本人操作请忽略本条消息。',
+                config('v2board.app_name', 'V2Board'),
+                $code
+            )
+        );
+        Cache::put(CacheKey::get('TELEGRAM_FORGET_CODE', $email), $code, 300);
+        Cache::put($sentKey, time(), 60);
         return response([
             'data' => true
         ]);

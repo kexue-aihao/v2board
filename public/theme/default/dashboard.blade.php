@@ -81,7 +81,8 @@ window.__v2boardSiteStatusScripts = [
     "/theme/{{$theme}}/assets/components.async.js?v={{$version}}",
     "/theme/{{$theme}}/assets/umi.js?v={{$version}}",
     "/assets/two-factor-widget.js?v={{$version}}",
-    "/assets/password-policy-widget.js?v={{$version}}"
+    "/assets/password-policy-widget.js?v={{$version}}",
+    "/assets/telegram-bind-widget.js?v={{$version}}"
     @if (file_exists(public_path("/theme/{$theme}/assets/custom.js")))
         , "/theme/{{$theme}}/assets/custom.js?v={{$version}}"
     @endif

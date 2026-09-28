@@ -6957,6 +6957,13 @@
                 }, f.a.createElement(l["a"], {
                     checked: parseInt(y.telegram_bot_enable),
                     onChange: e=>this.set("telegram", "telegram_bot_enable", e ? 1 : 0)
+                })),
+                f.a.createElement(m, {
+                    title: "\u5f3a\u5236\u7ed1\u5b9a Telegram",
+                    description: "\u5f00\u542f\u540e\uff1a\u81ea\u884c\u6ce8\u518c\uff08\u975e OAuth\uff09\u4e14\u672a\u7ed1\u5b9a Telegram \u7684\u8d26\u53f7\uff0c\u767b\u5f55\u540e\u4f1a\u88ab\u4e00\u4e2a\u4e0d\u53ef\u5173\u95ed\u7684\u5f39\u7a97\u906e\u6321\uff0c\u7ed1\u5b9a\u540e\u624d\u80fd\u4f7f\u7528\u9762\u677f\uff1b\u5f39\u7a97\u5185\u540c\u65f6\u63d0\u4f9b\u7528 Telegram \u9a8c\u8bc1\u7801\u627e\u56de\u5bc6\u7801\u3002OAuth \u8d26\u53f7\uff08Telegram/Google/GitHub\uff09\u4e0d\u53d7\u5f71\u54cd\u3002"
+                }, f.a.createElement(l["a"], {
+                    checked: parseInt(y.telegram_account_binding_enable),
+                    onChange: e=>this.set("telegram", "telegram_account_binding_enable", e ? 1 : 0)
                 })), f.a.createElement(m, {
                     title: "\u7fa4\u7ec4\u5730\u5740",
                     description: "\u586b\u5199\u540e\u5c06\u4f1a\u5728\u7528\u6237\u7aef\u5c55\u793a\uff0c\u6216\u8005\u88ab\u7528\u4e8e\u9700\u8981\u7684\u5730\u65b9\u3002"
