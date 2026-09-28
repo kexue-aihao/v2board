@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Jobs\SendTelegramJob;
+use App\Models\InviteCode;
 use App\Models\Plan;
 use App\Models\TelegramRegistration;
 use App\Models\User;
@@ -48,28 +49,42 @@ class TelegramRegistrationService
     /* ---------------- 机器人侧 ---------------- */
 
     /**
-     * 进入「等待提交邮箱」状态。用户在 /regedit 之后直接回一条消息，那条消息就是邮箱。
+     * 进入注册会话：/regedit 之后用户直接回一条消息，那条消息就是邮箱。
+     * 站点强制邀请码时，会话会先停在「等邀请码」这一步。
      */
     public function startSession(int $chatId): void
     {
-        Cache::put(CacheKey::get('TELEGRAM_REGISTER_SESSION', $chatId), 'await_email', self::SESSION_TTL);
+        Cache::put($this->sessionKey($chatId), ['state' => 'email'], self::SESSION_TTL);
     }
 
-    public function sessionActive(int $chatId): bool
+    /** 当前会话：['state' => 'email'] 或 ['state' => 'invite', 'email' => '...'] */
+    public function session(int $chatId): ?array
     {
-        return Cache::get(CacheKey::get('TELEGRAM_REGISTER_SESSION', $chatId)) === 'await_email';
+        $value = Cache::get($this->sessionKey($chatId));
+        return is_array($value) && isset($value['state']) ? $value : null;
+    }
+
+    /** 邮箱已收到但站点要求邀请码：先把邮箱存进会话，等用户补上邀请码 */
+    public function awaitInvite(int $chatId, string $email): void
+    {
+        Cache::put($this->sessionKey($chatId), ['state' => 'invite', 'email' => $email], self::SESSION_TTL);
     }
 
     public function endSession(int $chatId): void
     {
-        Cache::forget(CacheKey::get('TELEGRAM_REGISTER_SESSION', $chatId));
+        Cache::forget($this->sessionKey($chatId));
+    }
+
+    private function sessionKey(int $chatId): string
+    {
+        return CacheKey::get('TELEGRAM_REGISTER_SESSION', $chatId);
     }
 
     /**
      * 提交虚拟邮箱，自动核验并下发验证码。
      * 返回 ['ok' => bool, 'message' => string] —— message 由命令层直接回给用户。
      */
-    public function apply(int $chatId, ?string $username, string $email): array
+    public function apply(int $chatId, ?string $username, string $email, ?string $inviteCode = null): array
     {
         if (!$this->enabled()) {
             return $this->fail('注册功能尚未开启，请联系管理员');
@@ -77,6 +92,19 @@ class TelegramRegistrationService
         $email = strtolower(trim($email));
         if (filter_var($email, FILTER_VALIDATE_EMAIL) === false || mb_strlen($email) > 64) {
             return $this->fail('邮箱格式不正确，请重新提交（虚拟邮箱也可以，例如 name@example.com）');
+        }
+        $inviteCode = $inviteCode !== null ? trim($inviteCode) : null;
+        if ($inviteCode === '') {
+            $inviteCode = null;
+        }
+        // 强制邀请码的站点：旧的邮箱注册本来就在这一步拦，机器人注册不能成为绕过口
+        if ((int)config('v2board.invite_force', 0)) {
+            if ($inviteCode === null) {
+                return $this->fail('本站注册需要邀请码，请把邀请码发给我');
+            }
+            if (!InviteCode::where('code', $inviteCode)->where('status', 0)->exists()) {
+                return $this->fail('邀请码无效或已被使用，请检查后重新提交');
+            }
         }
         // 核验 ①②：邮箱与 Telegram 都不能已被占用。邮箱已存在时不区分"已注册"与"被他人占用"，
         // 否则这里就成了一个邮箱枚举接口。
@@ -103,6 +131,7 @@ class TelegramRegistrationService
             'telegram_id' => $chatId,
             'telegram_username' => $username !== null ? mb_substr($username, 0, 64) : null,
             'email' => $email,
+            'invite_code' => $inviteCode,
             'code_hash' => '',
             'status' => self::STATUS_CODE_SENT,
             'attempts' => 0,
@@ -180,6 +209,23 @@ class TelegramRegistrationService
             $user->uuid = Helper::guid(true);
             $user->token = Helper::guid();
             $user->telegram_id = (int)$application->telegram_id;
+            // 邀请码在这里才真正消费，规则与旧的邮箱注册一致：建立邀请关系、非永久码置为已用；
+            // 若在此期间被别人用掉，强制邀请码的站点直接拒绝建号。
+            if ((string)($application->invite_code ?? '') !== '') {
+                $invite = InviteCode::where('code', $application->invite_code)
+                    ->where('status', 0)
+                    ->lockForUpdate()
+                    ->first();
+                if ($invite) {
+                    $user->invite_user_id = $invite->user_id ?: null;
+                    if (!(int)config('v2board.invite_never_expire', 0)) {
+                        $invite->status = 1;
+                        $invite->save();
+                    }
+                } elseif ((int)config('v2board.invite_force', 0)) {
+                    abort(422, '邀请码已被使用，请回到机器人重新申请');
+                }
+            }
             $this->applyTryOutPlan($user, $now);
             if (!TokenRotationContext::using('telegram_register', function () use ($user) {
                 return $user->save();

@@ -34,7 +34,8 @@ class SchemaUpgradeService
         'traffic_reward_signed_bytes_schema' => 'traffic_reward_signed_bytes_schema_v1',
         'traffic_reward_native_entrypoint_schema' => 'traffic_reward_native_entrypoint_schema_v1',
         'telegram_login_link_schema' => 'telegram_login_link_schema_v1',
-        'telegram_registration_schema' => 'telegram_registration_schema_v1'
+        'telegram_registration_schema' => 'telegram_registration_schema_v1',
+        'telegram_registration_invite_schema' => 'telegram_registration_invite_schema_v1'
     ];
 
     public function run(): array
@@ -151,6 +152,9 @@ class SchemaUpgradeService
                 return;
             case 'telegram_registration_schema':
                 $this->applyTelegramRegistrationSchema();
+                return;
+            case 'telegram_registration_invite_schema':
+                $this->applyTelegramRegistrationInviteSchema();
                 return;
         }
 
@@ -1582,6 +1586,7 @@ class SchemaUpgradeService
             'attempts' => "tinyint(4) NOT NULL DEFAULT '0'",
             'sent_at' => 'int(11) DEFAULT NULL',
             'expires_at' => 'int(11) DEFAULT NULL',
+            'invite_code' => 'varchar(64) DEFAULT NULL',
             'user_id' => 'int(11) DEFAULT NULL',
             'created_at' => 'int(11) NOT NULL',
             'updated_at' => 'int(11) NOT NULL'
@@ -1592,6 +1597,13 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_telegram_registration', 'telegram_id', ['telegram_id']);
         $this->ensureIndex('v2_telegram_registration', 'email', ['email']);
         $this->ensureIndex('v2_telegram_registration', 'status', ['status']);
+    }
+
+    private function applyTelegramRegistrationInviteSchema(): void
+    {
+        $this->requireTable('v2_telegram_registration');
+        // 邀请码在机器人那一步就校验，落在这个字段上带到网页建号时消费
+        $this->ensureColumn('v2_telegram_registration', 'invite_code', 'varchar(64) DEFAULT NULL');
     }
 
     private function requireTable(string $table): void

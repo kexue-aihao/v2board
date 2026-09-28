@@ -110,9 +110,33 @@ class TelegramController extends Controller
         if ($text === '' || strpos($text, '/') === 0) return false;
         // 骰子/老虎机是纯表情消息，别当成邮箱
         if ($text === '🎲' || $text === '🎰') return false;
-        if (!$service->sessionActive($chatId)) return false;
 
-        $result = $service->apply($chatId, $message['from']['username'] ?? null, $text);
+        $session = $service->session($chatId);
+        if (!$session) return false;
+        $username = $message['from']['username'] ?? null;
+
+        // 会话在等邀请码：这一条消息就是邀请码，邮箱取会话里存下的那个
+        if (($session['state'] ?? '') === 'invite') {
+            $result = $service->apply($chatId, $username, (string)($session['email'] ?? ''), $text);
+            $this->telegramService->sendMessage($chatId, $result['message']);
+            return true;
+        }
+
+        // 会话在等邮箱：允许一条消息里写成「邮箱 邀请码」，省一轮往返
+        $parts = preg_split('/\s+/', $text);
+        $email = (string)($parts[0] ?? '');
+        $inviteCode = isset($parts[1]) && $parts[1] !== '' ? (string)$parts[1] : null;
+        if ((int)config('v2board.invite_force', 0) && $inviteCode === null) {
+            if (filter_var(strtolower($email), FILTER_VALIDATE_EMAIL) === false) {
+                $this->telegramService->sendMessage($chatId, '邮箱格式不正确，请重新发送（虚拟邮箱也可以，例如 name@example.com）');
+                return true;
+            }
+            $service->awaitInvite($chatId, strtolower($email));
+            $this->telegramService->sendMessage($chatId, '本站注册需要邀请码，请把邀请码发给我。');
+            return true;
+        }
+
+        $result = $service->apply($chatId, $username, $email, $inviteCode);
         $this->telegramService->sendMessage($chatId, $result['message']);
         return true;
     }
