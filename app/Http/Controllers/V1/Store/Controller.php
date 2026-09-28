@@ -5,7 +5,6 @@ namespace App\Http\Controllers\V1\Store;
 use App\Http\Controllers\Controller as BaseController;
 use App\Http\Controllers\V1\Passport\AuthController as PassportAuthController;
 use App\Http\Requests\Passport\AuthLogin;
-use App\Http\Requests\Passport\AuthRegister;
 use App\Models\Order;
 use App\Models\ResellerAccount;
 use App\Models\ResellerCustomer;
@@ -77,22 +76,13 @@ class Controller extends BaseController
         })->values()]);
     }
 
+    /**
+     * A6 决策（2026-09-28）：注册入口收敛到 Telegram 机器人，店面不再提供注册。
+     * 保留路由而不是删掉，是为了给前端一句明确的文案，而不是 404。
+     */
     public function register(Request $request)
     {
-        // Store registrations use the store-specific policy: email is the account identifier,
-        // but the platform-wide email verification switch does not apply here.
-        //
-        // 波及面声明（oauth_register_only，2026-08-01）：本方法内部调用
-        // PassportAuthController::register()，其函数顶部的「仅允许第三方账号注册」
-        // 开关（v2board.oauth_register_only）对本路径同样生效——开关开启时，
-        // reseller 店面的邮箱注册也会被 403 拦截；而店面页面不含 OAuth 按钮，
-        // 等于关闭所有 reseller 店面的新客注册。这是拦截钉在 register() 最顶部
-        // 的规格的自然结果（副作用之前拒绝、无资源烧毁），当前按平台全局策略
-        // 处理；如产品层面要求店面豁免，应在此调用前显式绕过，而非把拦截
-        // 从 AuthController::register 顶部下移。
-        $response = (new PassportAuthController())->register($this->passportRequest($request, AuthRegister::class), true);
-        $this->linkAuthenticatedUser($request, $response);
-        return $response;
+        abort(403, '店面注册已关闭，请前往主站通过 Telegram 机器人注册');
     }
 
     public function login(Request $request)

@@ -11,8 +11,8 @@ use App\Models\User;
 use App\Models\Subscription;
 use App\Services\CouponService;
 use App\Services\OrderService;
+use App\Services\OrderPaymentService;
 use App\Services\PaymentAttemptService;
-use App\Services\PaymentService;
 use App\Services\PlanService;
 use App\Services\UserService;
 use App\Utils\Helper;
@@ -239,50 +239,8 @@ class OrderController extends Controller
         if (!$order) {
             abort(500, __('Order does not exist or has been paid'));
         }
-        // free process
-        if ($order->total_amount <= 0) {
-            $orderService = new OrderService($order);
-            if (!$orderService->completeFree()) {
-                abort(500, 'Free order could not be opened');
-            }
-            return response([
-                'type' => -1,
-                'data' => true
-            ]);
-        }
-        $payment = Payment::find($method);
-        if (!$payment || (int)$payment->enable !== 1 || !PaymentAttemptService::isDriverAvailable((string)$payment->payment)) {
-            abort(422, __('Payment method is not available'));
-        }
-
-        $attemptService = new PaymentAttemptService();
-        $attempt = $attemptService->create($order, $payment);
-        $paymentService = new PaymentService($attempt->driver, $attempt->payment_id);
-        $checkout = [
-            'trade_no' => $attempt->attempt_no,
-            'display_trade_no' => $order->trade_no,
-            'total_amount' => (int)$attempt->order_amount_cents,
-            'user_id' => $order->user_id,
-            'stripe_token' => $request->input('token')
-        ];
-
-        try {
-            $quote = $paymentService->prepare($checkout);
-            $attempt = $attemptService->markPending($attempt, $quote);
-            $checkout['gateway_amount_minor'] = (int)$attempt->gateway_amount_minor;
-            $checkout['gateway_currency'] = (string)$attempt->gateway_currency;
-            $result = $paymentService->pay($checkout);
-            if (!empty($result['provider_reference'])) {
-                $attempt = $attemptService->bindProviderReference($attempt, (string)$result['provider_reference']);
-            }
-        } catch (\Throwable $e) {
-            $attemptService->markFailed($attempt, 'payment gateway initialization failed');
-            abort(500, __('Payment gateway request failed'));
-        }
-        return response([
-            'type' => $result['type'],
-            'data' => $result['data']
-        ]);
+        // 网关这一段与机器人下单共用，见 OrderPaymentService
+        return response((new OrderPaymentService())->initiate($order, $method, $request->input('token')));
     }
 
     public function check(Request $request)

@@ -178,6 +178,8 @@ class ConfigController extends Controller
             'telegram' => [
                 'telegram_bot_enable' => config('v2board.telegram_bot_enable', 0),
                 'telegram_account_binding_enable' => (int)config('v2board.telegram_account_binding_enable', 0),
+                'telegram_register_enable' => (int)config('v2board.telegram_register_enable', 0),
+                'telegram_register_code_delay' => (int)config('v2board.telegram_register_code_delay', 0),
                 'telegram_bot_token_configured' => !empty(config('v2board.telegram_bot_token')),
                 'telegram_discuss_id' => config('v2board.telegram_discuss_id'),
                 'telegram_discuss_link' => config('v2board.telegram_discuss_link'),
@@ -193,28 +195,16 @@ class ConfigController extends Controller
                 'android_download_url' => config('v2board.android_download_url')
             ],
             'safe' => [
-                'email_verify' => (int)config('v2board.email_verify', 0),
                 // 仅第三方注册：与 email_verify / oauth_* 同在 safe 组，admin 注册设置区消费
                 'oauth_register_only' => (int)config('v2board.oauth_register_only', 0),
                 'safe_mode_enable' => (int)config('v2board.safe_mode_enable', 0),
                 'secure_path' => config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))),
-                'email_whitelist_enable' => (int)config('v2board.email_whitelist_enable', 0),
-                'email_whitelist_suffix' => config('v2board.email_whitelist_suffix', Dict::EMAIL_WHITELIST_SUFFIX_DEFAULT),
-                'email_gmail_limit_enable' => config('v2board.email_gmail_limit_enable', 0),
                 'recaptcha_enable' => (int)config('v2board.recaptcha_enable', 0),
                 'arithmetic_verification_enable' => (int)config('v2board.arithmetic_verification_enable', 0),
                 'reseller_enable' => (int)config('v2board.reseller_enable', 0),
                 'reseller_allowed_payment_drivers' => array_values((array)config('v2board.reseller_allowed_payment_drivers', [])),
                 'payment_secure_driver_allowlist' => array_values((array)config('v2board.payment_secure_driver_allowlist', [])),
                 'payment_return_url_allowlist' => array_values((array)config('v2board.payment_return_url_allowlist', [])),
-                'oauth_google_enable' => (int)config('v2board.oauth_google_enable', 0),
-                'oauth_google_client_id' => config('v2board.oauth_google_client_id'),
-                'oauth_google_client_secret_configured' => (bool)config('v2board.oauth_google_client_secret'),
-                'oauth_google_redirect_uri' => config('v2board.oauth_google_redirect_uri'),
-                'oauth_github_enable' => (int)config('v2board.oauth_github_enable', 0),
-                'oauth_github_client_id' => config('v2board.oauth_github_client_id'),
-                'oauth_github_client_secret_configured' => (bool)config('v2board.oauth_github_client_secret'),
-                'oauth_github_redirect_uri' => config('v2board.oauth_github_redirect_uri'),
                 'oauth_telegram_enable' => (int)config('v2board.oauth_telegram_enable', 0),
                 'oauth_telegram_login_domain' => config('v2board.oauth_telegram_login_domain'),
                 'oauth_telegram_bot_username' => config('v2board.oauth_telegram_bot_username'),
@@ -251,12 +241,6 @@ class ConfigController extends Controller
         $data = $request->validated();
         $previousTelegramBindingEnabled = (int)config('v2board.telegram_subscription_binding_enable', 0);
         $previousTelegramDiscussId = trim((string)config('v2board.telegram_discuss_id', ''));
-        foreach (['google', 'github'] as $provider) {
-            $secret = 'oauth_' . $provider . '_client_secret';
-            if (array_key_exists($secret, $data) && trim((string)$data[$secret]) === '') {
-                unset($data[$secret]);
-            }
-        }
         // 通讯密钥留空即保留原值：输入框每次改动都会防抖自动保存，清空或编辑到一半时
         // 提交的空串经 ConvertEmptyStringsToNull 变 null 后 nullable 会放行，落盘就成了
         // server_token => NULL，所有节点鉴权失败。

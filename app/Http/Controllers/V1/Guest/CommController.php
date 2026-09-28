@@ -4,6 +4,7 @@ namespace App\Http\Controllers\V1\Guest;
 
 use App\Http\Controllers\Controller;
 use App\Services\UserTelegramBindingService;
+use App\Services\TelegramRegistrationService;
 use App\Services\ArithmeticVerificationService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
@@ -54,9 +55,13 @@ class CommController extends Controller
                 // 强制绑定 Telegram：登录页的「用 Telegram 验证码找回密码」入口据此决定是否显示。
                 // 注意这里只暴露开关本身，不暴露任何账号信息。
                 'telegram_forget_enabled' => (new UserTelegramBindingService())->enabled(),
+                // Telegram 机器人注册：注册页据此把邮箱注册表单换成机器人引导
+                'telegram_register_enabled' => (new TelegramRegistrationService())->enabled(),
+                'telegram_bot_username' => (string)config('v2board.oauth_telegram_bot_username', ''),
                 'oauth' => [
-                    'google' => (int)config('v2board.oauth_google_enable', 0) === 1,
-                    'github' => (int)config('v2board.oauth_github_enable', 0) === 1,
+                    // 已下线：恒为 false，主题据此不再渲染这两个登录按钮
+                    'google' => false,
+                    'github' => false,
                     'telegram' => (int)config('v2board.oauth_telegram_enable', 0) === 1,
                     'telegram_bot_username' => config('v2board.oauth_telegram_bot_username'),
                     'telegram_login_domain' => config('v2board.oauth_telegram_login_domain')

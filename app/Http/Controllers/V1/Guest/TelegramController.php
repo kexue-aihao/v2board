@@ -7,6 +7,8 @@ use App\Services\TelegramBindingService;
 use App\Services\TelegramRewardService;
 use App\Services\TelegramService;
 use App\Services\UserTelegramBindingService;
+use App\Services\TelegramRegistrationService;
+use App\Services\TelegramShopService;
 use App\Utils\CacheKey;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -50,10 +52,17 @@ class TelegramController extends Controller
             return response(['data' => true]);
         }
         if (isset($data['callback_query'])) {
-            (new TelegramRewardService($this->telegramService))->handleCallback((array)$data['callback_query']);
+            $callback = (array)$data['callback_query'];
+            // 商店按钮带 shop: 前缀；handleCallback 返回 false 表示不是它的，再交给娱乐模块
+            if (!(new TelegramShopService())->handleCallback($callback)) {
+                (new TelegramRewardService($this->telegramService))->handleCallback($callback);
+            }
             return response(['data' => true]);
         }
         if ($this->handleNativeDice($data)) {
+            return response(['data' => true]);
+        }
+        if ($this->handleRegistrationMessage($data)) {
             return response(['data' => true]);
         }
         $this->formatMessage($data);
@@ -65,6 +74,49 @@ class TelegramController extends Controller
      * 账号级绑定：私聊对机器人发 /start ubind_<nonce>。
      * 前缀 ubind_ 与售后群的 bind_ 区分，且不依赖售后群绑定开关是否开启。
      */
+    /**
+     * 注册会话：/regedit 之后用户直接发一条消息，那条消息就是登录邮箱；
+     * 深链 /start reg 则直接进入等待邮箱状态。
+     * 必须在 formatMessage/handle 之前拦下 —— 否则邮箱文本会被当作未知命令丢掉。
+     */
+    private function handleRegistrationMessage(array $data): bool
+    {
+        if (!isset($data['message']['text'])) return false;
+        $message = $data['message'];
+        if ((string)($message['chat']['type'] ?? '') !== 'private') return false;
+        $text = trim((string)$message['text']);
+        $chatId = (int)($message['chat']['id'] ?? 0);
+        $service = new TelegramRegistrationService();
+
+        // 注册深链 t.me/bot?start=reg：不进娱乐菜单，直接进入等待邮箱状态
+        if (preg_match('#^/start(@\w+)?\s+reg$#i', $text)) {
+            if (!$service->enabled()) return false;
+            if (\App\Models\User::where('telegram_id', $chatId)->exists()) {
+                $this->telegramService->sendMessage(
+                    $chatId,
+                    '该 Telegram 已经绑定过账号，直接发送 /login 即可生成免密登录链接。'
+                );
+                return true;
+            }
+            $service->startSession($chatId);
+            $this->telegramService->sendMessage(
+                $chatId,
+                "请直接在对话里发送一个邮箱，作为你的登录账号。\n"
+                . "虚拟邮箱也可以（例如 name@example.com），它只用来标识账号，不会收到邮件。"
+            );
+            return true;
+        }
+
+        if ($text === '' || strpos($text, '/') === 0) return false;
+        // 骰子/老虎机是纯表情消息，别当成邮箱
+        if ($text === '🎲' || $text === '🎰') return false;
+        if (!$service->sessionActive($chatId)) return false;
+
+        $result = $service->apply($chatId, $message['from']['username'] ?? null, $text);
+        $this->telegramService->sendMessage($chatId, $result['message']);
+        return true;
+    }
+
     private function handleAccountBindingUpdate(array $data): bool
     {
         if (!isset($data['message']['text'])) return false;
@@ -235,7 +287,9 @@ class TelegramController extends Controller
                 $instance = new $class();
                 if ($msg->message_type === 'message') {
                     if (!isset($instance->command)) continue;
-                    if ($msg->command !== $instance->command) continue;
+                    // 别名：命令改名后旧名字仍可用（如 /traffic -> /get_traffic）
+                    $aliases = isset($instance->aliases) && is_array($instance->aliases) ? $instance->aliases : [];
+                    if ($msg->command !== $instance->command && !in_array($msg->command, $aliases, true)) continue;
                     $instance->handle($msg);
                     return;
                 }

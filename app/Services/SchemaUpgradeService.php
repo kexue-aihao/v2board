@@ -33,7 +33,8 @@ class SchemaUpgradeService
         'traffic_reward_schema' => 'traffic_reward_schema_v1',
         'traffic_reward_signed_bytes_schema' => 'traffic_reward_signed_bytes_schema_v1',
         'traffic_reward_native_entrypoint_schema' => 'traffic_reward_native_entrypoint_schema_v1',
-        'telegram_login_link_schema' => 'telegram_login_link_schema_v1'
+        'telegram_login_link_schema' => 'telegram_login_link_schema_v1',
+        'telegram_registration_schema' => 'telegram_registration_schema_v1'
     ];
 
     public function run(): array
@@ -147,6 +148,9 @@ class SchemaUpgradeService
                 return;
             case 'telegram_login_link_schema':
                 $this->applyTelegramLoginLinkSchema();
+                return;
+            case 'telegram_registration_schema':
+                $this->applyTelegramRegistrationSchema();
                 return;
         }
 
@@ -1520,6 +1524,74 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_telegram_login_link', 'uniq_telegram_chat', ['telegram_chat_id'], true);
         $this->ensureIndex('v2_telegram_login_link', 'uniq_token_hash', ['token_hash'], true);
         $this->ensureIndex('v2_telegram_login_link', 'expires_at', ['expires_at']);
+    }
+
+    private function applyTelegramRegistrationSchema(): void
+    {
+        $this->requireTable('v2_user');
+
+        // 账号与 Telegram 的绑定关系从「代码判断」升级为「数据库约束」：一个 Telegram
+        // 只能对一个账号。存量里语义为「未绑定」的 0 与空串先归一成 NULL —— 可空唯一列
+        // 允许多个 NULL，但不允许多个 0/''，不归一会让下面的 ALTER 直接失败。
+        DB::table('v2_user')->where('telegram_id', 0)->update(['telegram_id' => null]);
+        DB::statement("UPDATE `v2_user` SET `telegram_id` = NULL WHERE `telegram_id` = ''");
+
+        // 真有重复值时不能带着脏数据建唯一索引，也不能静默跳过（这层约束正是并发
+        // 抢注的兜底），把冲突值报出来让人工处理后重跑。
+        $duplicates = DB::table('v2_user')
+            ->select('telegram_id', DB::raw('COUNT(*) as total'))
+            ->whereNotNull('telegram_id')
+            ->groupBy('telegram_id')
+            ->having('total', '>', 1)
+            ->limit(5)
+            ->get();
+        if ($duplicates->isNotEmpty()) {
+            $list = [];
+            foreach ($duplicates as $row) {
+                $list[] = $row->telegram_id . '（' . $row->total . ' 个账号）';
+            }
+            throw new RuntimeException(
+                'v2_user.telegram_id 存在重复值，无法建立唯一索引：' . implode('、', $list)
+                . '。请先人工合并或解绑这些账号，再重新执行升级。'
+            );
+        }
+        $this->ensureUniqueIndex('v2_user', 'uniq_telegram_id', ['telegram_id']);
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_telegram_registration` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `telegram_id` bigint(20) NOT NULL,
+            `telegram_username` varchar(64) DEFAULT NULL,
+            `email` varchar(64) NOT NULL,
+            `code_hash` char(64) DEFAULT NULL,
+            `status` tinyint(4) NOT NULL DEFAULT '0',
+            `attempts` tinyint(4) NOT NULL DEFAULT '0',
+            `sent_at` int(11) DEFAULT NULL,
+            `expires_at` int(11) DEFAULT NULL,
+            `user_id` int(11) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Telegram 注册申请'");
+
+        foreach ([
+            'telegram_id' => 'bigint(20) NOT NULL',
+            'telegram_username' => 'varchar(64) DEFAULT NULL',
+            'email' => 'varchar(64) NOT NULL',
+            'code_hash' => 'char(64) DEFAULT NULL',
+            'status' => "tinyint(4) NOT NULL DEFAULT '0'",
+            'attempts' => "tinyint(4) NOT NULL DEFAULT '0'",
+            'sent_at' => 'int(11) DEFAULT NULL',
+            'expires_at' => 'int(11) DEFAULT NULL',
+            'user_id' => 'int(11) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_telegram_registration', $column, $definition);
+        }
+
+        $this->ensureIndex('v2_telegram_registration', 'telegram_id', ['telegram_id']);
+        $this->ensureIndex('v2_telegram_registration', 'email', ['email']);
+        $this->ensureIndex('v2_telegram_registration', 'status', ['status']);
     }
 
     private function requireTable(string $table): void

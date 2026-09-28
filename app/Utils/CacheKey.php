@@ -54,6 +54,8 @@ class CacheKey
         'TELEGRAM_ACCOUNT_BINDING' => 'Telegram 账号绑定',
         'TELEGRAM_FORGET_CODE' => 'Telegram 找回密码验证码',
         'LAST_SEND_TELEGRAM_FORGET_TIMESTAMP' => '最后一次发送 Telegram 找回密码验证码时间',
+        'TELEGRAM_REGISTER_SESSION' => 'Telegram 注册会话（等待提交邮箱）',
+        'TELEGRAM_REGISTER_THROTTLE' => 'Telegram 注册发码节流',
         'RISK_RECOMPUTE_CURSOR' => '风险重算游标',
         'RISK_MANUAL_LOCK' => '风险手动评估锁',
         'RISK_MANUAL_CURSOR' => '风险手动评估游标',

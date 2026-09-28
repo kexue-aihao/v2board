@@ -223,6 +223,32 @@
         return String(window.location.hash || '').indexOf('#/login') === 0;
     }
 
+    function isForgetPage() {
+        var hash = String(window.location.hash || '');
+        return hash.indexOf('#/forget') === 0 || hash.indexOf('#/reset') === 0;
+    }
+
+    /**
+     * 邮箱验证码找回已下线，主题自带的找回表单点了只会报错。各主题 DOM 不同，
+     * 只能从 type=email 的输入框往上找到「同时含提交按钮」的那层再隐藏；
+     * 找不到就什么都不做（宁可不藏，也不能误藏整页）。
+     */
+    function hideLegacyForm() {
+        var inputs = document.querySelectorAll('input[type="email"]');
+        for (var i = 0; i < inputs.length; i++) {
+            var node = inputs[i];
+            for (var depth = 0; node && depth < 6; depth++) {
+                var parent = node.parentElement;
+                if (!parent || parent === document.body) break;
+                if (parent.querySelector('button[type="submit"]')) {
+                    parent.style.display = 'none';
+                    break;
+                }
+                node = parent;
+            }
+        }
+    }
+
     function renderResetEntry() {
         if (document.getElementById('v2b-tgb-entry')) return;
         addStyle();
@@ -241,7 +267,7 @@
     }
 
     function openResetModal() {
-        var content = '<p>验证码会发送到该账号在 Telegram 上绑定的机器人私聊。没绑定过 Telegram 的账号请改用邮箱验证码找回。</p>'
+        var content = '<p>验证码会发送到该账号在 Telegram 上绑定的机器人私聊。也可以直接在机器人里发送 /resetpassword 获取验证码。</p>'
             + '<label class="v2b-tgb-field"><span>账号邮箱</span><input name="email" type="email" autocomplete="off" placeholder="you@example.com"></label>'
             + '<div class="v2b-tgb-code-fields" hidden>'
             + '<label class="v2b-tgb-field"><span>Telegram 验证码</span><input name="telegram_code" type="text" inputmode="numeric" autocomplete="off" placeholder="6 位数字"></label>'
@@ -321,6 +347,12 @@
         lastCheck = Date.now();
         if (!authToken()) {
             removeResetEntry();
+            // 邮箱验证码找回已下线：忘记密码页直接进 Telegram 验证码流程，并藏掉旧表单
+            if (isForgetPage()) {
+                hideLegacyForm();
+                if (!modal) openResetModal();
+                return;
+            }
             if (isLoginPage()) maybeRenderResetEntry();
             return;
         }

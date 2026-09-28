@@ -10,7 +10,9 @@ use RuntimeException;
 
 class OAuthService
 {
-    public const PROVIDERS = ['google', 'github', 'telegram'];
+    // Register 收敛到 Telegram 机器人后，Google / GitHub 登录一并下线（见 2026-09-28 需求文档）。
+    // 这里是所有 OAuth 入口的唯一校验点，移除后二者的 redirect/state/callback 一律 404。
+    public const PROVIDERS = ['telegram'];
     private const STATE_TTL = 600;
     private const TICKET_TTL = 300;
     private const TELEGRAM_AUTH_MAX_AGE = 86400;

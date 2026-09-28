@@ -123,6 +123,8 @@
     @endforeach
     {{-- 强制绑定 Telegram 弹窗 + Telegram 验证码找回密码；独立文件，不随主题产物升级丢失 --}}
     <script defer src="/assets/telegram-bind-widget.js?v={{ $version }}"></script>
+    {{-- Telegram 机器人注册引导 + 验证码输入；同样独立于主题产物 --}}
+    <script defer src="/assets/telegram-register-widget.js?v={{ $version }}"></script>
 </head>
 <body>
 <div id="app"></div>

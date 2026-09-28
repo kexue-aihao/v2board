@@ -29,13 +29,12 @@ class PassportRoute
             'prefix' => 'passport'
         ], function ($router) {
             // Auth
-            $router->post('/auth/register', 'V1\\Passport\\AuthController@register');
+            $router->post('/auth/register/telegram', 'V1\\Passport\\AuthController@registerByTelegram');
             $router->post('/auth/login', 'V1\\Passport\\AuthController@login');
             $router->post('/auth/verify2fa', 'V1\\Passport\\AuthController@verify2fa');
             $router->post('/auth/2fa/setup', 'V1\\Passport\\AuthController@setup2fa');
             $router->post('/auth/2fa/confirm', 'V1\\Passport\\AuthController@confirmSetup2fa');
             $router->get ('/auth/token2Login', 'V1\\Passport\\AuthController@token2Login');
-            $router->post('/auth/forget', 'V1\\Passport\\AuthController@forget');
             $router->post('/auth/forget/telegram', 'V1\\Passport\\AuthController@forgetByTelegram');
             $router->post('/auth/getQuickLoginUrl', 'V1\\Passport\\AuthController@getQuickLoginUrl');
             // Third-party login. The callback only creates a short-lived ticket;
@@ -47,7 +46,6 @@ class PassportRoute
             $router->get ('/oauth/{provider}/callback', 'V1\\Passport\\OAuthController@callback');
             $router->post('/oauth/complete', 'V1\\Passport\\OAuthController@complete');
             // Comm
-            $router->post('/comm/sendEmailVerify', 'V1\\Passport\\CommController@sendEmailVerify');
             $router->post('/comm/sendTelegramForgetCode', 'V1\\Passport\\CommController@sendTelegramForgetCode');
             $router->post('/comm/pv', 'V1\\Passport\\CommController@pv');
         });

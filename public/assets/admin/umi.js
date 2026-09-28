@@ -6141,23 +6141,11 @@
                 }, f.a.createElement("div", {
                     className: ""
                 }, f.a.createElement(m, {
-                    title: "\u90ae\u7bb1\u9a8c\u8bc1",
-                    description: "\u5f00\u542f\u540e\u5c06\u4f1a\u5f3a\u5236\u8981\u6c42\u7528\u6237\u8fdb\u884c\u90ae\u7bb1\u9a8c\u8bc1\u3002"
-                }, f.a.createElement(l["a"], {
-                    checked: parseInt(_.email_verify),
-                    onChange: e=>this.set("safe", "email_verify", e ? 1 : 0)
-                })), f.a.createElement(m, {
                     title: "\u4ec5\u5141\u8bb8\u7b2c\u4e09\u65b9\u8d26\u53f7\u6ce8\u518c",
                     description: "\u5f00\u542f\u540e\u5173\u95ed\u90ae\u7bb1\u6ce8\u518c\uff0c\u4ec5\u53ef\u901a\u8fc7\u5df2\u542f\u7528\u7684\u7b2c\u4e09\u65b9\u767b\u5f55\u6ce8\u518c\uff1b\u8bf7\u786e\u4fdd\u81f3\u5c11\u542f\u7528\u4e00\u4e2a\u7b2c\u4e09\u65b9\u767b\u5f55"
                 }, f.a.createElement(l["a"], {
                     checked: parseInt(_.oauth_register_only),
                     onChange: e=>this.set("safe", "oauth_register_only", e ? 1 : 0)
-                })), f.a.createElement(m, {
-                    title: "\u7981\u6b62\u4f7f\u7528Gmail\u591a\u522b\u540d",
-                    description: "\u5f00\u542f\u540eGmail\u591a\u522b\u540d\u5c06\u65e0\u6cd5\u6ce8\u518c\u3002"
-                }, f.a.createElement(l["a"], {
-                    checked: parseInt(_.email_gmail_limit_enable),
-                    onChange: e=>this.set("safe", "email_gmail_limit_enable", e ? 1 : 0)
                 })), f.a.createElement(m, {
                     title: "\u5b89\u5168\u6a21\u5f0f",
                     description: "\u5f00\u542f\u540e\u9664\u4e86\u7ad9\u70b9URL\u4ee5\u5916\u7684\u7ed1\u5b9a\u672c\u7ad9\u70b9\u7684\u57df\u540d\u8bbf\u95ee\u90fd\u5c06\u4f1a\u88ab403\u3002"
@@ -6208,12 +6196,6 @@
                     placeholder: "admin",
                     defaultValue: _.secure_path,
                     onChange: e=>this.set("safe", "secure_path", e.target.value)
-                })), f.a.createElement(m, {
-                    title: "\u90ae\u7bb1\u540e\u7f00\u767d\u540d\u5355",
-                    description: "\u5f00\u542f\u540e\u5728\u540d\u5355\u4e2d\u7684\u90ae\u7bb1\u540e\u7f00\u624d\u5141\u8bb8\u8fdb\u884c\u6ce8\u518c\u3002"
-                }, f.a.createElement(l["a"], {
-                    checked: parseInt(_.email_whitelist_enable),
-                    onChange: e=>this.set("safe", "email_whitelist_enable", e ? 1 : 0)
                 })), _.email_whitelist_enable ? f.a.createElement(m, {
                     isChildren: !0,
                     title: "\u767d\u540d\u5355\u540e\u7f00",
@@ -6245,13 +6227,7 @@
                      onChange: e=>this.set("safe", "reseller_enable", e ? 1 : 0)
                  })), f.a.createElement(f.a.Fragment, null, f.a.createElement("div", {
                      className: "v2board-config-section-title mt-4 mb-2"
-                 }, "OAuth 登录"), f.a.createElement(m, {
-                     title: "Google 登录",
-                     description: "启用 Google 账号登录和注册。"
-                 }, f.a.createElement(l["a"], {
-                     checked: parseInt(_.oauth_google_enable),
-                     onChange: e=>this.set("safe", "oauth_google_enable", e ? 1 : 0)
-                 })), _.oauth_google_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                 }, "OAuth 登录"), _.oauth_google_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                      isChildren: !0,
                      title: "Google Client ID",
                      description: "OAuth 回调地址必须与 Google 应用配置完全一致。"
@@ -6279,13 +6255,7 @@
                      className: "form-control",
                      defaultValue: _.oauth_google_redirect_uri,
                      onChange: e=>this.set("safe", "oauth_google_redirect_uri", e.target.value)
-                 }))) : "", f.a.createElement(m, {
-                     title: "GitHub 登录",
-                     description: "启用 GitHub 账号登录和注册。"
-                 }, f.a.createElement(l["a"], {
-                     checked: parseInt(_.oauth_github_enable),
-                     onChange: e=>this.set("safe", "oauth_github_enable", e ? 1 : 0)
-                 })), _.oauth_github_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                 }))) : "", _.oauth_github_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                      isChildren: !0,
                      title: "GitHub Client ID",
                      description: "请填写 GitHub OAuth App 的 Client ID。"
@@ -6964,6 +6934,24 @@
                 }, f.a.createElement(l["a"], {
                     checked: parseInt(y.telegram_account_binding_enable),
                     onChange: e=>this.set("telegram", "telegram_account_binding_enable", e ? 1 : 0)
+                })),
+                f.a.createElement(m, {
+                    title: "Telegram \u673a\u5668\u4eba\u6ce8\u518c",
+                    description: "\u5f00\u542f\u540e\uff1a\u6ce8\u518c\u5165\u53e3\u6536\u655b\u5230\u673a\u5668\u4eba /regedit\uff0c\u7f51\u9875\u7aef\u51ed\u300c\u90ae\u7bb1 + \u9a8c\u8bc1\u7801\u300d\u5b8c\u6210\u6ce8\u518c\uff1b\u90ae\u7bb1\u6ce8\u518c\u4e0e Google / GitHub \u767b\u5f55\u5c06\u88ab\u79fb\u9664\u3002"
+                }, f.a.createElement(l["a"], {
+                    checked: parseInt(y.telegram_register_enable),
+                    onChange: e=>this.set("telegram", "telegram_register_enable", e ? 1 : 0)
+                })),
+                f.a.createElement(m, {
+                    title: "\u6ce8\u518c\u9a8c\u8bc1\u7801\u5ef6\u8fdf\u53d1\u9001",
+                    description: "\u6838\u9a8c\u901a\u8fc7\u540e\u5ef6\u8fdf\u591a\u5c11\u79d2\u4e0b\u53d1\u9a8c\u8bc1\u7801\uff0c0 \u8868\u793a\u7acb\u5373\u53d1\u9001\u3002"
+                }, f.a.createElement(a["a"], {
+                    addonAfter: "\u79d2",
+                    size: "large",
+                    type: "number",
+                    placeholder: "0",
+                    defaultValue: y.telegram_register_code_delay,
+                    onChange: e=>this.set("telegram", "telegram_register_code_delay", e.target.value)
                 })), f.a.createElement(m, {
                     title: "\u7fa4\u7ec4\u5730\u5740",
                     description: "\u586b\u5199\u540e\u5c06\u4f1a\u5728\u7528\u6237\u7aef\u5c55\u793a\uff0c\u6216\u8005\u88ab\u7528\u4e8e\u9700\u8981\u7684\u5730\u65b9\u3002"
