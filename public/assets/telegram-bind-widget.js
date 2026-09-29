@@ -225,7 +225,12 @@
 
     function isForgetPage() {
         var hash = String(window.location.hash || '');
-        return hash.indexOf('#/forget') === 0 || hash.indexOf('#/reset') === 0;
+        // default 使用 /forgetpassword，ez/signature 使用 /forgot-password；
+        // 两者都可能带查询参数或尾部斜杠，因此只判断路由前缀。
+        return hash.indexOf('#/forgetpassword') === 0
+            || hash.indexOf('#/forgot-password') === 0
+            || hash.indexOf('#/forget') === 0
+            || hash.indexOf('#/reset') === 0;
     }
 
     /**

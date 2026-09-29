@@ -51,6 +51,7 @@ class CacheKey
         'TELEGRAM_GROUP_ADMINS' => '售后群管理员名单',
         'TELEGRAM_MEMBER_VERIFIED' => '售后群成员已验证',
         'TELEGRAM_UPDATE' => 'Telegram 更新幂等',
+        'TELEGRAM_BOT_USERNAME' => 'Telegram 机器人用户名',
         'TELEGRAM_ACCOUNT_BINDING' => 'Telegram 账号绑定',
         'TELEGRAM_FORGET_CODE' => 'Telegram 找回密码验证码',
         'LAST_SEND_TELEGRAM_FORGET_TIMESTAMP' => '最后一次发送 Telegram 找回密码验证码时间',

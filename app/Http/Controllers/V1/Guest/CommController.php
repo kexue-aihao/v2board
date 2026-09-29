@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\V1\Guest;
 
 use App\Http\Controllers\Controller;
-use App\Services\UserTelegramBindingService;
+use App\Services\TelegramPasswordResetService;
 use App\Services\TelegramRegistrationService;
 use App\Services\ArithmeticVerificationService;
 use App\Utils\Dict;
@@ -52,9 +52,9 @@ class CommController extends Controller
                 'is_arithmetic_verification' => (int)config('v2board.arithmetic_verification_enable', 0) ? 1 : 0,
                 // 仅第三方注册开关：主题注册页据此隐藏邮箱注册表单，只留 OAuth 区
                 'oauth_register_only' => (int)config('v2board.oauth_register_only', 0) ? 1 : 0,
-                // 强制绑定 Telegram：登录页的「用 Telegram 验证码找回密码」入口据此决定是否显示。
-                // 注意这里只暴露开关本身，不暴露任何账号信息。
-                'telegram_forget_enabled' => (new UserTelegramBindingService())->enabled(),
+                // Telegram 找回密码只依赖机器人配置，与「强制绑定」开关解耦。
+                // 已经手动绑定的存量用户即使不再强制新登录用户绑定，仍应能自助找回密码。
+                'telegram_forget_enabled' => (new TelegramPasswordResetService())->enabled(),
                 // Telegram 机器人注册：注册页据此把邮箱注册表单换成机器人引导
                 'telegram_register_enabled' => (new TelegramRegistrationService())->enabled(),
                 // 后台「停止注册」：注册页据此直接回「未开放注册」，

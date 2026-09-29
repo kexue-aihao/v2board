@@ -122,11 +122,18 @@ class UserTelegramBindingService
         if ($username !== '') {
             return $username;
         }
-        $response = (new TelegramService())->getMe();
-        $username = ltrim((string)($response->result->username ?? ''), '@');
-        if ($username === '') {
-            abort(503, 'Telegram bot username is not configured');
-        }
-        return $username;
+
+        // status() 会在绑定弹窗打开期间按 4 秒轮询；用户名不应因此每次都请求 Telegram。
+        // 把 Bot Token 纳入 key，切换机器人后不会复用旧机器人的用户名。
+        $token = trim((string)config('v2board.telegram_bot_token', ''));
+        $cacheKey = CacheKey::get('TELEGRAM_BOT_USERNAME', sha1($token));
+        return (string)Cache::remember($cacheKey, 3600, function () {
+            $response = (new TelegramService())->getMe();
+            $username = ltrim((string)($response->result->username ?? ''), '@');
+            if ($username === '') {
+                abort(503, 'Telegram bot username is not configured');
+            }
+            return $username;
+        });
     }
 }

@@ -76,7 +76,9 @@ class TelegramPasswordResetService
         if ($base !== '') {
             $lines[] = '';
             $lines[] = '回到网站的找回密码页，填写邮箱、验证码与新密码：';
-            $lines[] = $base . '/#/forget';
+            // 三套主题均支持该入口；ez/signature 会把 /forgetpassword 重定向到
+            // /forgot-password，default 直接使用 /forgetpassword。
+            $lines[] = $base . '/#/forgetpassword';
         }
         return implode("\n", $lines);
     }

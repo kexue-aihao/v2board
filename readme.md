@@ -303,6 +303,8 @@ period 支持值：
 | GET | /invite/fetch | 邀请信息 |
 | GET | /invite/details | 邀请明细 |
 | GET | /telegram/getBotInfo | Telegram Bot 信息 |
+| GET | /telegram/account/status | 查询当前账号是否需要绑定 Telegram |
+| POST | /telegram/account/prepare | 生成账号级 Telegram 绑定深链 |
 | GET | /telegram/binding | 查询当前账户 Telegram 绑定状态 |
 | POST | /telegram/binding/prepare | 生成 Telegram 绑定信息（需 subscription_id） |
 | POST | /telegram/binding/revoke | 撤销 Telegram 绑定 |
@@ -359,6 +361,7 @@ period 支持值：
 | reseller_allowed_payment_drivers | array | [] | 倒卖商可用支付驱动白名单 |
 | telegram_subscription_binding_enable | 0/1 | 0 | 启用 Telegram 订阅绑定 |
 | telegram_binding_check_interval | integer | 300 | Telegram 绑定校验间隔（秒），60-3600 |
+| telegram_account_binding_enable | 0/1 | 0 | 登录后引导未绑定的普通存量账号绑定 Telegram（需配置机器人 Token） |
 | telegram_register_enable | 0/1 | 0 | 启用 Telegram 机器人注册 |
 | telegram_register_code_delay | integer | 10 | 注册验证码发送延迟（秒），0 表示立即发送，最大 300 |
 | oauth_google_enable / oauth_google_client_id / oauth_google_client_secret / oauth_google_redirect_uri | 0/1、string | — | Google OAuth 登录；fetch 仅回传 oauth_google_client_secret_configured 布尔位，save 传空串保留原密钥 |
