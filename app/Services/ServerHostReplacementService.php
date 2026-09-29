@@ -63,17 +63,17 @@ class ServerHostReplacementService
                 if ($replacement === (string) $server->host) {
                     continue;
                 }
-                if (strlen($replacement) > 255) {
-                    abort(422, __('替换后的节点域名超过255个字符'));
-                }
-
+                $originalHost = (string) $server->host;
                 $server->host = $replacement;
-                $server->save();
+                $persistedServer = $server->save() ? $server->fresh() : null;
+                if (!$persistedServer || (string) $persistedServer->host !== $replacement) {
+                    abort(500, __('节点域名保存失败，本次替换已回滚'));
+                }
                 $updated[] = [
                     'id' => (int) $server->id,
                     'type' => $match['type'],
                     'name' => (string) $server->name,
-                    'old_host' => (string) $match['host'],
+                    'old_host' => $originalHost,
                     'new_host' => $replacement,
                 ];
             }
@@ -122,6 +122,10 @@ class ServerHostReplacementService
 
     private function replacement(string $mode, string $host, string $oldHost, string $newHost): string
     {
-        return $mode === self::MODE_EXACT ? $newHost : str_replace($oldHost, $newHost, $host);
+        $replacement = $mode === self::MODE_EXACT ? $newHost : str_replace($oldHost, $newHost, $host);
+        if (strlen($replacement) > 255) {
+            abort(422, __('替换后的节点域名超过255个字符'));
+        }
+        return $replacement;
     }
 }

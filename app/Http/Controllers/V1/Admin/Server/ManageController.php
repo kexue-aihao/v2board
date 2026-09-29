@@ -15,7 +15,7 @@ class ManageController extends Controller
         $serverService = new ServerService();
         return response([
             'data' => $serverService->getAllServers()
-        ]);
+        ])->header('Cache-Control', 'no-store, private');
     }
 
     public function sort(Request $request)

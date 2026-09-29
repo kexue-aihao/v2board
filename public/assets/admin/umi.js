@@ -101987,7 +101987,7 @@
                         case 8:
                             if (a = e.sent,
                             s = {},
-                            "application/json" !== a.headers.get("content-type")) {
+                            "application/json" !== (a.headers.get("content-type") || "").split(";")[0].trim().toLowerCase()) {
                                 e.next = 16;
                                 break
                             }
@@ -108307,7 +108307,11 @@
                     searchKey: void 0,
                     sortMode: !0,
                     pageSize: Object(L["e"])("server_manage_page_size") || 10,
+                    hostReplaceVisible: !1,
                     hostReplaceLoading: !1,
+                    hostReplaceError: "",
+                    hostReplaceResult: "",
+                    hostReplaceStage: "",
                     hostReplaceMode: "exact",
                     hostReplaceOld: "",
                     hostReplaceNew: "",
@@ -108402,97 +108406,132 @@
                 })
             }
             startHostReplace() {
-                if (this.state.hostReplaceLoading) return;
-                var e = window.prompt("匹配方式：exact 精确匹配，contains 模糊匹配", "exact");
-                if (e !== "exact" && e !== "contains") return;
-                var t = window.prompt("请输入旧域名");
-                if (!t) return;
-                var n = window.prompt("请输入新域名");
-                if (!n || t === n) return;
+                if (this.hostReplaceBusy) return;
                 this.setState({
-                    hostReplaceMode: e,
-                    hostReplaceOld: t,
-                    hostReplaceNew: n,
-                    hostReplacePreview: null
-                }, ()=>this.previewHostReplace());
-            }
-            previewHostReplace() {
-                var e = this.state;
-                if (!e.hostReplaceOld || !e.hostReplaceNew) {
-                    return c["a"].error("请输入旧域名和新域名")
-                }
-                this.setState({
-                    hostReplaceLoading: !0
+                    hostReplaceVisible: !0,
+                    hostReplacePreview: null,
+                    hostReplaceError: "",
+                    hostReplaceResult: ""
                 });
-                return Object(hostReplacementApi["b"])("/" + window.settings.secure_path + "/server/manage/host/preview", {
-                    mode: e.hostReplaceMode,
-                    old_host: e.hostReplaceOld,
-                    new_host: e.hostReplaceNew
-                }, !0).then(t=>{
-                    if (200 === t.code) {
-                        this.setState({
-                            hostReplacePreview: t.data,
-                            hostReplaceLoading: !1
-                        }, ()=>{
-                            if (t.data.matched_count) {
-                                c["a"].success("预览到 " + t.data.matched_count + " 个节点");
-                                this.replaceHost()
-                            } else {
-                                c["a"].warning("没有匹配的节点")
-                            }
-                        });
-                    } else {
-                        this.setState({
-                            hostReplaceLoading: !1
-                        });
-                        c["a"].error(t.msg || t.message || "预览失败")
-                    }
-                }).catch(()=>{
-                    this.setState({
-                        hostReplaceLoading: !1
-                    });
-                    c["a"].error("预览失败")
-                })
             }
-            replaceHost() {
-                var e = this.state;
-                if (!e.hostReplacePreview || !e.hostReplacePreview.matched_count) {
-                    return c["a"].warning("请先预览并确认有匹配节点")
-                }
-                var preview = e.hostReplacePreview.nodes.slice(0, 10).map(node=>node.type + " #" + node.id + ": " + node.host + " → " + node.new_host).join("\n");
-                if (!window.confirm("将替换 " + e.hostReplacePreview.matched_count + " 个节点的连接域名（仅 host 字段）\n" + preview + (e.hostReplacePreview.matched_count > 10 ? "\n……仅显示前 10 个节点" : "") + "\n是否继续？")) {
-                    return
-                }
-                this.setState({
-                    hostReplaceLoading: !0
+            closeHostReplace() {
+                if (!this.hostReplaceBusy) this.setState({hostReplaceVisible: !1});
+            }
+            changeHostReplace(field, value) {
+                if (!this.hostReplaceBusy) this.setState({
+                    [field]: value, hostReplacePreview: null, hostReplaceError: "", hostReplaceResult: ""
                 });
-                return Object(hostReplacementApi["b"])("/" + window.settings.secure_path + "/server/manage/host/replace", {
-                    mode: e.hostReplaceMode,
-                    old_host: e.hostReplaceOld,
-                    new_host: e.hostReplaceNew,
-                    confirm: !0
-                }, !0).then(t=>{
-                    if (200 === t.code) {
-                        c["a"].success("已替换 " + t.data.updated_count + " 个节点");
-                        this.setState({
-                            hostReplaceLoading: !1,
-                            hostReplacePreview: null
-                        });
-                        this.props.dispatch({
-                            type: "serverManage/getNodes"
-                        });
-                    } else {
-                        this.setState({
-                            hostReplaceLoading: !1
-                        });
-                        c["a"].error(t.msg || t.message || "替换失败")
+            }
+            hostReplacementData(response) {
+                if (!response || response.code !== 200) {
+                    throw new Error(response && (response.msg || response.message) || "请求失败，请检查登录状态和接口是否已更新");
+                }
+                if (!response.data || typeof response.data !== "object") {
+                    throw new Error("接口未返回有效 JSON 数据，请检查服务端响应和后台版本");
+                }
+                return response.data;
+            }
+            async previewHostReplace() {
+                if (this.hostReplaceBusy) return;
+                var params = {
+                    mode: this.state.hostReplaceMode,
+                    old_host: this.state.hostReplaceOld.trim(),
+                    new_host: this.state.hostReplaceNew.trim()
+                };
+                if (!params.old_host || !params.new_host || params.old_host === params.new_host) {
+                    this.setState({hostReplaceError: "请输入不同的旧域名和新域名", hostReplacePreview: null});
+                    return;
+                }
+                this.hostReplaceBusy = !0;
+                this.setState({hostReplaceLoading: !0, hostReplaceStage: "正在预览", hostReplacePreview: null, hostReplaceError: "", hostReplaceResult: ""});
+                try {
+                    var data = this.hostReplacementData(await Object(hostReplacementApi["b"])("/" + window.settings.secure_path + "/server/manage/host/preview", params, !0));
+                    if (!Array.isArray(data.nodes) || !Number.isInteger(data.matched_count) || data.nodes.length !== data.matched_count) {
+                        throw new Error("预览结果不完整，请重新预览");
                     }
-                }).catch(()=>{
                     this.setState({
-                        hostReplaceLoading: !1
+                        hostReplacePreview: Object.assign({}, data, {params: params}),
+                        hostReplaceResult: data.matched_count ? "" : "没有匹配的节点，未执行任何修改"
                     });
-                    c["a"].error("替换失败")
-                })
+                } catch (error) {
+                    this.setState({hostReplaceError: error.message || "预览失败，请稍后重试"});
+                } finally {
+                    this.hostReplaceBusy = !1;
+                    this.setState({hostReplaceLoading: !1, hostReplaceStage: ""});
+                }
+            }
+            async replaceHost() {
+                if (this.hostReplaceBusy) return;
+                var preview = this.state.hostReplacePreview;
+                if (!preview || !preview.matched_count) return;
+                this.hostReplaceBusy = !0;
+                this.setState({hostReplaceLoading: !0, hostReplaceStage: "正在保存", hostReplaceError: "", hostReplaceResult: ""});
+                var saved = !1;
+                try {
+                    var data = this.hostReplacementData(await Object(hostReplacementApi["b"])("/" + window.settings.secure_path + "/server/manage/host/replace", Object.assign({}, preview.params, {confirm: !0}), !0));
+                    if (!Number.isInteger(data.updated_count) || data.updated_count < 0 || !Array.isArray(data.nodes) || data.nodes.length !== data.updated_count) {
+                        throw new Error("替换接口返回结果不完整，请刷新列表核对后重新预览");
+                    }
+                    if (!data.updated_count) {
+                        this.setState({hostReplaceError: "没有更新任何节点，节点可能已变更，请重新预览"});
+                        return;
+                    }
+                    saved = !0;
+                    this.setState({hostReplaceStage: "正在重新读取并核对域名"});
+                    var servers = this.hostReplacementData(await Object(hostReplacementApi["a"])("/" + window.settings.secure_path + "/server/manage/getNodes", {_host_replace: Date.now()}));
+                    if (!Array.isArray(servers)) throw new Error("节点列表响应无效");
+                    this.props.dispatch({type: "serverManage/setState", payload: {servers: servers, fetchLoading: !1, sortMode: !1}});
+                    var verified = data.nodes.every(node=>servers.some(server=>server.type === node.type && String(server.id) === String(node.id) && server.host === node.new_host));
+                    if (!verified) throw new Error("重新读取的域名与保存结果不一致");
+                    var result = "已替换并核对 " + data.updated_count + " 个节点，列表已更新";
+                    this.record = void 0;
+                    this.setState({searchKey: void 0, hostReplaceResult: result});
+                    c["a"].success(result);
+                } catch (error) {
+                    this.setState({hostReplaceError: (saved ? "接口已返回保存成功，但列表核对失败。请刷新列表检查，勿重复提交：" : "替换未确认完成，请核对列表后重新预览：") + (error.message || "网络请求失败")});
+                } finally {
+                    this.hostReplaceBusy = !1;
+                    this.setState({hostReplaceLoading: !1, hostReplaceStage: "", hostReplacePreview: null});
+                }
+            }
+            renderHostReplacement() {
+                var state = this.state, preview = state.hostReplacePreview, busy = state.hostReplaceLoading;
+                var el = y.a.createElement;
+                return el(R["a"], {
+                    title: "替换节点域名", width: "min(760px, 100vw)", visible: state.hostReplaceVisible,
+                    maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeHostReplace()
+                }, el("div", {style: {paddingBottom: 70}},
+                    el("p", null, "范围为全部协议节点（含隐藏节点），仅修改连接地址 host，保留 SNI、端口及传输配置。"),
+                    el("div", {className: "form-group"}, el("label", null, "匹配方式"), el(N["a"], {
+                        value: state.hostReplaceMode, disabled: busy, style: {width: "100%"},
+                        onChange: value=>this.changeHostReplace("hostReplaceMode", value)
+                    }, el(N["a"].Option, {value: "exact"}, "精确匹配（完整地址相同）"), el(N["a"].Option, {value: "contains"}, "模糊匹配（字面包含替换）"))),
+                    el("p", null, "区分大小写，不支持通配符或正则。模糊匹配示例：old.example.com → new.example.com，会保留 hk. 等前缀。"),
+                    el("div", {className: "form-group"}, el("label", null, "旧域名 / 匹配文字"), el(s["a"], {
+                        value: state.hostReplaceOld, disabled: busy, maxLength: 255, placeholder: "old.example.com",
+                        onChange: event=>this.changeHostReplace("hostReplaceOld", event.target.value)
+                    })),
+                    el("div", {className: "form-group"}, el("label", null, "新域名 / 替换文字"), el(s["a"], {
+                        value: state.hostReplaceNew, disabled: busy, maxLength: 255, placeholder: "new.example.com",
+                        onChange: event=>this.changeHostReplace("hostReplaceNew", event.target.value)
+                    })),
+                    state.hostReplaceError && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap"}}, state.hostReplaceError),
+                    state.hostReplaceResult && el("p", {role: "status"}, state.hostReplaceResult),
+                    state.hostReplaceStage && el("p", {role: "status"}, state.hostReplaceStage),
+                    preview && el("div", null, el("strong", null, "预计影响 " + preview.matched_count + " 个节点，请核对后确认替换"),
+                        el("div", {style: {maxHeight: 320, overflow: "auto", marginTop: 12}}, el("table", {className: "table", style: {wordBreak: "break-all"}},
+                            el("thead", null, el("tr", null, el("th", null, "协议 / 节点"), el("th", null, "当前地址"), el("th", null, "替换后地址"))),
+                            el("tbody", null, preview.nodes.map(node=>el("tr", {key: node.type + ":" + node.id},
+                                el("td", null, node.type + " #" + node.id + " " + node.name), el("td", null, node.host), el("td", null, node.new_host)
+                            )))
+                        ))
+                    ),
+                    el("div", {className: "v2board-drawer-action"},
+                        el(l["a"], {disabled: busy, onClick: ()=>this.closeHostReplace(), style: {marginRight: 8}}, "关闭"),
+                        el(l["a"], {loading: busy, onClick: ()=>this.previewHostReplace(), style: {marginRight: 8}}, "预览匹配"),
+                        el(l["a"], {type: "primary", disabled: busy || !preview || !preview.matched_count, onClick: ()=>this.replaceHost()}, "确认替换")
+                    )
+                ));
             }
             render() {
                 var e, t, n, r, v, _ = this.props.serverManage, E = _.servers, O = _.fetchLoading, A = _.sortMode, R = this.props.serverGroup.groups, N = this.state.searchKey, D = {
@@ -108690,7 +108729,7 @@
                     message: e=>{
                         return window.confirm("\u8282\u70b9\u6392\u5e8f\u8fd8\u6ca1\u6709\u4fdd\u5b58\uff0c\u662f\u5426\u79bb\u5f00")
                     }
-                }), y.a.createElement(M["a"], {
+                }), this.renderHostReplacement(), y.a.createElement(M["a"], {
                     loading: O
                 }, y.a.createElement("div", {
                     className: "block block-bottom ".concat(T.a.manage)
