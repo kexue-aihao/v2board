@@ -67,19 +67,19 @@
 
 | 方法 | 接口路径 | 鉴权 | 请求参数 | 返回/说明 |
 | --- | --- | --- | --- | --- |
-| POST | /auth/register | 无 | email、password；可选 invite_code、email_code、recaptcha_data、arithmetic_challenge_id、arithmetic_answer | 注册成功返回 auth_data；算术验证开启时服务端强制校验；开启 oauth_register_only 时本接口直接返回 403（仅允许第三方注册）；@telegram.invalid、@github.io 为保留域，拒绝注册 |
+| POST | /auth/register/telegram | 无 | email、code | 使用 Telegram 机器人下发的 6 位验证码注册，成功返回 auth_data；邮箱注册接口已关闭 |
 | POST | /auth/login | 无 | email、password | 密码正确时返回 auth_data 或二步验证 challenge |
 | POST | /auth/verify2fa | 无 | challenge、code 或 recovery_code | 完成登录二步验证并返回 auth_data |
 | POST | /auth/2fa/setup | setup_token | setup_token | 管理员/员工（is_admin 或 is_staff）强制二步验证初始化 |
 | POST | /auth/2fa/confirm | setup_token | setup_token、code | 确认管理员/员工二步验证，返回 auth_data 及 recovery_codes |
 | GET | /auth/token2Login | 无 | token 或 verify，可选 redirect | 临时 Token 登录或跳转 |
-| POST | /auth/forget | 无 | email、email_code、password | 重置密码 |
+| POST | /auth/forget/telegram | 无 | email、telegram_code、password | 已绑定 Telegram 的账号使用机器人验证码重置密码 |
 | POST | /auth/getQuickLoginUrl | 用户（auth_data） | 可选 redirect | 生成临时快捷登录地址 |
 | GET | /oauth/{provider}/redirect | 无 | 路径 provider（google/github/telegram） | 跳转到第三方授权页；provider 未启用/未配置返回 503，未知 provider 返回 404 |
 | GET | /oauth/{provider}/state | 无 | 路径 provider（仅 telegram） | 为 Telegram 登录控件签发一次性 state；非 telegram 返回 404 |
 | GET | /oauth/{provider}/callback | 无 | 路径 provider（google/github）；query code、state | 第三方回调，换取 ticket 后 302 回前端 /#/login（oauth_ticket 或 oauth_error）；telegram 返回 422 |
-| POST | /oauth/complete | 无 | ticket；或 provider=telegram 时传 data、state；可选 email、email_code、recaptcha_data、invite_code | 消费 ticket 完成登录/注册；可能返回 requires_email、link_required、registration_required，或 auth_data / 二步验证 challenge |
-| POST | /comm/sendEmailVerify | 无 | email；可选 isforget（0/1）、recaptcha_data | 发送邮箱验证码；按 IP 限流，isforget=0 校验邮箱未注册、isforget=1 校验已注册 |
+| POST | /oauth/complete | 无 | ticket；或 provider=telegram 时传 data、state | 消费 ticket 完成已有 OAuth/Telegram 账号登录；OAuth 新账号注册已关闭 |
+| POST | /comm/sendTelegramForgetCode | 无 | email | 向已绑定账号的 Telegram 对话发送找回密码验证码，按 IP 和账号限流 |
 | POST | /comm/pv | 无 | invite_code | 邀请码页面访问计数（pv+1） |
 
 > 管理员登录入口注册在同一路由文件（PassportRoute），但位于密钥路径下，基础路径为 /api/v1/{secure_path}/passport（secure_path 取 config `v2board.secure_path`，缺省回退 `frontend_admin_path` 或 crc32b(app.key)）。这些接口无 admin 中间件，管理员身份在控制器内校验：
@@ -110,6 +110,22 @@
 
 部署后执行 `php artisan v2board:update` 创建登录链接表。若 Telegram 命令菜单未显示 `/login`，在管理端重新设置一次 Telegram Webhook 即可同步命令列表。
 
+### Telegram 机器人自助功能
+
+机器人私聊支持以下命令：
+
+| 命令 | 说明 |
+| --- | --- |
+| `/start` | 未绑定账号时显示注册和登录入口；已绑定账号显示原有菜单 |
+| `/regedit` | 提交邮箱并接收注册验证码；强制邀请码时随后提交邀请码 |
+| `/login` | 生成一次性免密码登录链接 |
+| `/resetpassword` | 向已绑定账号发送找回密码验证码 |
+| `/get_subscription` | 浏览套餐、选择周期和支付方式，支付链接或二维码由机器人返回 |
+| `/get_traffic` | 查询流量；`/traffic` 继续作为旧命令别名 |
+| `/reset` | 按当前套餐的 `reset_price` 创建流量重置订单 |
+
+机器人购买复用网页支付驱动。支付回调仍由面板的公开回调接口处理，订单会校验支付尝试、金额、币种和支付方式后才开通。
+
 ### 4.3 公共配置扩展字段
 
 `GET /api/v1/guest/comm/config` 返回的 `data` 包含以下字段，并带有 `Cache-Control: no-store, no-cache, must-revalidate`：
@@ -123,7 +139,11 @@
 | is_recaptcha | integer | 是否开启 reCAPTCHA，0/1 |
 | recaptcha_site_key | string/null | reCAPTCHA 站点 Key |
 | is_arithmetic_verification | integer | 是否开启注册算术验证，0/1 |
-| oauth_register_only | integer | 是否仅允许第三方(OAuth)注册，0/1；开启时主题注册页隐藏邮箱注册表单，只保留 OAuth 区 |
+| oauth_register_only | integer | 兼容旧主题的第三方注册开关；新账号注册统一走 Telegram 机器人 |
+| telegram_register_enabled | boolean | Telegram 机器人注册是否可用 |
+| telegram_register_closed | boolean | 后台「停止注册」是否生效 |
+| telegram_forget_enabled | boolean | Telegram 找回密码入口是否可用 |
+| telegram_bot_username | string | 注册机器人用户名，用于生成深链 |
 | oauth.google | boolean | 是否开启 Google 第三方登录 |
 | oauth.github | boolean | 是否开启 GitHub 第三方登录 |
 | oauth.telegram | boolean | 是否开启 Telegram 第三方登录 |
@@ -339,6 +359,8 @@ period 支持值：
 | reseller_allowed_payment_drivers | array | [] | 倒卖商可用支付驱动白名单 |
 | telegram_subscription_binding_enable | 0/1 | 0 | 启用 Telegram 订阅绑定 |
 | telegram_binding_check_interval | integer | 300 | Telegram 绑定校验间隔（秒），60-3600 |
+| telegram_register_enable | 0/1 | 0 | 启用 Telegram 机器人注册 |
+| telegram_register_code_delay | integer | 10 | 注册验证码发送延迟（秒），0 表示立即发送，最大 300 |
 | oauth_google_enable / oauth_google_client_id / oauth_google_client_secret / oauth_google_redirect_uri | 0/1、string | — | Google OAuth 登录；fetch 仅回传 oauth_google_client_secret_configured 布尔位，save 传空串保留原密钥 |
 | oauth_github_enable / oauth_github_client_id / oauth_github_client_secret / oauth_github_redirect_uri | 0/1、string | — | GitHub OAuth 登录，同上 |
 | oauth_telegram_enable / oauth_telegram_login_domain / oauth_telegram_bot_username | 0/1、string | — | Telegram Widget 登录 |
@@ -789,17 +811,13 @@ Cloudflare 免费版能够承担基础 DDoS 缓解、缓存和浏览器挑战，
 
 #### 注册接口挑战规则
 
-在 **Security > WAF > Custom rules** 创建一条规则，动作为 **Managed Challenge**。以下表达式覆盖主站和倒卖商店铺的注册、邮箱验证码与找回密码入口：
+在 **Security > WAF > Custom rules** 创建一条规则，动作为 **Managed Challenge**。以下表达式覆盖主站 Telegram 注册、找回密码和登录入口：
 
 ```
 http.request.method eq "POST" and (
-  http.request.uri.path eq "/api/v1/passport/auth/register" or
-  http.request.uri.path eq "/api/v1/passport/comm/sendEmailVerify" or
-  http.request.uri.path eq "/api/v1/passport/auth/forget" or
-  (
-    starts_with(http.request.uri.path, "/api/v1/store/") and
-    ends_with(http.request.uri.path, "/passport/register")
-  )
+  http.request.uri.path eq "/api/v1/passport/auth/register/telegram" or
+  http.request.uri.path eq "/api/v1/passport/comm/sendTelegramForgetCode" or
+  http.request.uri.path eq "/api/v1/passport/auth/forget/telegram"
 )
 ```
 
@@ -816,11 +834,12 @@ http.request.method eq "POST" and (
 
 | 目标 | 起始阈值 | 超限动作 |
 | --- | --- | --- |
-| `/api/v1/passport/auth/register` 与店铺 `/passport/register` | 每 IP 10 分钟 5 次 | Managed Challenge；持续命中再短时 Block |
-| `/api/v1/passport/comm/sendEmailVerify` | 每 IP 1 分钟 3 次、每小时 10 次 | Block 或 Managed Challenge |
+| `/api/v1/passport/auth/register/telegram` | 每 IP 10 分钟 5 次 | Managed Challenge；持续命中再短时 Block |
+| `/api/v1/passport/comm/sendTelegramForgetCode` | 每 IP 1 分钟 3 次 | Block 或 Managed Challenge |
+| `/api/v1/passport/auth/forget/telegram` | 每 IP 1 分钟 5 次 | Managed Challenge |
 | `/api/v1/passport/auth/login` | 每 IP 1 分钟 20 次 | Managed Challenge；不要按邮箱直接在边缘封禁，以免被恶意者利用来锁定他人 |
 
-边缘 IP 限速挡不住分布式代理池，因此必须同时打开现有服务端能力：管理端配置中启用 `register_limit_by_ip_enable`，设置合理的 `register_limit_count` 与 `register_limit_expire`；启用 `email_verify`、`recaptcha_enable` 和 `arithmetic_verification_enable`；必要时启用 `invite_force` 或邮箱后缀白名单。当前后端对 `/passport/comm/sendEmailVerify` 已限制为每 IP 每分钟 3 次，算术题按 IP 绑定、5 分钟过期且最多 5 次作答；Cloudflare 规则应作为其前置防线。
+边缘 IP 限速挡不住分布式代理池，因此必须同时打开现有服务端能力：管理端配置中启用 `register_limit_by_ip_enable`，设置合理的 `register_limit_count` 与 `register_limit_expire`；启用 `telegram_register_enable`、`recaptcha_enable` 和 `arithmetic_verification_enable`；必要时启用 `invite_force`。Telegram 注册自身按 UID 做 60 秒发码节流，验证码最多错误 5 次即作废；Cloudflare 规则应作为其前置防线。
 
 Cloudflare Turnstile 本身可免费使用，但**不能**直接填入本项目的 `recaptcha_data`：当前服务端使用 Google reCAPTCHA SDK 校验该字段。若要改用 Turnstile，必须同时修改前端提交逻辑与后端 Siteverify 校验；在未完成该改造前，继续使用已配置的 reCAPTCHA 或内置算术验证。
 
@@ -943,12 +962,12 @@ Cloudflare Turnstile 本身可免费使用，但**不能**直接填入本项目�
 | GET | /config | 无 | 店铺名称、描述、Logo 等公开信息 |
 | GET | /plans | 无 | 已启用且基础模板仍在售的套餐；价格字段为整数分 |
 | GET | /payments | 无 | 已启用且被管理员允许的支付方式，仅返回 id、name、driver |
-| POST | /passport/register | email、password；以及主站注册所需字段 | 使用现有 `v2_user` 注册，并建立当前店铺客户关联 |
+| POST | /passport/register | — | 店铺注册已关闭，返回 403 并引导用户前往主站 Telegram 机器人注册 |
 | POST | /passport/login | email、password | 登录现有 `v2_user` 并建立当前店铺客户关联 |
 | POST | /passport/verify2fa | challenge、code 或 recovery_code | 完成店铺用户二步验证 |
 | GET/POST | /payment/notify/{payment_uuid} | 支付平台回调参数 | 校验支付配置、店铺、订单和金额后开通订阅 |
 
-店铺注册复用主站 `passport/register` 逻辑：跳过平台级邮箱验证开关（`email_verify`），但 `oauth_register_only=1` 时店铺邮箱注册同样被 403 拦截（店铺页面不含第三方登录入口，等于关闭全部店铺新客注册），`arithmetic_verification_enable=1` 时仍需提交 `arithmetic_challenge_id`、`arithmetic_answer` 算术验证。
+店铺注册入口保留为明确的 403 响应，避免前端收到 404；新用户需前往主站通过 Telegram 机器人完成注册。
 
 登录后接口使用现有用户 `auth_data`：
 

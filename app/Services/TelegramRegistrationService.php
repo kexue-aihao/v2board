@@ -38,6 +38,13 @@ class TelegramRegistrationService
     private const RESEND_THROTTLE = 60;
     private const MAX_ATTEMPTS = 5;
 
+    private $telegram;
+
+    public function __construct(?TelegramService $telegram = null)
+    {
+        $this->telegram = $telegram ?: new TelegramService();
+    }
+
     /**
      * 站点级注册总闸（后台「停止注册」）。旧的邮箱注册与 OAuth 注册都受它管；机器人是现在
      * 唯一的注册入口，不认这个开关等于管理员根本关不掉注册。
@@ -186,24 +193,40 @@ class TelegramRegistrationService
             abort(422, self::INVALID_CODE_MESSAGE);
         }
 
-        $application = TelegramRegistration::where('email', $email)
-            ->where('status', self::STATUS_CODE_SENT)
-            ->orderByDesc('id')
-            ->first();
-        if (!$application) {
-            abort(422, self::INVALID_CODE_MESSAGE);
-        }
         $now = time();
-        if ((int)$application->expires_at < $now || (int)$application->attempts >= self::MAX_ATTEMPTS) {
-            $application->update(['status' => self::STATUS_VOID, 'updated_at' => $now]);
-            abort(422, self::INVALID_CODE_MESSAGE);
-        }
-        if (!$this->codeMatches($application, $code)) {
-            $application->increment('attempts');
-            abort(422, self::INVALID_CODE_MESSAGE);
-        }
+        // 申请行、验证码校验、失败次数和建号都放在同一行锁事务里。否则一个正确码请求
+        // 可能在第五次错误提交把申请作废后，仍拿着事务外读取的旧对象继续建号。
+        $result = DB::transaction(function () use ($email, $code, $now) {
+            $application = TelegramRegistration::where('email', $email)
+                ->where('status', self::STATUS_CODE_SENT)
+                ->orderByDesc('id')
+                ->lockForUpdate()
+                ->first();
 
-        return DB::transaction(function () use ($application, $email, $now) {
+            if (!$application) {
+                return ['invalid' => true];
+            }
+            if ((int)$application->expires_at < $now || (int)$application->attempts >= self::MAX_ATTEMPTS) {
+                $application->status = self::STATUS_VOID;
+                $application->code_hash = null;
+                $application->updated_at = $now;
+                $application->save();
+                return ['invalid' => true];
+            }
+            if (!$this->codeMatches($application, $code)) {
+                $attempts = (int)$application->attempts + 1;
+                $application->attempts = $attempts;
+                $application->status = $attempts >= self::MAX_ATTEMPTS
+                    ? self::STATUS_VOID
+                    : self::STATUS_CODE_SENT;
+                if ($attempts >= self::MAX_ATTEMPTS) {
+                    $application->code_hash = null;
+                }
+                $application->updated_at = $now;
+                $application->save();
+                return ['invalid' => true];
+            }
+
             // 核验 ④ 的并发兜底：两个请求同时提交同一邮箱/同一 Telegram 时，后到的在这里失败；
             // 最终仍由 v2_user 上的唯一索引把关。
             if (User::where('email', $email)->lockForUpdate()->exists()) {
@@ -255,26 +278,11 @@ class TelegramRegistrationService
             ]);
             return $user;
         });
-    }
 
-    /**
-     * 供注册页展示「验证码发去了哪里」：只回掩码后的邮箱与有效期，不回验证码本身。
-     */
-    public function pendingHint(string $email): array
-    {
-        $email = strtolower(trim($email));
-        $application = TelegramRegistration::where('email', $email)
-            ->where('status', self::STATUS_CODE_SENT)
-            ->orderByDesc('id')
-            ->first();
-        if (!$application) {
-            return ['pending' => false];
+        if (is_array($result) && !empty($result['invalid'])) {
+            abort(422, self::INVALID_CODE_MESSAGE);
         }
-        return [
-            'pending' => true,
-            'email' => $this->maskEmail($email),
-            'expires_at' => (int)$application->expires_at
-        ];
+        return $result;
     }
 
     /* ---------------- 内部 ---------------- */
@@ -287,7 +295,7 @@ class TelegramRegistrationService
             SendTelegramJob::dispatch((int)$application->telegram_id, $text)->delay(now()->addSeconds($delay));
             return;
         }
-        (new TelegramService())->sendMessage((int)$application->telegram_id, $text);
+        $this->telegram->sendMessage((int)$application->telegram_id, $text);
     }
 
     /**
@@ -350,18 +358,6 @@ class TelegramRegistrationService
             return false;
         }
         return hash_equals($expected, $this->hashCode((int)$application->id, $code));
-    }
-
-    private function maskEmail(string $email): string
-    {
-        $parts = explode('@', $email, 2);
-        $local = $parts[0] ?? '';
-        $domain = $parts[1] ?? '';
-        if ($local === '' || $domain === '') {
-            return $email;
-        }
-        $head = mb_substr($local, 0, 1);
-        return $head . str_repeat('*', max(1, mb_strlen($local) - 1)) . '@' . $domain;
     }
 
     private function applyTryOutPlan(User $user, int $now): void

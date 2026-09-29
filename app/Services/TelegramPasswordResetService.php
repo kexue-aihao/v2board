@@ -20,6 +20,13 @@ class TelegramPasswordResetService
     private const CODE_TTL = 300;
     private const RESEND_THROTTLE = 60;
 
+    private $telegram;
+
+    public function __construct(?TelegramService $telegram = null)
+    {
+        $this->telegram = $telegram ?: new TelegramService();
+    }
+
     public function enabled(): bool
     {
         return trim((string)config('v2board.telegram_bot_token', '')) !== '';
@@ -50,7 +57,7 @@ class TelegramPasswordResetService
 
         $code = (string)random_int(100000, 999999);
         // 先发后存：发送抛异常时验证码不会留在缓存里，避免「已下发」的假象。
-        (new TelegramService())->sendMessage((int)$user->telegram_id, $this->message($code));
+        $this->telegram->sendMessage((int)$user->telegram_id, $this->message($code));
         Cache::put(CacheKey::get('TELEGRAM_FORGET_CODE', $email), $code, self::CODE_TTL);
         Cache::put($sentKey, time(), self::RESEND_THROTTLE);
 

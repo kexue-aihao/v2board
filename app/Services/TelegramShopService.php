@@ -32,9 +32,9 @@ class TelegramShopService
 
     private $telegram;
 
-    public function __construct()
+    public function __construct(?TelegramService $telegram = null)
     {
-        $this->telegram = new TelegramService();
+        $this->telegram = $telegram ?: new TelegramService();
     }
 
     /**
@@ -109,7 +109,7 @@ class TelegramShopService
             if ($price === null || $price === '') {
                 continue;
             }
-            $buttons[] = [$this->button($label . '  ' . $price, 'shop:buy:' . $plan->id . ':' . $field)];
+            $buttons[] = [$this->button($label . '  ' . $this->formatAmount($price), 'shop:buy:' . $plan->id . ':' . $field)];
         }
         if (!$buttons) {
             $this->send($chatId, '该套餐暂无可购买的周期。');
@@ -211,7 +211,32 @@ class TelegramShopService
 
         $methods = $this->paymentMethods();
         if (!$methods) {
-            $this->send($chatId, '当前没有可用的支付方式，请联系管理员。订单号：' . $order->trade_no);
+            // 余额已覆盖全额时不需要支付方式，直接走与网页相同的免支付开通路径。
+            if ((int)$order->total_amount <= 0) {
+                try {
+                    $result = (new OrderPaymentService())->initiate($order, null);
+                    if (($result['type'] ?? null) !== -1) {
+                        throw new \RuntimeException('免费订单开通失败');
+                    }
+                    $this->send($chatId, '订单已开通，可发送 /get_traffic 查看订阅。');
+                } catch (\Throwable $e) {
+                    report($e);
+                    // 免支付开通失败时订单仍是待支付，退回本次已抵扣的余额，避免用户余额
+                    // 被一笔无法完成的机器人订单长期冻结。
+                    try {
+                        (new PaymentAttemptService())->cancelOrder($order, 'free order opening failed');
+                    } catch (\Throwable $cancelError) {
+                        report($cancelError);
+                    }
+                    $this->send($chatId, '订单开通失败：' . $e->getMessage());
+                }
+                return;
+            }
+
+            // 建单时可能刚好没有启用的支付驱动。取消订单会退回本次已抵扣的余额，
+            // 避免机器人留下一个永久阻塞后续下单的待支付订单。
+            (new PaymentAttemptService())->cancelOrder($order, 'no payment method available');
+            $this->send($chatId, '当前没有可用的支付方式，请联系管理员。');
             return;
         }
         $buttons = [];
@@ -222,7 +247,7 @@ class TelegramShopService
             $chatId,
             "订单已创建\n"
             . '套餐：' . $plan->name . '（' . self::PERIODS[$period] . "）\n"
-            . '应付：' . $order->total_amount . "\n"
+            . '应付：' . $this->formatAmount($order->total_amount) . "\n"
             . '订单号：' . $order->trade_no . "\n\n请选择支付方式：",
             $buttons
         );
@@ -309,7 +334,7 @@ class TelegramShopService
     {
         foreach (['month_price', 'quarter_price', 'half_year_price', 'year_price', 'onetime_price'] as $field) {
             if ($plan->$field !== null && $plan->$field !== '') {
-                return '  ' . $plan->$field . ' 起';
+                return '  ' . $this->formatAmount($plan->$field) . '起';
             }
         }
         return '';
@@ -318,6 +343,11 @@ class TelegramShopService
     private function isHttpUrl(string $value): bool
     {
         return (bool)preg_match('#^https?://#i', $value);
+    }
+
+    private function formatAmount($amount): string
+    {
+        return number_format(((int)$amount) / 100, 2, '.', '') . ' 元';
     }
 
     private function button(string $text, string $callbackData): array

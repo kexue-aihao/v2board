@@ -2,7 +2,7 @@
 
 > v0.1 · 2026-09-28 · 配套文档：`Telegram注册体系改造-需求文档.md`
 >
-> 状态：**待审批**。审批通过后按第 12 节的工作拆分开工。
+> 状态：**阶段一至四已实现，阶段五测试与联调中**。
 
 ---
 
@@ -186,9 +186,7 @@ CREATE TABLE `v2_telegram_registration` (
 | 副作用 | 建号（虚拟邮箱 + 随机密码 + `telegram_id`）、申请置 2、清空 code_hash、写登录态 |
 | 限流 | IP 维度 3 次/分钟；同一申请失败 5 次即作废 |
 
-**`GET /passport/auth/register/telegram/status`**
-
-供网页轮询（用户先打开网页、再回机器人取码的场景）。入参 `ticket`，返回 `{status, email_masked, expires_at}`。不返回验证码本身。
+网页当前不轮询注册状态：机器人直接把带 `tg_email` 的注册页深链发给用户，页面由用户填写邮箱和验证码后一次提交。原计划的 `GET /passport/auth/register/telegram/status` 暂不暴露，避免仅凭邮箱查询注册申请状态造成枚举面。
 
 **`POST /passport/auth/forget/telegram`**
 
@@ -306,6 +304,8 @@ CREATE TABLE `v2_telegram_registration` (
 | 五 · 测试与联调 | 第 11 节用例全跑 + 三套主题回归 | 验收 | 1–2 人日 |
 
 **合计约 9–12 人日**。阶段一、二完成即可上线注册闭环，三、四可分批灰度。
+
+当前实现已完成阶段一至四；阶段五还需执行第 11 节的自动化用例、真实 Telegram 支付回调联调和 default / ez / signature 三套主题回归。
 
 ---
 
