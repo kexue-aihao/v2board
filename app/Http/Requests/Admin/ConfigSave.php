@@ -97,6 +97,8 @@ class ConfigSave extends FormRequest
         'reward_group_enable' => 'in:0,1',
         // telegram
         'telegram_bot_enable' => 'in:0,1',
+        'telegram_admin_operation_enable' => 'in:0,1',
+        'telegram_admin_operation_topic_id' => 'nullable|integer|min:1',
         'telegram_account_binding_enable' => 'in:0,1',
         'telegram_register_enable' => 'in:0,1',
         'telegram_register_code_delay' => 'integer|min:0|max:300',

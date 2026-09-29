@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\ServerShadowsocksSave;
 use App\Http\Requests\Admin\ServerShadowsocksUpdate;
 use App\Models\ServerShadowsocks;
 use App\Services\ServerIdService;
+use App\Services\TelegramAdminOperationService;
 use Illuminate\Http\Request;
 
 class ShadowsocksController extends Controller
@@ -25,13 +26,17 @@ class ShadowsocksController extends Controller
             if ($nodeId !== null && $nodeId !== (int)$server->id) {
                 ServerIdService::assertIdAvailable('shadowsocks', $nodeId);
             }
+            $previousShow = (int)$server->show;
             try {
-                $server->update($params);
+                $saved = $server->update($params);
                 if ($nodeId !== null && $nodeId !== (int)$server->id) {
                     ServerIdService::changeId('shadowsocks', $server, $nodeId);
                 }
             } catch (\Exception $e) {
                 abort(500, __('保存失败'));
+            }
+            if ($saved) {
+                TelegramAdminOperationService::nodeVisibilityChanged($server, 'shadowsocks', $previousShow);
             }
             return response([
                 'data' => true
@@ -45,6 +50,7 @@ class ShadowsocksController extends Controller
         if (!$server) {
             abort(500, __('创建失败'));
         }
+        TelegramAdminOperationService::nodeCreated($server, 'shadowsocks');
 
         return response([
             'data' => true
@@ -59,9 +65,12 @@ class ShadowsocksController extends Controller
                 abort(500, __('节点ID不存在'));
             }
         }
-        return response([
-            'data' => $server->delete()
-        ]);
+        $wasPublished = (int)$server->show === 1;
+        $deleted = $server->delete();
+        if ($deleted && $wasPublished) {
+            TelegramAdminOperationService::nodeDeleted($server, 'shadowsocks');
+        }
+        return response(['data' => $deleted]);
     }
 
     public function update(ServerShadowsocksUpdate $request)
@@ -75,10 +84,14 @@ class ShadowsocksController extends Controller
         if (!$server) {
             abort(500, __('该服务器不存在'));
         }
+        $previousShow = (int)$server->show;
         try {
-            $server->update($params);
+            $saved = $server->update($params);
         } catch (\Exception $e) {
             abort(500, __('保存失败'));
+        }
+        if ($saved) {
+            TelegramAdminOperationService::nodeVisibilityChanged($server, 'shadowsocks', $previousShow);
         }
 
         return response([

@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\ServerTrojanSave;
 use App\Http\Requests\Admin\ServerTrojanUpdate;
 use App\Models\ServerTrojan;
 use App\Services\ServerIdService;
+use App\Services\TelegramAdminOperationService;
 use App\Services\ServerService;
 use Illuminate\Http\Request;
 
@@ -26,13 +27,17 @@ class TrojanController extends Controller
             if ($nodeId !== null && $nodeId !== (int)$server->id) {
                 ServerIdService::assertIdAvailable('trojan', $nodeId);
             }
+            $previousShow = (int)$server->show;
             try {
-                $server->update($params);
+                $saved = $server->update($params);
                 if ($nodeId !== null && $nodeId !== (int)$server->id) {
                     ServerIdService::changeId('trojan', $server, $nodeId);
                 }
             } catch (\Exception $e) {
                 abort(500, __('保存失败'));
+            }
+            if ($saved) {
+                TelegramAdminOperationService::nodeVisibilityChanged($server, 'trojan', $previousShow);
             }
             return response([
                 'data' => true
@@ -46,6 +51,7 @@ class TrojanController extends Controller
         if (!$server) {
             abort(500, __('创建失败'));
         }
+        TelegramAdminOperationService::nodeCreated($server, 'trojan');
 
         return response([
             'data' => true
@@ -60,9 +66,12 @@ class TrojanController extends Controller
                 abort(500, __('节点ID不存在'));
             }
         }
-        return response([
-            'data' => $server->delete()
-        ]);
+        $wasPublished = (int)$server->show === 1;
+        $deleted = $server->delete();
+        if ($deleted && $wasPublished) {
+            TelegramAdminOperationService::nodeDeleted($server, 'trojan');
+        }
+        return response(['data' => $deleted]);
     }
 
     public function update(ServerTrojanUpdate $request)
@@ -76,10 +85,14 @@ class TrojanController extends Controller
         if (!$server) {
             abort(500, __('该服务器不存在'));
         }
+        $previousShow = (int)$server->show;
         try {
-            $server->update($params);
+            $saved = $server->update($params);
         } catch (\Exception $e) {
             abort(500, __('保存失败'));
+        }
+        if ($saved) {
+            TelegramAdminOperationService::nodeVisibilityChanged($server, 'trojan', $previousShow);
         }
 
         return response([

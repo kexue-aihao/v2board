@@ -5,6 +5,7 @@ namespace App\Http\Controllers\V1\Admin\Server;
 use App\Http\Controllers\Controller;
 use App\Models\ServerAnytls;
 use App\Services\ServerIdService;
+use App\Services\TelegramAdminOperationService;
 use Illuminate\Http\Request;
 
 class AnyTLSController extends Controller
@@ -43,13 +44,17 @@ class AnyTLSController extends Controller
             if ($nodeId !== null && $nodeId !== (int)$server->id) {
                 ServerIdService::assertIdAvailable('anytls', $nodeId);
             }
+            $previousShow = (int)$server->show;
             try {
-                $server->update($params);
+                $saved = $server->update($params);
                 if ($nodeId !== null && $nodeId !== (int)$server->id) {
                     ServerIdService::changeId('anytls', $server, $nodeId);
                 }
             } catch (\Exception $e) {
                 abort(500, __('保存失败'));
+            }
+            if ($saved) {
+                TelegramAdminOperationService::nodeVisibilityChanged($server, 'anytls', $previousShow);
             }
             return response([
                 'data' => true
@@ -63,6 +68,7 @@ class AnyTLSController extends Controller
         if (!$server) {
             abort(500, __('创建失败'));
         }
+        TelegramAdminOperationService::nodeCreated($server, 'anytls');
 
         return response([
             'data' => true
@@ -77,9 +83,12 @@ class AnyTLSController extends Controller
                 abort(500, __('节点ID不存在'));
             }
         }
-        return response([
-            'data' => $server->delete()
-        ]);
+        $wasPublished = (int)$server->show === 1;
+        $deleted = $server->delete();
+        if ($deleted && $wasPublished) {
+            TelegramAdminOperationService::nodeDeleted($server, 'anytls');
+        }
+        return response(['data' => $deleted]);
     }
 
     public function update(Request $request)
@@ -98,10 +107,14 @@ class AnyTLSController extends Controller
         if (!$server) {
             abort(500, __('该服务器不存在'));
         }
+        $previousShow = (int)$server->show;
         try {
-            $server->update($params);
+            $saved = $server->update($params);
         } catch (\Exception $e) {
             abort(500, __('保存失败'));
+        }
+        if ($saved) {
+            TelegramAdminOperationService::nodeVisibilityChanged($server, 'anytls', $previousShow);
         }
 
         return response([

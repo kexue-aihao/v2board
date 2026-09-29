@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\Subscription;
 use App\Models\ResellerPlan;
 use App\Services\PlanService;
+use App\Services\TelegramAdminOperationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -44,6 +45,7 @@ class PlanController extends Controller
             if (!$plan) {
                 abort(500, __('该订阅不存在'));
             }
+            $previousShow = (int)$plan->show;
             DB::beginTransaction();
             // update user group id and transfer
             try {
@@ -61,13 +63,16 @@ class PlanController extends Controller
                 abort(500, __('保存失败'));
             }
             DB::commit();
+            TelegramAdminOperationService::planVisibilityChanged($plan, $previousShow);
             return response([
                 'data' => true
             ]);
         }
-        if (!Plan::create($params)) {
+        $plan = Plan::create($params);
+        if (!$plan) {
             abort(500, __('创建失败'));
         }
+        TelegramAdminOperationService::planCreated($plan);
         return response([
             'data' => true
         ]);
@@ -90,9 +95,11 @@ class PlanController extends Controller
                 abort(500, __('该订阅ID不存在'));
             }
         }
-        return response([
-            'data' => $plan->delete()
-        ]);
+        $deleted = $plan->delete();
+        if ($deleted) {
+            TelegramAdminOperationService::planDeleted($plan);
+        }
+        return response(['data' => $deleted]);
     }
 
     public function update(PlanUpdate $request)
@@ -106,11 +113,15 @@ class PlanController extends Controller
         if (!$plan) {
             abort(500, __('该订阅不存在'));
         }
+        $previousShow = (int)$plan->show;
 
         try {
-            $plan->update($updateData);
+            $saved = $plan->update($updateData);
         } catch (\Exception $e) {
             abort(500, __('保存失败'));
+        }
+        if ($saved) {
+            TelegramAdminOperationService::planVisibilityChanged($plan, $previousShow);
         }
 
         return response([

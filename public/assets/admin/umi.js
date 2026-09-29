@@ -6325,16 +6325,16 @@
                  }, f.a.createElement(l["a"], {
                      checked: parseInt(y.telegram_subscription_binding_enable),
                      onChange: e=>this.set("telegram", "telegram_subscription_binding_enable", e ? 1 : 0)
-                 })), y.telegram_subscription_binding_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                 })), (y.telegram_subscription_binding_enable || y.telegram_admin_operation_enable) ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                      isChildren: !0,
                      title: "售后群 Chat ID",
-                     description: "数字群组 ID（超级群通常以 -100 开头），不是上方的售后群链接。此项为空时用户前台不显示绑定入口。机器人需为该群管理员并具备邀请用户权限。"
+                     description: "数字群组 ID（超级群通常以 -100 开头），不是上方的售后群链接。绑定和后台操作通知共用此群。机器人需为该群管理员。"
                  }, f.a.createElement("input", {
                      className: "form-control",
                      placeholder: "-100xxxxxxxxxx",
                      defaultValue: y.telegram_discuss_id,
                      onChange: e=>this.set("telegram", "telegram_discuss_id", e.target.value)
-                 })), f.a.createElement(m, {
+                 })), y.telegram_subscription_binding_enable ? f.a.createElement(m, {
                      isChildren: !0,
                      title: "Telegram 巡检间隔（秒）",
                      description: "用于检测用户名变更，建议保持 300 秒。"
@@ -6345,7 +6345,7 @@
                      className: "form-control",
                      defaultValue: y.telegram_binding_check_interval,
                      onChange: e=>this.set("telegram", "telegram_binding_check_interval", e.target.value)
-                 }))) : ""), _.recaptcha_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                 })) : null) : ""), _.recaptcha_enable ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                     isChildren: !0,
                     title: "\u5bc6\u94a5",
                     description: "\u5728Google reCAPTCHA\u7533\u8bf7\u7684\u5bc6\u94a5\u3002"
@@ -6940,6 +6940,25 @@
                     checked: parseInt(y.telegram_bot_enable),
                     onChange: e=>this.set("telegram", "telegram_bot_enable", e ? 1 : 0)
                 })),
+                f.a.createElement(m, {
+                    title: "后台操作通知",
+                    description: "仅通知节点和套餐上架、下架及已上架项目删除，发送到配置的售后群。消息会隐藏节点地址和连接参数。"
+                }, f.a.createElement(l["a"], {
+                    checked: parseInt(y.telegram_admin_operation_enable),
+                    onChange: e=>this.set("telegram", "telegram_admin_operation_enable", e ? 1 : 0)
+                })),
+                y.telegram_admin_operation_enable ? f.a.createElement(m, {
+                    isChildren: !0,
+                    title: "通知 Topic ID",
+                    description: "论坛式群组可填写主题 ID；普通群组留空。"
+                }, f.a.createElement("input", {
+                    type: "number",
+                    min: 1,
+                    className: "form-control",
+                    placeholder: "留空发送到默认话题",
+                    defaultValue: y.telegram_admin_operation_topic_id,
+                    onChange: e=>this.set("telegram", "telegram_admin_operation_topic_id", e.target.value)
+                })) : "",
                 f.a.createElement(m, {
                     title: "\u5f3a\u5236\u7ed1\u5b9a Telegram",
                     description: "\u5f00\u542f\u540e\uff1a\u81ea\u884c\u6ce8\u518c\uff08\u975e OAuth\uff09\u4e14\u672a\u7ed1\u5b9a Telegram \u7684\u8d26\u53f7\uff0c\u767b\u5f55\u540e\u4f1a\u88ab\u4e00\u4e2a\u4e0d\u53ef\u5173\u95ed\u7684\u5f39\u7a97\u906e\u6321\uff0c\u7ed1\u5b9a\u540e\u624d\u80fd\u4f7f\u7528\u9762\u677f\uff1b\u5f39\u7a97\u5185\u540c\u65f6\u63d0\u4f9b\u7528 Telegram \u9a8c\u8bc1\u7801\u627e\u56de\u5bc6\u7801\u3002OAuth \u8d26\u53f7\uff08Telegram/Google/GitHub\uff09\u4e0d\u53d7\u5f71\u54cd\u3002"

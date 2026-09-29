@@ -16,7 +16,7 @@ class TelegramService {
         $this->api = 'https://api.telegram.org/bot' . $token . '/';
     }
 
-    public function sendMessage(int $chatId, string $text, string $parseMode = '', ?array $replyMarkup = null)
+    public function sendMessage(int $chatId, string $text, string $parseMode = '', ?array $replyMarkup = null, ?int $messageThreadId = null)
     {
         if ($parseMode === 'markdown') {
             $text = str_replace('_', '\_', $text);
@@ -28,6 +28,9 @@ class TelegramService {
         ];
         if ($replyMarkup !== null) {
             $params['reply_markup'] = json_encode($replyMarkup, JSON_UNESCAPED_UNICODE);
+        }
+        if ($messageThreadId !== null && $messageThreadId > 0) {
+            $params['message_thread_id'] = $messageThreadId;
         }
         return $this->request('sendMessage', $params);
     }
