@@ -164,6 +164,31 @@ class ServerBatchOperationTest extends TestCase
         $this->assertArrayNotHasKey('private_key', $this->tlsSettings('v2node'));
     }
 
+    public function testRegenerationIsLimitedToV2nodeVlessRealityNodes(): void
+    {
+        $keys = json_encode([
+            'private_key' => self::REALITY_PRIVATE_KEY,
+            'public_key' => self::REALITY_PUBLIC_KEY,
+            'short_id' => self::REALITY_SHORT_ID,
+        ]);
+        // 同样是 REALITY，但一个是 v2node 下的别的协议，一个是独立的 vless 节点类型
+        $this->seed('v2node', 1, 'vmess-reality', ['protocol' => 'vmess', 'tls' => 2, 'tls_settings' => $keys]);
+        $this->seed('vless', 1, 'standalone-vless', ['tls' => 2, 'tls_settings' => $keys]);
+
+        $this->postJson($this->url . '/nodes/copy', [
+            'nodes' => [['type' => 'v2node', 'id' => 1], ['type' => 'vless', 'id' => 1]],
+            'regenerate_reality_keys' => true,
+            'confirm' => true,
+        ])->assertOk()->assertJsonPath('data.created_count', 2);
+
+        foreach (['v2node', 'vless'] as $type) {
+            $settings = json_decode((string) DB::table('v2_server_' . $type)->where('id', '!=', 1)->value('tls_settings'), true);
+            $this->assertSame(self::REALITY_PRIVATE_KEY, $settings['private_key'], $type . ' 不在 v2node+vless 范围内，密钥应原样保留');
+            $this->assertSame(self::REALITY_PUBLIC_KEY, $settings['public_key']);
+            $this->assertSame(self::REALITY_SHORT_ID, $settings['short_id']);
+        }
+    }
+
     public function testBatchCopyRequiresConfirmationAndRejectsEmptySelection(): void
     {
         $this->seed('vmess', 1, 'vmess-node');

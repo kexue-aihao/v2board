@@ -108750,7 +108750,7 @@
                             checked: !!state.batchCopyRegenerate, disabled: busy,
                             onChange: checked=>this.changeBatchField("batchCopyRegenerate", !!checked)
                         }), "为副本重新生成 REALITY 密钥")),
-                        el("p", null, "仅对 v2node 中启用 REALITY（TLS 模式为 REALITY）的节点生效，会为每个副本换一套新的 Private Key、Public Key 与 ShortId。两台机器共用同一套密钥等于把原节点身份复制出去，建议保持勾选。"),
+                        el("p", null, "仅对 v2node 类型、vless 协议的 REALITY 节点生效，会为每个副本换一套新的 Private Key、Public Key 与 ShortId。两台机器共用同一套密钥等于把原节点身份复制出去，建议保持勾选。"),
                         el("div", {style: {maxHeight: 240, overflow: "auto"}}, el("table", {className: "table", style: {wordBreak: "break-all"}},
                             el("thead", null, el("tr", null, el("th", null, "协议 / 节点"), el("th", null, "地址"))),
                             el("tbody", null, nodes.map(node=>el("tr", {key: this.batchKey(node)},

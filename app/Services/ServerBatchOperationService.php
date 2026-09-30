@@ -72,8 +72,8 @@ class ServerBatchOperationService
 
                 $copy = $server->replicate();
                 $copy->show = 0;
-                if ($regenerateRealityKeys && $type === 'v2node') {
-                    $copy->tls_settings = $this->withFreshRealityKeys((array) $copy->tls_settings, (int) $copy->tls);
+                if ($regenerateRealityKeys && $this->isRealityVlessNode($type, $copy)) {
+                    $copy->tls_settings = $this->withFreshRealityKeys((array) $copy->tls_settings);
                 }
 
                 if (!$copy->save()) {
@@ -250,18 +250,27 @@ class ServerBatchOperationService
     }
 
     /**
+     * 需要为副本换密钥的节点：v2node 类型、vless 协议、TLS 模式为 REALITY。
+     *
+     * v2node 里其它协议同样能选到 tls=2，但本次只覆盖 vless，所以条件写死在协议上，
+     * 不按「只要 tls=2 就换」推断 —— 那会把别的协议也一起改了。
+     */
+    private function isRealityVlessNode(string $type, $server): bool
+    {
+        return $type === 'v2node'
+            && (string) $server->protocol === 'vless'
+            && (int) $server->tls === 2;
+    }
+
+    /**
      * 为副本重新生成一套 REALITY 密钥。
      *
      * 复制节点时若沿用原节点的 keypair，两台机器就共用同一个 REALITY 私钥，等于把
      * 原节点的身份复制了一份出去，所以默认给副本换一套。short_id 的推导方式与
      * V2nodeController::save() 保持一致，避免出现两处生成规则不同的密钥。
      */
-    private function withFreshRealityKeys(array $tlsSettings, int $tls): array
+    private function withFreshRealityKeys(array $tlsSettings): array
     {
-        if ($tls !== 2) {
-            return $tlsSettings;
-        }
-
         $keyPair = SodiumCompat::crypto_box_keypair();
         $tlsSettings['private_key'] = Helper::base64EncodeUrlSafe(SodiumCompat::crypto_box_secretkey($keyPair));
         $tlsSettings['public_key'] = Helper::base64EncodeUrlSafe(SodiumCompat::crypto_box_publickey($keyPair));
