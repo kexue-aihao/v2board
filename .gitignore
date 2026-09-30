@@ -28,3 +28,6 @@ workerman.log
 # 内部设计与需求文档只保留在本地，不进仓库
 /Telegram注册体系改造-技术设计.md
 /Telegram注册体系改造-需求文档.md
+# 审计材料只保留在本地：代码审计上下文与注入审计 PoC
+/audit-context/
+/security-audit/
