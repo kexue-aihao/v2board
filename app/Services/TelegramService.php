@@ -91,6 +91,11 @@ class TelegramService {
         return $this->request('getMe');
     }
 
+    public function getChat($chatId)
+    {
+        return $this->request('getChat', ['chat_id' => $chatId], 8);
+    }
+
     public function setWebhook(string $url, array $extra = [])
     {
         $commands = $this->discoverCommands(base_path('app/Plugins/Telegram/Commands'));
@@ -186,9 +191,13 @@ class TelegramService {
         ]);
     }
 
-    private function request(string $method, array $params = [])
+    private function request(string $method, array $params = [], ?int $timeout = null)
     {
         $curl = new Curl();
+        if ($timeout !== null) {
+            $curl->setConnectTimeout(min(3, $timeout));
+            $curl->setTimeout($timeout);
+        }
         $curl->get($this->api . $method . '?' . http_build_query($params));
         $response = $curl->response;
         $curl->close();

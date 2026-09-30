@@ -71722,6 +71722,10 @@
                 }
             }
             componentWillUnmount() {
+                if (this.telegramInfoModal) {
+                    this.telegramInfoModal.destroy();
+                    this.telegramInfoModal = null;
+                }
                 this.props.dispatch({
                     type: "user/empty"
                 }),
@@ -71830,6 +71834,45 @@
                     okText: "\u786e\u5b9a",
                     cancelText: "\u53d6\u6d88"
                 })
+            }
+            renderTelegramInfo(user, data, error) {
+                var el = g.a.createElement;
+                var copyValue = (label, value)=>el("p", null, el("strong", null, label + "："),
+                    el("code", {style: {wordBreak: "break-all", userSelect: "text"}}, value),
+                    el(s["a"], {size: "small", style: {marginLeft: 8}, onClick: ()=>Object(L["a"])(value)}, "复制"));
+                return el("div", null,
+                    el("p", {style: {wordBreak: "break-all"}}, user.email),
+                    error ? el("p", {role: "alert", style: {color: "#c00000"}}, error) : data ? el("div", null,
+                        el("p", null, "账号绑定状态：" + (data.bound ? "已绑定" : "未绑定")),
+                        data.bound && copyValue("Telegram UID", data.telegram_id),
+                        data.bound && (data.username_status === "available" && data.username
+                            ? copyValue("Telegram 用户名", "@" + data.username)
+                            : el("p", null, "Telegram 用户名：" + (data.username_status === "not_set" ? "未设置用户名" : "暂时无法获取"))),
+                        data.message && el("p", {role: "status"}, data.message)
+                    ) : el("p", {role: "status"}, "正在查询 Telegram 绑定信息…"),
+                    (data || error) && el(s["a"], {size: "small", onClick: ()=>this.showTelegramInfo(user)}, "重新查询")
+                );
+            }
+            async showTelegramInfo(user) {
+                if (!user || !user.id) return;
+                if (this.telegramInfoModal) this.telegramInfoModal.destroy();
+                var close = ()=>{ if (this.telegramInfoModal === modal) this.telegramInfoModal = null; };
+                var modal = p["a"].info({
+                    title: "Telegram 绑定信息", width: 520, okText: "关闭", closable: !0,
+                    content: this.renderTelegramInfo(user, null, null), onOk: close, onCancel: close
+                });
+                this.telegramInfoModal = modal;
+                try {
+                    var response = await Object(n("t3Un")["a"])("/" + window.settings.secure_path + "/user/telegramInfo", {id: user.id});
+                    if (!response || response.code !== 200) throw new Error(response && (response.msg || response.message) || "查询失败，请稍后重试");
+                    var data = response.data;
+                    if (!data || typeof data.bound !== "boolean" || (data.bound && !data.telegram_id)) {
+                        throw new Error("绑定信息响应无效，请确认服务端已更新");
+                    }
+                    if (this.telegramInfoModal === modal) modal.update({content: this.renderTelegramInfo(user, data, null)});
+                } catch (error) {
+                    if (this.telegramInfoModal === modal) modal.update({content: this.renderTelegramInfo(user, null, error.message || "查询失败，请稍后重试")});
+                }
             }
             // 独立于 resetSecret：换订阅地址和把用户锁在门外是两件事，合并会让任何一次换
             // 订阅地址都顺手让用户登不进来。明文只在这一个响应里出现一次，不进日志不发邮件。
@@ -72368,6 +72411,13 @@
                             }, g.a.createElement("a", null, g.a.createElement(u["a"], {
                                 type: "edit"
                             }), " \u7f16\u8f91"))), g.a.createElement(c["a"].Item, {
+                                onClick: ()=>this.showTelegramInfo(t),
+                                onContextMenu: e=>{
+                                    e.stopPropagation()
+                                }
+                            }, g.a.createElement("a", null, g.a.createElement(u["a"], {
+                                type: "info-circle"
+                            }), " 查看 Telegram 绑定")), g.a.createElement(c["a"].Item, {
                                 onClick: ()=>this.subscribeRequests(t),
                                 onContextMenu: e=>{
                                     e.stopPropagation()
@@ -72602,6 +72652,12 @@
                 }, g.a.createElement("a", null, g.a.createElement(u["a"], {
                     type: "edit"
                 }), " \u7f16\u8f91"))), g.a.createElement("li", {
+                    className: "ant-dropdown-menu-item"
+                }, g.a.createElement("a", {
+                    onClick: ()=>this.showTelegramInfo(this.record)
+                }, g.a.createElement(u["a"], {
+                    type: "info-circle"
+                }), " 查看 Telegram 绑定")), g.a.createElement("li", {
                     className: "ant-dropdown-menu-item"
                 }, g.a.createElement(S["a"], {
                     email: null === (n = this.record) || void 0 === n ? void 0 : n.email,

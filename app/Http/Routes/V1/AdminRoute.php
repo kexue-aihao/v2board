@@ -121,6 +121,7 @@ class AdminRoute
             $router->get ('/user/fetch', 'V1\\Admin\\UserController@fetch');
             $router->post('/user/update', 'V1\\Admin\\UserController@update');
             $router->get ('/user/getUserInfoById', 'V1\\Admin\\UserController@getUserInfoById');
+            $router->get ('/user/telegramInfo', 'V1\\Admin\\UserController@telegramInfo');
             $router->post('/user/generate', 'V1\\Admin\\UserController@generate');
             $router->post('/user/dumpCSV', 'V1\\Admin\\UserController@dumpCSV');
             $router->post('/user/sendMail', 'V1\\Admin\\UserController@sendMail');

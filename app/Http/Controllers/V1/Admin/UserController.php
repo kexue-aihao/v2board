@@ -25,6 +25,7 @@ use App\Services\SubscriptionService;
 use App\Services\SubscriptionRiskService;
 use App\Services\IpLocationService;
 use App\Services\OnlineDeviceService;
+use App\Services\TelegramService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -302,6 +303,47 @@ class UserController extends Controller
             'data' => $res,
             'total' => $total
         ]);
+    }
+
+    public function telegramInfo(Request $request)
+    {
+        $params = $request->validate(['id' => 'required|integer|min:1']);
+        $user = User::find($params['id']);
+        if (!$user) abort(404, __('用户不存在'));
+
+        // Read the account binding, never infer it from an email or a group subscription.
+        $telegramId = (string)($user->telegram_id ?? '');
+        $bound = ctype_digit($telegramId) && (int)$telegramId > 0;
+        $data = [
+            'bound' => $bound,
+            'telegram_id' => $bound ? $telegramId : null,
+            'username' => null,
+            'username_status' => $bound ? 'unavailable' : 'unbound',
+            'message' => $bound ? '' : '该用户尚未绑定 Telegram 账号',
+        ];
+
+        if ($bound) {
+            if (trim((string)config('v2board.telegram_bot_token', '')) === '') {
+                $data['message'] = '未配置 Telegram 机器人，暂时无法查询用户名；已绑定的 UID 如下。';
+            } else {
+                try {
+                    $response = app(TelegramService::class)->getChat($telegramId);
+                    $chat = $response->result ?? null;
+                    if (!$chat || (string)($chat->id ?? '') !== $telegramId || ($chat->type ?? '') !== 'private') {
+                        throw new \RuntimeException('Unexpected Telegram account response');
+                    }
+                    $username = ltrim(trim((string)($chat->username ?? '')), '@');
+                    $data['username'] = $username !== '' ? $username : null;
+                    $data['username_status'] = $username !== '' ? 'available' : 'not_set';
+                } catch (\Throwable $exception) {
+                    // A failed lookup does not mean the account is unbound or has no username.
+                    // Do not return Telegram transport errors, which may contain the bot token.
+                    $data['message'] = '暂时无法从 Telegram 获取用户名，请稍后重试，并确认绑定时使用的机器人配置正确。';
+                }
+            }
+        }
+
+        return response(['data' => $data])->header('Cache-Control', 'no-store, private');
     }
 
     public function getUserInfoById(Request $request)
