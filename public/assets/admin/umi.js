@@ -108380,6 +108380,7 @@
             }
         })(wV2node);
         var hostReplacementApi = n("t3Un");
+        var batchApi = n("t3Un");
         class q extends y.a.Component {
             constructor(e) {
                 super(e),
@@ -108395,7 +108396,18 @@
                     hostReplaceMode: "exact",
                     hostReplaceOld: "",
                     hostReplaceNew: "",
-                    hostReplacePreview: null
+                    hostReplacePreview: null,
+                    batchDialog: "",
+                    batchSelection: [],
+                    batchLoading: !1,
+                    batchError: "",
+                    batchResult: "",
+                    batchStage: "",
+                    batchCopyConfirmed: !1,
+                    batchCopyRegenerate: !0,
+                    batchServerName: "",
+                    batchDest: "",
+                    batchPreview: null
                 }
             }
             componentDidMount() {
@@ -108573,6 +108585,224 @@
                     this.hostReplaceBusy = !1;
                     this.setState({hostReplaceLoading: !1, hostReplaceStage: "", hostReplacePreview: null});
                 }
+            }
+            batchKey(e) {
+                return e.type + ":" + e.id
+            }
+            selectedBatchNodes() {
+                var keys = this.state.batchSelection || []
+                  , servers = this.props.serverManage.servers || []
+                  , selected = [];
+                for (var i = 0; i < servers.length; i++) {
+                    var server = servers[i];
+                    if (keys.indexOf(this.batchKey(server)) >= 0) {
+                        selected.push({type: server.type, id: server.id, name: server.name})
+                    }
+                }
+                return selected
+            }
+            changeBatchSelection(keys) {
+                this.setState({batchSelection: keys || [], batchPreview: null, batchError: "", batchResult: ""})
+            }
+            openBatchDialog(dialog) {
+                if (this.batchBusy) return;
+                this.setState({batchDialog: dialog, batchPreview: null, batchError: "", batchResult: "", batchStage: "", batchCopyConfirmed: !1})
+            }
+            closeBatchDialog() {
+                if (!this.batchBusy) this.setState({batchDialog: "", batchPreview: null, batchError: "", batchResult: "", batchStage: "", batchCopyConfirmed: !1})
+            }
+            changeBatchField(field, value) {
+                if (!this.batchBusy) this.setState({
+                    [field]: value, batchPreview: null, batchError: "", batchResult: ""
+                })
+            }
+            batchData(response) {
+                if (!response || response.code !== 200) {
+                    throw new Error(response && (response.msg || response.message) || "请求失败，请检查登录状态和接口是否已更新")
+                }
+                if (!response.data || typeof response.data !== "object") {
+                    throw new Error("接口未返回有效 JSON 数据，请检查服务端响应和后台版本")
+                }
+                return response.data
+            }
+            async refreshBatchNodeList(cacheBuster) {
+                var servers = this.batchData(await Object(batchApi["a"])("/" + window.settings.secure_path + "/server/manage/getNodes", cacheBuster));
+                if (!Array.isArray(servers)) throw new Error("节点列表响应无效");
+                this.props.dispatch({type: "serverManage/setState", payload: {servers: servers, fetchLoading: !1}});
+                return servers
+            }
+            async runBatchCopy() {
+                // 服务端一旦确认创建，本次对话框会话就不再允许重提：列表核对失败时再点一次
+                // 会照着同一批选中节点重复建出副本，所以这里必须硬拦。
+                if (this.batchBusy || this.state.batchCopyConfirmed) return;
+                var nodes = this.selectedBatchNodes();
+                if (!nodes.length) {
+                    this.setState({batchError: "请先在列表中勾选要复制的节点"});
+                    return
+                }
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在复制", batchError: "", batchResult: ""});
+                var created = !1;
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/nodes/copy", {
+                        nodes: nodes, regenerate_reality_keys: !!this.state.batchCopyRegenerate, confirm: !0
+                    }, !0));
+                    if (!Number.isInteger(data.created_count) || data.created_count < 0 || !Array.isArray(data.nodes) || data.nodes.length !== data.created_count) {
+                        throw new Error("复制接口返回结果不完整，请刷新列表核对")
+                    }
+                    if (!data.created_count) {
+                        this.setState({batchError: "没有复制出任何节点，请刷新列表后重试"});
+                        return
+                    }
+                    created = !0;
+                    this.setState({batchCopyConfirmed: !0, batchStage: "正在重新读取并核对"});
+                    var servers = await this.refreshBatchNodeList({_batch_copy: Date.now()});
+                    // 副本必须先出现在列表里且处于隐藏状态，否则说明落库没生效或前端读到的是旧列表
+                    var verified = data.nodes.every(node=>servers.some(server=>server.type === node.type && String(server.id) === String(node.id) && !parseInt(server.show)));
+                    if (!verified) throw new Error("重新读取的节点列表与复制结果不一致");
+                    var result = "已复制 " + data.created_count + " 个节点，副本默认为隐藏状态";
+                    this.setState({batchSelection: [], batchResult: result});
+                    c["a"].success(result);
+                } catch (error) {
+                    this.setState({batchError: (created ? "接口已返回复制成功，但列表核对失败。请刷新列表检查，勿重复提交：" : "复制未确认完成，请核对列表后重试：") + (error.message || "网络请求失败")});
+                } finally {
+                    this.batchBusy = !1;
+                    this.setState({batchLoading: !1, batchStage: ""});
+                }
+            }
+            async previewBatchTls() {
+                if (this.batchBusy) return;
+                var nodes = this.selectedBatchNodes();
+                if (!nodes.length) {
+                    this.setState({batchError: "请先在列表中勾选要修改的节点"});
+                    return
+                }
+                var params = {
+                    nodes: nodes,
+                    server_name: this.state.batchServerName.trim(),
+                    dest: this.state.batchDest.trim()
+                };
+                if (!params.server_name && !params.dest) {
+                    this.setState({batchError: "请至少填写 Server Name(SNI) 或 Server Address 中的一项", batchPreview: null});
+                    return
+                }
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在预览", batchPreview: null, batchError: "", batchResult: ""});
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/tls-fields/preview", params, !0));
+                    if (!Array.isArray(data.nodes) || !Number.isInteger(data.matched_count) || data.nodes.length !== data.matched_count) {
+                        throw new Error("预览结果不完整，请重新预览")
+                    }
+                    this.setState({
+                        batchPreview: Object.assign({}, data, {params: params}),
+                        batchResult: data.changed_count ? "" : "所选节点这两项与目标值一致，未执行任何修改"
+                    });
+                } catch (error) {
+                    this.setState({batchError: error.message || "预览失败，请稍后重试"});
+                } finally {
+                    this.batchBusy = !1;
+                    this.setState({batchLoading: !1, batchStage: ""});
+                }
+            }
+            async applyBatchTls() {
+                if (this.batchBusy) return;
+                var preview = this.state.batchPreview;
+                if (!preview || !preview.changed_count) return;
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在保存", batchError: "", batchResult: ""});
+                var saved = !1;
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/tls-fields/apply", Object.assign({}, preview.params, {confirm: !0}), !0));
+                    if (!Number.isInteger(data.updated_count) || data.updated_count < 0 || !Array.isArray(data.nodes) || data.nodes.length !== data.updated_count) {
+                        throw new Error("接口返回结果不完整，请刷新列表核对后重新预览")
+                    }
+                    if (!data.updated_count) {
+                        this.setState({batchError: "没有更新任何节点，节点可能已变更，请重新预览"});
+                        return
+                    }
+                    saved = !0;
+                    this.setState({batchStage: "正在重新读取并核对"});
+                    var servers = await this.refreshBatchNodeList({_batch_tls: Date.now()});
+                    var verified = data.nodes.every(node=>servers.some(server=>server.type === node.type && String(server.id) === String(node.id)));
+                    if (!verified) throw new Error("重新读取的节点列表与保存结果不一致");
+                    var result = "已更新 " + data.updated_count + " 个节点，列表已刷新";
+                    this.setState({batchPreview: null, batchResult: result});
+                    c["a"].success(result);
+                } catch (error) {
+                    this.setState({batchError: (saved ? "接口已返回保存成功，但列表核对失败。请刷新列表检查，勿重复提交：" : "保存未确认完成，请核对列表后重新预览：") + (error.message || "网络请求失败")});
+                } finally {
+                    this.batchBusy = !1;
+                    // 无论成功失败都作废本次预览，避免失败后带着旧预览再确认一次
+                    this.setState({batchLoading: !1, batchStage: "", batchPreview: null});
+                }
+            }
+            renderBatchOperations() {
+                var state = this.state, preview = state.batchPreview, busy = state.batchLoading;
+                var el = y.a.createElement;
+                var nodes = this.selectedBatchNodes();
+                if (state.batchDialog === "copy") {
+                    return el(R["a"], {
+                        title: "批量复制节点", width: "min(760px, 100vw)", visible: !0,
+                        maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeBatchDialog()
+                    }, el("div", {style: {paddingBottom: 70}},
+                        el("p", null, "将复制选中的 " + nodes.length + " 个节点，副本一律先置为隐藏（不对外下发），名称与端口沿用原节点。"),
+                        el("div", {className: "form-group"}, el("label", null, el(f["a"], {
+                            checked: !!state.batchCopyRegenerate, disabled: busy,
+                            onChange: checked=>this.changeBatchField("batchCopyRegenerate", !!checked)
+                        }), "为副本重新生成 REALITY 密钥")),
+                        el("p", null, "仅对 v2node 中启用 REALITY（TLS 模式为 REALITY）的节点生效，会为每个副本换一套新的 Private Key、Public Key 与 ShortId。两台机器共用同一套密钥等于把原节点身份复制出去，建议保持勾选。"),
+                        el("div", {style: {maxHeight: 240, overflow: "auto"}}, el("table", {className: "table", style: {wordBreak: "break-all"}},
+                            el("thead", null, el("tr", null, el("th", null, "协议 / 节点"), el("th", null, "地址"))),
+                            el("tbody", null, nodes.map(node=>el("tr", {key: this.batchKey(node)},
+                                el("td", null, node.type + " #" + node.id + " " + node.name)
+                            )))
+                        )),
+                        state.batchError && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap"}}, state.batchError),
+                        state.batchResult && el("p", {role: "status"}, state.batchResult),
+                        state.batchStage && el("p", {role: "status"}, state.batchStage),
+                        el("div", {className: "v2board-drawer-action"},
+                            el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
+                            el(l["a"], {type: "primary", loading: busy, disabled: busy || !nodes.length, onClick: ()=>this.runBatchCopy()}, "确认复制")
+                        )
+                    ))
+                }
+                if (state.batchDialog !== "tls") return null;
+                return el(R["a"], {
+                    title: "批量填写 Server Name(SNI) / Server Address", width: "min(760px, 100vw)", visible: !0,
+                    maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeBatchDialog()
+                }, el("div", {style: {paddingBottom: 70}},
+                    el("p", null, "对选中的 " + nodes.length + " 个节点填写同一组值。留空的一项保持原样不动。"),
+                    el("div", {className: "form-group"}, el("label", null, "Server Name(SNI)"), el(s["a"], {
+                        value: state.batchServerName, disabled: busy, maxLength: 255, placeholder: "www.example.com",
+                        onChange: event=>this.changeBatchField("batchServerName", event.target.value)
+                    })),
+                    el("p", null, "各类节点的 SNI 存放位置不同，会分别写入：v2node / vless 进 tls_settings，vmess 进 tlsSettings，trojan、tuic、hysteria、anytls 写 server_name 列。shadowsocks 没有该字段，会被跳过。"),
+                    el("div", {className: "form-group"}, el("label", null, "Server Address"), el(s["a"], {
+                        value: state.batchDest, disabled: busy, maxLength: 255, placeholder: "REALITY 目标地址，默认使用 SNI",
+                        onChange: event=>this.changeBatchField("batchDest", event.target.value)
+                    })),
+                    el("p", null, "Server Address 即 REALITY 的目标地址，只有 v2node 的节点表单存在该字段，其它协议不受影响。"),
+                    state.batchError && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap"}}, state.batchError),
+                    state.batchResult && el("p", {role: "status"}, state.batchResult),
+                    state.batchStage && el("p", {role: "status"}, state.batchStage),
+                    preview && el("div", null, el("strong", null, "预计改动 " + preview.changed_count + " / " + preview.matched_count + " 个节点，请核对后确认应用"),
+                        el("div", {style: {maxHeight: 320, overflow: "auto", marginTop: 12}}, el("table", {className: "table", style: {wordBreak: "break-all"}},
+                            el("thead", null, el("tr", null, el("th", null, "协议 / 节点"), el("th", null, "当前 SNI"), el("th", null, "新 SNI"), el("th", null, "当前 Server Address"), el("th", null, "新 Server Address"))),
+                            el("tbody", null, preview.nodes.map(node=>el("tr", {key: node.type + ":" + node.id},
+                                el("td", null, node.type + " #" + node.id + " " + node.name),
+                                el("td", null, node.server_name_applicable ? (node.server_name || "（空）") : "不适用"),
+                                el("td", null, node.new_server_name === null ? "不修改" : node.new_server_name),
+                                el("td", null, node.dest_applicable ? (node.dest || "（空）") : "不适用"),
+                                el("td", null, node.new_dest === null ? "不修改" : node.new_dest)
+                            )))
+                        ))
+                    ),
+                    el("div", {className: "v2board-drawer-action"},
+                        el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
+                        el(l["a"], {loading: busy, onClick: ()=>this.previewBatchTls(), style: {marginRight: 8}}, "预览改动"),
+                        el(l["a"], {type: "primary", disabled: busy || !preview || !preview.changed_count, onClick: ()=>this.applyBatchTls()}, "确认应用")
+                    )
+                ))
             }
             renderHostReplacement() {
                 var state = this.state, preview = state.hostReplacePreview, busy = state.hostReplaceLoading;
@@ -108809,7 +109039,7 @@
                     message: e=>{
                         return window.confirm("\u8282\u70b9\u6392\u5e8f\u8fd8\u6ca1\u6709\u4fdd\u5b58\uff0c\u662f\u5426\u79bb\u5f00")
                     }
-                }), this.renderHostReplacement(), y.a.createElement(M["a"], {
+                }), this.renderHostReplacement(), this.renderBatchOperations(), y.a.createElement(M["a"], {
                     loading: O
                 }, y.a.createElement("div", {
                     className: "block block-bottom ".concat(T.a.manage)
@@ -108856,7 +109086,21 @@
                     loading: this.state.hostReplaceLoading,
                     disabled: A,
                     onClick: ()=>this.startHostReplace()
-                }, "替换节点域名"), !Object(L["f"])() && y.a.createElement(l["a"], {
+                }, "替换节点域名"), y.a.createElement(l["a"], {
+                    style: {
+                        marginLeft: 8
+                    },
+                    loading: this.state.batchLoading && this.state.batchDialog === "copy",
+                    disabled: A || !this.selectedBatchNodes().length,
+                    onClick: ()=>this.openBatchDialog("copy")
+                }, this.selectedBatchNodes().length ? "批量复制 (" + this.selectedBatchNodes().length + ")" : "批量复制"), y.a.createElement(l["a"], {
+                    style: {
+                        marginLeft: 8
+                    },
+                    loading: this.state.batchLoading && this.state.batchDialog === "tls",
+                    disabled: A || !this.selectedBatchNodes().length,
+                    onClick: ()=>this.openBatchDialog("tls")
+                }, "批量填写 SNI/地址"), !Object(L["f"])() && y.a.createElement(l["a"], {
                     style: {
                         float: "right"
                     },
@@ -108913,6 +109157,12 @@
                     disableRightClick: A,
                     tableLayout: "auto",
                     dataSource: N ? E.filter(e=>-1 !== JSON.stringify(e).indexOf(N)) : E,
+                    // 不同类型之间 id 会重复，行键必须带上类型，否则多选会串行
+                    rowKey: e=>this.batchKey(e),
+                    rowSelection: A ? void 0 : {
+                        selectedRowKeys: this.state.batchSelection,
+                        onChange: keys=>this.changeBatchSelection(keys)
+                    },
                     columns: A ? [{
                         title: "\u6392\u5e8f",
                         dataIndex: "sort",

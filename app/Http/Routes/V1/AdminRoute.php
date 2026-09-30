@@ -40,6 +40,9 @@ class AdminRoute
             $router->post('/server/manage/sort', 'V1\\Admin\\Server\\ManageController@sort');
             $router->post('/server/manage/host/preview', 'V1\\Admin\\Server\\ManageController@previewHostReplacement');
             $router->post('/server/manage/host/replace', 'V1\\Admin\\Server\\ManageController@replaceHost');
+            $router->post('/server/manage/nodes/copy', 'V1\\Admin\\Server\\ManageController@copyNodes');
+            $router->post('/server/manage/tls-fields/preview', 'V1\\Admin\\Server\\ManageController@previewTlsFields');
+            $router->post('/server/manage/tls-fields/apply', 'V1\\Admin\\Server\\ManageController@applyTlsFields');
             $router->group([
                 'prefix' => 'server/trojan'
             ], function ($router) {
