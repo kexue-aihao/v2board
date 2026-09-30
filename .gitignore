@@ -25,3 +25,6 @@ docker-compose.yml
 public/clients/*
 workerman.webman.php.pid
 workerman.log
+# 内部设计与需求文档只保留在本地，不进仓库
+/Telegram注册体系改造-技术设计.md
+/Telegram注册体系改造-需求文档.md
