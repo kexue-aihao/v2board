@@ -800,6 +800,7 @@ CREATE TABLE `v2_server_anytls` (
                                       `sort` int(11) DEFAULT NULL,
                                       `server_name` varchar(64) DEFAULT NULL,
                                       `insecure` tinyint(1) NOT NULL DEFAULT '0',
+                                      `pinned_peer_cert_sha256` varchar(128) DEFAULT NULL COMMENT 'TLS leaf cert SHA256 hex',
                                       `padding_scheme` text,
                                       `created_at` int(11) NOT NULL,
                                       `updated_at` int(11) NOT NULL,
@@ -1098,3 +1099,6 @@ CREATE TABLE IF NOT EXISTS `v2_subscribe_user_agent_summary` (
     KEY `last_seen_at` (`last_seen_at`),
     KEY `recent_audit_id` (`recent_audit_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE `v2_server_anytls`
+ADD `pinned_peer_cert_sha256` varchar(128) DEFAULT NULL COMMENT 'TLS leaf cert SHA256 hex' AFTER `insecure`;

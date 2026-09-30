@@ -9,55 +9,75 @@ class HelperPinnedPeerCertTest extends TestCase
 {
     private const PIN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
-    public function testPinnedCertificateIsIncludedInSharedUriFormats(): void
+    protected function tearDown(): void
     {
-        $server = $this->server([
-            'tls' => 1,
-            'tls_settings' => [
-                'server_name' => 'example.com',
-                'pinned_peer_cert_sha256' => self::PIN,
-            ],
-        ]);
+        Helper::setIncludeXrayPcs(false);
+        parent::tearDown();
+    }
+
+    /**
+     * V2rayN / V2rayNG 的协议处理器会打开这个开关，只有它们能收到证书指纹。
+     * hysteria 系列的查询参数名是 pinSHA256，其余是 pcs。
+     */
+    public function testPinnedCertificateIsIncludedInV2rayShareLinks(): void
+    {
+        Helper::setIncludeXrayPcs(true);
+        $server = $this->serverWithPin();
 
         $vmess = json_decode(base64_decode(substr(trim(Helper::buildVmessUri('uuid', $server)), 8)), true);
-        $vless = parse_url(trim(Helper::buildVlessUri('uuid', $server)), PHP_URL_QUERY);
-        $trojan = parse_url(trim(Helper::buildTrojanUri('password', $server)), PHP_URL_QUERY);
-        $hysteria2 = parse_url(trim(Helper::buildHysteria2Uri('password', $server)), PHP_URL_QUERY);
-        $tuic = parse_url(trim(Helper::buildTuicUri('password', $server)), PHP_URL_QUERY);
-        $anytls = parse_url(trim(Helper::buildAnytlsUri('password', $server)), PHP_URL_QUERY);
 
         $this->assertSame(self::PIN, $vmess['pcs']);
-        $this->assertSame(self::PIN, $this->query($vless)['pcs']);
-        $this->assertSame(self::PIN, $this->query($trojan)['pcs']);
-        $this->assertSame(self::PIN, $this->query($hysteria2)['pcs']);
-        $this->assertSame(self::PIN, $this->query($tuic)['pcs']);
-        $this->assertSame(self::PIN, $this->query($anytls)['pcs']);
+        $this->assertSame(self::PIN, $this->query(Helper::buildVlessUri('uuid', $server))['pcs']);
+        $this->assertSame(self::PIN, $this->query(Helper::buildTrojanUri('password', $server))['pcs']);
+        $this->assertSame(self::PIN, $this->query(Helper::buildTuicUri('password', $server))['pcs']);
+        $this->assertSame(self::PIN, $this->query(Helper::buildAnytlsUri('password', $server))['pcs']);
+        $this->assertSame(self::PIN, $this->query(Helper::buildHysteria2Uri('password', $server))['pinSHA256']);
+    }
+
+    /**
+     * 其余客户端（Clash / sing-box / Shadowrocket 等）不允许收到指纹：它们不认
+     * pcs，收到会让整份订阅解析失败。开关默认关闭，只有上面两个处理器会打开。
+     */
+    public function testPinnedCertificateIsNotEmittedForOtherClients(): void
+    {
+        Helper::setIncludeXrayPcs(false);
+        $server = $this->serverWithPin();
+
+        $vmess = json_decode(base64_decode(substr(trim(Helper::buildVmessUri('uuid', $server)), 8)), true);
+
+        $this->assertArrayNotHasKey('pcs', $vmess);
+        $this->assertArrayNotHasKey('vcn', $vmess);
+        $this->assertArrayNotHasKey('pcs', $this->query(Helper::buildVlessUri('uuid', $server)));
+        $this->assertArrayNotHasKey('pcs', $this->query(Helper::buildTrojanUri('password', $server)));
+        $this->assertArrayNotHasKey('pcs', $this->query(Helper::buildTuicUri('password', $server)));
+        $this->assertArrayNotHasKey('pcs', $this->query(Helper::buildAnytlsUri('password', $server)));
+        $this->assertArrayNotHasKey('pinSHA256', $this->query(Helper::buildHysteria2Uri('password', $server)));
     }
 
     public function testEmptyPinIsNotAddedToSubscriptions(): void
     {
+        Helper::setIncludeXrayPcs(true);
         $server = $this->server([
             'tls' => 1,
             'tls_settings' => ['server_name' => 'example.com'],
         ]);
 
         $vmess = json_decode(base64_decode(substr(trim(Helper::buildVmessUri('uuid', $server)), 8)), true);
-        $vless = $this->query(parse_url(trim(Helper::buildVlessUri('uuid', $server)), PHP_URL_QUERY));
-        $trojan = $this->query(parse_url(trim(Helper::buildTrojanUri('password', $server)), PHP_URL_QUERY));
-        $hysteria2 = $this->query(parse_url(trim(Helper::buildHysteria2Uri('password', $server)), PHP_URL_QUERY));
-        $tuic = $this->query(parse_url(trim(Helper::buildTuicUri('password', $server)), PHP_URL_QUERY));
-        $anytls = $this->query(parse_url(trim(Helper::buildAnytlsUri('password', $server)), PHP_URL_QUERY));
 
         $this->assertArrayNotHasKey('pcs', $vmess);
-        $this->assertArrayNotHasKey('pcs', $vless);
-        $this->assertArrayNotHasKey('pcs', $trojan);
-        $this->assertArrayNotHasKey('pcs', $hysteria2);
-        $this->assertArrayNotHasKey('pcs', $tuic);
-        $this->assertArrayNotHasKey('pcs', $anytls);
+        $this->assertArrayNotHasKey('pcs', $this->query(Helper::buildVlessUri('uuid', $server)));
+        $this->assertArrayNotHasKey('pcs', $this->query(Helper::buildTrojanUri('password', $server)));
+        $this->assertArrayNotHasKey('pcs', $this->query(Helper::buildTuicUri('password', $server)));
+        $this->assertArrayNotHasKey('pcs', $this->query(Helper::buildAnytlsUri('password', $server)));
+        $this->assertArrayNotHasKey('pinSHA256', $this->query(Helper::buildHysteria2Uri('password', $server)));
     }
 
+    /**
+     * 节点 API 与订阅服务里同时存在 snake_case 与驼峰两种载荷形状，指纹要都能取到。
+     */
     public function testCamelCaseTlsSettingIsAcceptedForLegacyServerShape(): void
     {
+        Helper::setIncludeXrayPcs(true);
         $server = $this->server([
             'tls' => 1,
             'tlsSettings' => [
@@ -71,16 +91,15 @@ class HelperPinnedPeerCertTest extends TestCase
         $this->assertSame(self::PIN, $vmess['pcs']);
     }
 
-    public function testNonTlsVlessDoesNotIncludeCertificatePin(): void
+    private function serverWithPin(): array
     {
-        $server = $this->server([
-            'tls' => 0,
-            'tls_settings' => ['pinned_peer_cert_sha256' => self::PIN],
+        return $this->server([
+            'tls' => 1,
+            'tls_settings' => [
+                'server_name' => 'example.com',
+                'pinned_peer_cert_sha256' => self::PIN,
+            ],
         ]);
-
-        $vless = $this->query(parse_url(trim(Helper::buildVlessUri('uuid', $server)), PHP_URL_QUERY));
-
-        $this->assertArrayNotHasKey('pcs', $vless);
     }
 
     private function server(array $overrides = []): array
@@ -105,9 +124,9 @@ class HelperPinnedPeerCertTest extends TestCase
         ], $overrides);
     }
 
-    private function query(?string $query): array
+    private function query(string $uri): array
     {
-        parse_str((string)$query, $params);
+        parse_str((string) parse_url(trim($uri), PHP_URL_QUERY), $params);
         return $params;
     }
 }

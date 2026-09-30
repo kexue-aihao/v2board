@@ -2,6 +2,7 @@
 
 namespace App\Protocols;
 
+use App\Utils\Helper;
 use phpDocumentor\Reflection\Types\Self_;
 use Symfony\Component\Yaml\Yaml;
 
@@ -141,10 +142,9 @@ class Clash
 
         if ($server['tls']) {
             $array['tls'] = true;
-            $tlsSettings = $server['tls_settings'] ?? $server['tlsSettings'] ?? [];
-            $array['skip-cert-verify'] = ((int)($tlsSettings['allow_insecure'] ?? $tlsSettings['allowInsecure'] ?? 0)) == 1 ? true : false;
+            $tlsSettings = Helper::normalizeTlsSettings($server);
             $array['servername'] = $tlsSettings['server_name'] ?? $tlsSettings['serverName'] ?? '';
-
+            Helper::applyClashTlsPin($array, $tlsSettings, $server);
         }
         if ($server['network'] === 'tcp') {
             $tcpSettings = $server['network_settings'] ?? ($server['networkSettings'] ?? []);
@@ -200,8 +200,9 @@ class Clash
                 }
             }
         };
-        $array['sni'] = $server['server_name'] ?? (($server['tls_settings'] ?? [])['server_name'] ?? '');
-        $array['skip-cert-verify'] = ((int)(($server['tls_settings'] ?? [])['allow_insecure'] ?? ($server['allow_insecure'] ?? 0))) == 1 ? true : false;
+        $tlsSettings = Helper::normalizeTlsSettings($server);
+        $array['sni'] = $server['server_name'] ?? ($tlsSettings['server_name'] ?? '');
+        Helper::applyClashTlsPin($array, $tlsSettings, $server);
         return $array;
     }
 
