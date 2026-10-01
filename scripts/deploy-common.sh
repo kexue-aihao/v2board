@@ -22,6 +22,24 @@ DEPLOY_WORKERMAN_REQUIRED_FUNCTIONS=(
     posix_setuid posix_isatty
 )
 
+# AcePanel 的 app.root 能在面板配置里改（它自己的 public.sh 也是先读
+# /opt/ace/panel/storage/config.yml 的 root，再拼 server/php 等路径），改过之后 PHP 就不在
+# /opt/ace 下了。这里按面板自己那套办法把根目录读出来，并确认传进来的 PHP 确实落在它的
+# server/php/<版本>/bin 下 —— 认不出来就照旧报错，不猜路径、也不动权限。
+deploy_custom_panel_root() {
+    local bin="$1" root config=/opt/ace/panel/storage/config.yml
+    [ -f "$config" ] || return 1
+    root="$(sed -n 's/^[[:space:]]*root[[:space:]]*:[[:space:]]*//p' "$config" | tail -n 1 | tr -d "\"'" | xargs || true)"
+    [ -n "$root" ] || return 1
+    case "$bin" in
+        "$root"/server/php/*/bin/php)
+            echo "$root"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 deploy_setup() {
     ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
     cd "$ROOT_DIR"
@@ -52,14 +70,27 @@ deploy_setup() {
             PANEL_PHP_DIR="${PHP_BIN%/bin/php}"
             ;;
         *)
-            echo "ERROR: aaPanel or AcePanel PHP binary is required: $PHP_BIN" >&2
-            echo "Set PHP_BIN to /www/server/php/<version>/bin/php or /opt/ace/server/php/<version>/bin/php." >&2
-            return 1
+            # 换过 app.root 的 AcePanel：根目录不在 /opt/ace，但 PHP 仍在
+            # <root>/server/php/<版本>/bin 下，按面板配置里写的 root 认下来。
+            if [ -n "$(deploy_custom_panel_root "$PHP_BIN")" ]; then
+                PANEL_NAME="AcePanel"
+                PANEL_PHP_DIR="${PHP_BIN%/bin/php}"
+            else
+                echo "ERROR: aaPanel or AcePanel PHP binary is required: $PHP_BIN" >&2
+                echo "Set PHP_BIN to /www/server/php/<version>/bin/php or /opt/ace/server/php/<version>/bin/php." >&2
+                echo "For an AcePanel install with a custom app.root, its root: entry in" >&2
+                echo "/opt/ace/panel/storage/config.yml must match this PHP path." >&2
+                return 1
+            fi
             ;;
     esac
 
     PANEL_PHP_VERSION="${PANEL_PHP_DIR##*/php/}"
     PANEL_PHP_INI="$PANEL_PHP_DIR/etc/php.ini"
+    # 面板根目录从 PHP_BIN 反推，不写死：aaPanel 固定在 /www，AcePanel 默认 /opt/ace，
+    # 但它的 app.root 可以在 /opt/ace/panel/storage/config.yml 里改成别处（面板自己的
+    # 安装/依赖脚本也是先读这份配置再拼路径）。写死会让改过根目录的站点扫错 cron 目录。
+    PANEL_ROOT="${PANEL_PHP_DIR%/server/php/*}"
     # Keep the old variable names available for deployments that source this file.
     AAPANEL_PHP_DIR="$PANEL_PHP_DIR"
     AAPANEL_PHP_VERSION="$PANEL_PHP_VERSION"
@@ -470,8 +501,10 @@ deploy_free_webman_port() {
     return 1
 }
 
-# aaPanel/AcePanel 把 supervisorctl 装在面板自带的 pyenv 里，不在 PATH 上，
+# aaPanel 的 supervisor 插件把 supervisorctl 装在面板自带的 pyenv 里，不在 PATH 上，
 # 所以 command -v supervisorctl 会失败，不能用它来判断有没有 supervisor。
+# AcePanel 反过来：它的 supervisor 应用直接 dnf/apt 装发行版那个 supervisor，面板自己也是
+# 调用 PATH 上的 supervisorctl，二进制落在 /usr/bin —— 已经被下面的 PATH 分支覆盖。
 deploy_supervisorctl_bin() {
     local candidate
     if [ -n "${SUPERVISORCTL:-}" ]; then
@@ -484,7 +517,6 @@ deploy_supervisorctl_bin() {
     fi
     for candidate in \
         /www/server/panel/pyenv/bin/supervisorctl \
-        /opt/ace/server/panel/pyenv/bin/supervisorctl \
         /usr/local/bin/supervisorctl \
         /usr/bin/supervisorctl; do
         [ -x "$candidate" ] && { echo "$candidate"; return 0; }
@@ -492,12 +524,21 @@ deploy_supervisorctl_bin() {
     return 1
 }
 
+# 面板把一个守护进程写成一个独立配置文件（程序名即 [program:<名字>]），位置随面板不同：
+#   aaPanel   /www/server/panel/plugin/supervisor/profile/<名字>.ini
+#   AcePanel  /etc/supervisor/conf.d/<名字>.conf（Debian/Ubuntu）
+#             /etc/supervisord.d/<名字>.conf（RHEL：其安装脚本把主配置里的
+#             files = supervisord.d/*.ini 改写成 *.conf，只按 *.ini 扫会整个漏掉，
+#             于是误判成「没有 supervisor 托管」，转去手工起进程与 supervisord 抢端口）
+#   通用部署  Debian 系与 RHEL 系都用上面同名目录，两种后缀都认。
 deploy_supervisor_config() {
     local conf
 
     for conf in /www/server/panel/plugin/supervisor/profile/*.ini \
-                /opt/ace/server/panel/plugin/supervisor/profile/*.ini \
+                /www/server/panel/plugin/supervisor/profile/*.conf \
                 /etc/supervisor/conf.d/*.conf \
+                /etc/supervisor/conf.d/*.ini \
+                /etc/supervisord.d/*.conf \
                 /etc/supervisord.d/*.ini; do
         [ -f "$conf" ] || continue
         grep -Eq 'webman\.(php|sh)' "$conf" || continue
@@ -831,12 +872,16 @@ deploy_cron_already_configured() {
             return 0
         fi
     done
-    # 面板计划任务把命令正文写进面板 cron 目录，crontab 里只留一行
-    # `/bin/bash <panel>/cron/<id>`，既没有 schedule:run 也没有本目录。不看这些脚本就会
-    # 把面板里已经配好的调度判成缺失，于是再追加一条 —— 每分钟两次 schedule:run，而
-    # v2board:statistics / reset:traffic / send:remindMail 这些没有 withoutOverlapping 的
-    # 命令就会在同一分钟里跑两遍（重复发信、重复统计）。
-    for conf in /www/server/cron/* /opt/ace/server/cron/*; do
+    # 面板计划任务把命令正文写进面板 cron 目录，crontab 里只留一行 wrapper 路径，既没有
+    # schedule:run 也没有本目录。不看这些脚本就会把面板里已经配好的调度判成缺失，于是再
+    # 追加一条 —— 每分钟两次 schedule:run，而 v2board:statistics / reset:traffic /
+    # send:remindMail 这些没有 withoutOverlapping 的命令就会在同一分钟里跑两遍（重复发信、
+    # 重复统计）。两个面板的落点不同：
+    #   aaPanel   /www/server/cron/<id>（命令正文直接写在该文件里）
+    #   AcePanel  <app.root>/server/cron/<随机>.sh（另有 _wrapper.sh，日志在 logs/ 子目录）
+    # 首项跟随 PHP_BIN 反推出的 PANEL_ROOT，面板改过 app.root 时也扫得到；后两项是两家的
+    # 默认根，留着兜底（同机装过两套面板时才可能命中不同的那个）。
+    for conf in "${PANEL_ROOT:-/www}"/server/cron/* /www/server/cron/* /opt/ace/server/cron/*; do
         [ -f "$conf" ] || continue
         case "$conf" in
             *.log) continue ;;

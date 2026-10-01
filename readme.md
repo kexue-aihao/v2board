@@ -641,7 +641,7 @@ PHP 配置只使用面板管理的同一套，不再存在项目内 php.ini：
 
 | 变量 | 要求 | 用途 |
 | --- | --- | --- |
-| PHP_BIN | `/www/server/php/<版本>/bin/php` 或 `/opt/ace/server/php/<版本>/bin/php` | 面板安装的 PHP CLI，例如 `/www/server/php/81/bin/php` 或 `/opt/ace/server/php/81/bin/php` |
+| PHP_BIN | `/www/server/php/<版本>/bin/php` 或 `/opt/ace/server/php/<版本>/bin/php`（AcePanel 改过 `app.root` 时为 `<root>/server/php/<版本>/bin/php`，脚本按面板配置里的 `root:` 识别） | 面板安装的 PHP CLI，例如 `/www/server/php/81/bin/php` 或 `/opt/ace/server/php/81/bin/php` |
 | PHP_INI | 与 PHP_BIN 同版本的 `etc/php.ini` | Webman、Horizon、artisan、Composer 与 cron 全部共用 |
 
 **只需安装一个面板 PHP 版本。** 例如 PHP 8.1 同时供 V2Board、PHP-FPM 与 phpMyAdmin 使用；不需要第二个 PHP 版本，也不要为了 AdapterMan 强制把站点设为“纯静态”。Webman 进程从同一份面板 `php.ini` 启动，但只在该进程内临时禁用 AdapterMan 所需函数，PHP-FPM/phpMyAdmin 不受影响。
@@ -672,8 +672,8 @@ AcePanel：
 
 Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorctl 停启，不再自行 `webman.php start -d`：
 
-- supervisorctl 二进制按 PATH、`/www/server/panel/pyenv/bin`、`/opt/ace/server/panel/pyenv/bin`、`/usr/local/bin`、`/usr/bin` 顺序查找，可用 `SUPERVISORCTL` 覆盖。
-- 程序名从 aaPanel 的 `/www/server/panel/plugin/supervisor/profile/*.ini`、AcePanel 的 `/opt/ace/server/panel/plugin/supervisor/profile/*.ini`、`/etc/supervisor/conf.d/*.conf`、`/etc/supervisord.d/*.ini` 中反查（取同时提到 webman.php 与本项目目录的那个文件），可用 `SUPERVISOR_PROGRAM` 覆盖。配置了 numprocs 时进程名是 `<程序名>_00`，脚本会自动用 `<程序名>:*` 这种组形式定位。
+- supervisorctl 二进制按 PATH、`/www/server/panel/pyenv/bin`（aaPanel 的进程守护插件把它装在面板自带的 pyenv 里，不在 PATH 上）、`/usr/local/bin`、`/usr/bin` 顺序查找，可用 `SUPERVISORCTL` 覆盖。AcePanel 相反：它的 Supervisor 应用直接 `dnf/apt install supervisor`，面板自己也调用 PATH 上的 supervisorctl，所以二进制就在 `/usr/bin`。
+- 程序名从 aaPanel 的 `/www/server/panel/plugin/supervisor/profile/*.ini`、AcePanel 与通用部署的 `/etc/supervisor/conf.d/*.conf`（Debian/Ubuntu）或 `/etc/supervisord.d/*.conf`（RHEL；AcePanel 的安装脚本会把主配置里的 `files = supervisord.d/*.ini` 改写成 `*.conf`，只按 `.ini` 扫会整个漏掉）中反查（取同时提到 webman.php 与本项目目录的那个文件），可用 `SUPERVISOR_PROGRAM` 覆盖。配置了 numprocs 时进程名是 `<程序名>_00`，脚本会自动用 `<程序名>:*` 这种组形式定位。
 
 托管情况下必须走 supervisorctl：supervisor 配置通常是 `autorestart=true`，手工 `webman.php stop` 之后 supervisord 会在几秒内把它重新拉起来占住端口，随后部署脚本自己的 start 就会撞上 `Address already in use`，并且起出一套 supervisord 不认、进程属主也不对的实例。
 
@@ -691,9 +691,9 @@ init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），�
 | 项目 | 说明 |
 | --- | --- |
 | 标记行 | `# v2board-schedule <项目目录>`，脚本靠它识别自己写过的条目 |
-| 幂等 | 下列任一命中就整段跳过、一个字都不改：标记行已存在；crontab 里已有指向本目录的 schedule:run（含运维手写的）；`/etc/crontab` 或 `/etc/cron.d/*` 里已有同类条目；**`/var/spool/cron/*` 或 `/var/spool/cron/crontabs/*`（即别的用户的 crontab）里已有同类条目**；`/www/server/cron/*` 或 `/opt/ace/server/cron/*` 里已有提到本目录与 schedule:run 的面板计划任务脚本。追加时已有 crontab 内容逐字保留，只在末尾追加，不覆盖运维其它条目 |
+| 幂等 | 下列任一命中就整段跳过、一个字都不改：标记行已存在；crontab 里已有指向本目录的 schedule:run（含运维手写的）；`/etc/crontab` 或 `/etc/cron.d/*` 里已有同类条目；**`/var/spool/cron/*` 或 `/var/spool/cron/crontabs/*`（即别的用户的 crontab）里已有同类条目**；`/www/server/cron/*` 或 `/opt/ace/server/cron/*`（面板根目录改过时按 PHP_BIN 反推的根）里已有提到本目录与 schedule:run 的面板计划任务脚本。追加时已有 crontab 内容逐字保留，只在末尾追加，不覆盖运维其它条目 |
 | 别的用户的 crontab | 运维常把调度装在 www 名下（`crontab -u www -e`，好让 storage/logs 里新建文件的属主与 Webman 一致），而 `bash update.sh` 一般以 root 跑：只看 `crontab -l`（root 自己那份）就看不见 www 的条目。脚本因此在 root 下额外扫 `/var/spool/cron`，否则会给一个本来配好的站点再追加一条。非 root 时这些文件读不到，会自动跳过 |
-| 面板计划任务 | aaPanel 把命令正文写进 `/www/server/cron/<id>`，AcePanel 把命令正文写进 `/opt/ace/server/cron/<id>`，crontab 里只留一行 `/bin/bash <panel>/cron/<id>`，光看 crontab 会误判成缺失。脚本因此额外扫这两批文件 —— 否则会重复追加一条，每分钟两次 schedule:run，`v2board:statistics`、`reset:traffic`、`send:remindMail` 这些没有 withoutOverlapping 的命令会在同一分钟跑两遍 |
+| 面板计划任务 | aaPanel 把命令正文写进 `/www/server/cron/<id>`；AcePanel 写进 `<app.root>/server/cron/<随机>.sh`（另生成 `_wrapper.sh`，日志在 `logs/` 子目录），crontab 里只留一行 wrapper 脚本路径，光看 crontab 会误判成缺失。脚本因此额外扫这些面板 cron 目录（AcePanel 改过 `app.root` 时按 PHP_BIN 反推出根目录）—— 否则会重复追加一条，每分钟两次 schedule:run，`v2board:statistics`、`reset:traffic`、`send:remindMail` 这些没有 withoutOverlapping 的命令会在同一分钟跑两遍 |
 | 重复告警 | crontab 里已有 schedule:run、但没有一条提到本目录时，脚本照旧追加（同机多站点各需一条），同时打印 WARNING。若其中某条其实就是本站点（典型是 docroot 为软链，路径与解析后的目录不一致），请手工删掉重复的那条 |
 | SKIP_CRON | `SKIP_CRON=1 bash update.sh` 让脚本完全不碰 crontab。**用别的载体跑调度时请一直带上它**：典型是 systemd timer、外部调度器、容器 sidecar —— 这些脚本认不出来（systemd 单元只会打印 WARNING 后照旧追加，因为「单元文件存在」并不等于「timer 已启用」，认成已配置反而可能让调度彻底不跑） |
 | PHP 路径 | 使用同一 aaPanel 或 AcePanel PHP_BIN 与 PHP_INI 的绝对路径（cron 的 PATH 很短，写 `php` 容易解析到别的版本） |
