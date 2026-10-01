@@ -677,7 +677,7 @@ Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorc
 
 托管情况下必须走 supervisorctl：supervisor 配置通常是 `autorestart=true`，手工 `webman.php stop` 之后 supervisord 会在几秒内把它重新拉起来占住端口，随后部署脚本自己的 start 就会撞上 `Address already in use`，并且起出一套 supervisord 不认、进程属主也不对的实例。
 
-另需注意 supervisor 配置里的 `command=` 应使用 Webman 包装脚本，例如 `command=PHP_BIN=/www/server/php/81/bin/php /bin/bash /www/wwwroot/v2board/scripts/webman.sh start`，AcePanel 则替换为 `/opt/ace/server/php/81/bin/php`。包装脚本固定读取同版本面板 `etc/php.ini`，仅为 Webman 注入 AdapterMan 所需覆盖；不要写裸 `php`、`-n` 或项目 ini。
+另需注意 supervisor 配置里的 `command=` 应使用 Webman 包装脚本，并通过 `environment=` 传入 PHP 路径。例如 aaPanel 使用 `command=/bin/bash /www/wwwroot/v2board/scripts/webman.sh start` 与 `environment=PHP_BIN=/www/server/php/81/bin/php,PHP_INI=/www/server/php/81/etc/php.ini`；AcePanel 将两处路径替换为 `/opt/ace/server/php/81/...`。不要把 `PHP_BIN=...` 直接写在 `command=` 前面，也不要写裸 `php`、`-n` 或项目 ini。包装脚本固定读取同版本面板 `etc/php.ini`，仅为 Webman 注入 AdapterMan 所需覆盖。
 
 ### 11.1 计划任务（部署必需）
 
