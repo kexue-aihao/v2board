@@ -610,7 +610,7 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 | php artisan schedule:run | 执行一次当前到期的计划任务，由 cron 每分钟调用 |
 | php artisan schedule:list | 列出全部计划任务及其执行时间 |
 
-`php artisan v2board:update` 默认走幂等 schema 迁移（`SchemaUpgradeService::run`，执行记录落 `v2_schema_migrations`），按需建表且可反复执行。除订阅、风控、IP 归属缓存等历史表外，还会建资金流水审计表 `v2_balance_log`（每次余额变更留痕，`unique_key` 唯一键保证同一笔只入账一次）、订阅凭证历史 `v2_subscription_token_history`、IP+账号累积 `v2_ip_account_link`，以及 OAuth 身份、Telegram 绑定等表。加 `--legacy` 才回退执行 `database/update.sql`。首次升级到含资金流水的版本时，建表窗口内的余额变更会静默跳过写流水，表建好后自动开始记录。
+`php artisan v2board:update` 默认走幂等 schema 迁移（`SchemaUpgradeService::run`，执行记录落 `v2_schema_migrations`），按需建表且可反复执行。除订阅、风控、IP 归属缓存等历史表外，还会建资金流水审计表 `v2_balance_log`（每次余额变更留痕，`unique_key` 唯一键保证同一笔只入账一次）、订阅凭证历史 `v2_subscription_token_history`、IP+账号累积 `v2_ip_account_link`，以及 OAuth 身份、Telegram 绑定、二步验证（`v2_user_two_factor`、`v2_two_factor_audit`，登录前必查，建不出来时登录一律 500）等表。加 `--legacy` 才回退执行 `database/update.sql`。首次升级到含资金流水的版本时，建表窗口内的余额变更会静默跳过写流水，表建好后自动开始记录。
 
 支付安全升级会创建 `v2_payment_attempt`，将订单与唯一外部支付尝试、金额、币种及网关流水绑定。首次升级时会自动关闭 BTCPay、Coinbase、MGate；停止结账入口后执行：
 

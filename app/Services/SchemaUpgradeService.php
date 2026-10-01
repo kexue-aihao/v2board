@@ -35,7 +35,9 @@ class SchemaUpgradeService
         'traffic_reward_native_entrypoint_schema' => 'traffic_reward_native_entrypoint_schema_v1',
         'telegram_login_link_schema' => 'telegram_login_link_schema_v1',
         'telegram_registration_schema' => 'telegram_registration_schema_v1',
-        'telegram_registration_invite_schema' => 'telegram_registration_invite_schema_v1'
+        'telegram_registration_invite_schema' => 'telegram_registration_invite_schema_v1',
+        'two_factor_schema' => 'two_factor_schema_v1',
+        'server_tls_pin_schema' => 'server_tls_pin_schema_v1'
     ];
 
     public function run(): array
@@ -155,6 +157,12 @@ class SchemaUpgradeService
                 return;
             case 'telegram_registration_invite_schema':
                 $this->applyTelegramRegistrationInviteSchema();
+                return;
+            case 'two_factor_schema':
+                $this->applyTwoFactorSchema();
+                return;
+            case 'server_tls_pin_schema':
+                $this->applyServerTlsPinSchema();
                 return;
         }
 
@@ -1604,6 +1612,100 @@ class SchemaUpgradeService
         $this->requireTable('v2_telegram_registration');
         // 邀请码在机器人那一步就校验，落在这个字段上带到网页建号时消费
         $this->ensureColumn('v2_telegram_registration', 'invite_code', 'varchar(64) DEFAULT NULL');
+    }
+
+    /**
+     * 二步验证的两张表只写在 install.sql（全新安装）与 update.sql（仅在 `v2board:update --legacy`
+     * 时执行）里，幂等迁移一直漏了它们。于是「在引入二步验证之前安装、且从未跑过 legacy 升级」
+     * 的站点跑 update.sh 时永远建不出这两张表，而登录路径每次都会读 v2_user_two_factor：
+     * AuthController::performLogin() → TwoFactorService::issueLoginResult() → isEnabled() →
+     * UserTwoFactor::where('user_id', ...)->first()，表不存在就是 QueryException（1146），
+     * 密码登录、管理员登录、Telegram 免密码登录全部直接 500。这里补上与 install.sql 同一份 DDL，
+     * 可反复执行。
+     */
+    private function applyTwoFactorSchema(): void
+    {
+        $this->requireTable('v2_user');
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_user_two_factor` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `secret_encrypted` text DEFAULT NULL,
+            `pending_secret_encrypted` text DEFAULT NULL,
+            `enabled` tinyint(1) NOT NULL DEFAULT '0',
+            `confirmed_at` int(11) DEFAULT NULL,
+            `recovery_codes` text DEFAULT NULL,
+            `last_used_step` bigint(20) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'secret_encrypted' => 'text DEFAULT NULL',
+            'pending_secret_encrypted' => 'text DEFAULT NULL',
+            'enabled' => "tinyint(1) NOT NULL DEFAULT '0'",
+            'confirmed_at' => 'int(11) DEFAULT NULL',
+            'recovery_codes' => 'text DEFAULT NULL',
+            'last_used_step' => 'bigint(20) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_user_two_factor', $column, $definition);
+        }
+        // 一个账号一条记录：登录校验靠这张表判断是否启用了二步验证，重复行会让状态判定失准。
+        $this->ensureUniqueIndex('v2_user_two_factor', 'user_id', ['user_id']);
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_two_factor_audit` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `actor_user_id` int(11) DEFAULT NULL,
+            `action` varchar(64) NOT NULL,
+            `ip` varchar(64) DEFAULT NULL,
+            `user_agent` varchar(500) DEFAULT NULL,
+            `metadata` text DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'actor_user_id' => 'int(11) DEFAULT NULL',
+            'action' => 'varchar(64) NOT NULL',
+            'ip' => 'varchar(64) DEFAULT NULL',
+            'user_agent' => 'varchar(500) DEFAULT NULL',
+            'metadata' => 'text DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_two_factor_audit', $column, $definition);
+        }
+        $this->ensureIndex('v2_two_factor_audit', 'user_id', ['user_id']);
+        $this->ensureIndex('v2_two_factor_audit', 'action', ['action']);
+    }
+
+    /**
+     * 同一类遗漏：这两个列也只在 install.sql / update.sql 里。少了它们，AnyTLS 节点保存
+     * （Admin\Server\AnyTLSController::save 带 pinned_peer_cert_sha256）与 V2node 的
+     * trusted_x_forwarded_for 写入都会以「未知列 1054」报 500。表不存在的老库直接跳过。
+     */
+    private function applyServerTlsPinSchema(): void
+    {
+        if (Schema::hasTable('v2_server_anytls')) {
+            $this->ensureColumn(
+                'v2_server_anytls',
+                'pinned_peer_cert_sha256',
+                "varchar(128) DEFAULT NULL COMMENT 'TLS leaf cert SHA256 hex'"
+            );
+        }
+
+        if (Schema::hasTable('v2_server_v2node')) {
+            $this->ensureColumn(
+                'v2_server_v2node',
+                'trusted_x_forwarded_for',
+                "varchar(255) DEFAULT NULL COMMENT '信任的x-forwarded-for头部'"
+            );
+        }
     }
 
     private function requireTable(string $table): void
