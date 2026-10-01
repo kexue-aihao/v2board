@@ -623,51 +623,61 @@ php artisan payment:invalidate-legacy --force
 
 支付宝当面付重新启用前，需在支付方式配置中填写与该 AppID 对应的 `seller_id`；缺少或不匹配该商户标识的已签名回调不会开通订单。
 
-aaPanel 升级示例：
+aaPanel / AcePanel 升级示例：
 
     PHP_BIN=/www/server/php/81/bin/php \
     PHP_INI=/www/server/php/81/etc/php.ini \
     DEPLOY_BRANCH=debug bash update.sh
 
+AcePanel 使用对应的 `/opt/ace` 路径：
+
+    PHP_BIN=/opt/ace/server/php/81/bin/php \
+    PHP_INI=/opt/ace/server/php/81/etc/php.ini \
+    DEPLOY_BRANCH=debug bash update.sh
+
 update.sh 会执行 Git 拉取、Composer 安装、数据库升级、缓存清理、IP 缓存清理和 Webman 重启；不会每次自动执行历史 IP 回填和风险计算。
 
-PHP 配置只使用 aaPanel 管理的同一套，不再存在项目内 php.ini：
+PHP 配置只使用面板管理的同一套，不再存在项目内 php.ini：
 
 | 变量 | 要求 | 用途 |
 | --- | --- | --- |
-| PHP_BIN | `/www/server/php/<版本>/bin/php` | aaPanel 唯一安装的 PHP CLI，例如 `/www/server/php/81/bin/php` |
-| PHP_INI | 与 PHP_BIN 同版本的 `/www/server/php/<版本>/etc/php.ini` | Webman、Horizon、artisan、Composer 与 cron 全部共用 |
+| PHP_BIN | `/www/server/php/<版本>/bin/php` 或 `/opt/ace/server/php/<版本>/bin/php` | 面板安装的 PHP CLI，例如 `/www/server/php/81/bin/php` 或 `/opt/ace/server/php/81/bin/php` |
+| PHP_INI | 与 PHP_BIN 同版本的 `etc/php.ini` | Webman、Horizon、artisan、Composer 与 cron 全部共用 |
 
-**只需安装一个 aaPanel PHP 版本。** 例如 PHP 8.1 同时供 V2Board、PHP-FPM 与 phpMyAdmin 使用；不需要第二个 PHP 版本，也不要为了 AdapterMan 强制把站点设为“纯静态”。Webman 进程从同一份 aaPanel `php.ini` 启动，但只在该进程内临时禁用 AdapterMan 所需函数，PHP-FPM/phpMyAdmin 不受影响。
+**只需安装一个面板 PHP 版本。** 例如 PHP 8.1 同时供 V2Board、PHP-FPM 与 phpMyAdmin 使用；不需要第二个 PHP 版本，也不要为了 AdapterMan 强制把站点设为“纯静态”。Webman 进程从同一份面板 `php.ini` 启动，但只在该进程内临时禁用 AdapterMan 所需函数，PHP-FPM/phpMyAdmin 不受影响。
 
-脚本会将 PATH 中的 `php` 解析为绝对路径；若它不是 aaPanel PHP，请显式指定 `PHP_BIN`。`PHP_INI` 不必指定；若指定，只能是该 PHP_BIN 对应的 `etc/php.ini`，防止不同进程误用另一套配置。
+脚本会将 PATH 中的 `php` 解析为绝对路径；若它不是 aaPanel 或 AcePanel PHP，请显式指定 `PHP_BIN`。`PHP_INI` 不必指定；若指定，只能是该 PHP_BIN 对应的 `etc/php.ini`，防止不同进程误用另一套配置。
 
-在 aaPanel 对应 PHP 版本的 **Install extensions** 中安装并启用：`pdo_mysql`、`fileinfo`、`redis`、`pcntl`、`posix`。
+在面板对应 PHP 版本的扩展管理中安装并启用：`pdo_mysql`、`fileinfo`、`redis`、`pcntl`、`posix`。
 
-下列函数必须**保持不在** aaPanel **Disabled functions** 中，因为 PHP-FPM/phpMyAdmin 的响应、Cookie、登录 Session 需要它们。`scripts/webman.sh` 会在启动 Webman 时仅对该进程临时禁用它们，以让 AdapterMan 替换 HTTP 响应、Cookie 与 Session 实现：
+下列函数必须**保持不在**面板的 **Disabled functions** 中，因为 PHP-FPM/phpMyAdmin 的响应、Cookie、登录 Session 需要它们。`scripts/webman.sh` 会在启动 Webman 时仅对该进程临时禁用它们，以让 AdapterMan 替换 HTTP 响应、Cookie 与 Session 实现：
 
     header,header_remove,headers_sent,headers_list,http_response_code,setcookie,session_create_id,session_id,session_name,session_save_path,session_status,session_start,session_write_close,session_regenerate_id,session_unset,session_get_cookie_params,session_set_cookie_params,set_time_limit
 
-同时，aaPanel 全局也不能禁用下列函数；它们分别由项目启动代码和 Workerman 的 worker 创建、信号、进程重载及 PID/用户管理使用：
+同时，面板全局也不能禁用下列函数；它们分别由项目启动代码和 Workerman 的 worker 创建、信号、进程重载及 PID/用户管理使用：
 
     putenv,stream_socket_client,exec,shell_exec,proc_open,proc_get_status,proc_close,pcntl_signal_dispatch,pcntl_signal,pcntl_alarm,pcntl_fork,pcntl_wait,posix_getuid,posix_getpwuid,posix_kill,posix_setsid,posix_getpid,posix_getpwnam,posix_getgrnam,posix_getgid,posix_setgid,posix_initgroups,posix_setuid,posix_isatty
 
-`init.sh` 与 `update.sh` 会在下载依赖或停止 Webman 前检查这两组冲突，并报告具体函数及影响功能；脚本不会自动修改 aaPanel。若选择继续全局禁用其中任一 PHP-FPM/phpMyAdmin 或 Workerman 所需函数，就不能继续使用本项目的共享 PHP AdapterMan/Webman 运行方式，只能改用 PHP-FPM HTTP 运行时。
+`init.sh` 与 `update.sh` 会在下载依赖或停止 Webman 前检查这两组冲突，并报告具体函数及影响功能；脚本不会自动修改面板。若选择继续全局禁用其中任一 PHP-FPM/phpMyAdmin 或 Workerman 所需函数，就不能继续使用本项目的共享 PHP AdapterMan/Webman 运行方式，只能改用 PHP-FPM HTTP 运行时。
 
-首次安装或升级前，可先运行无副作用预检；它只读取 PHP、aaPanel vhost 与 Supervisor 配置，不会下载依赖、写入数据库、停止服务或修改 cron：
+首次安装或升级前，可先运行无副作用预检；它只读取 PHP、面板 vhost 与 Supervisor 配置，不会下载依赖、写入数据库、停止服务或修改 cron：
 
     PHP_BIN=/www/server/php/81/bin/php DEPLOY_CHECK_ONLY=1 bash init.sh
+
+AcePanel：
+
+    PHP_BIN=/opt/ace/server/php/81/bin/php DEPLOY_CHECK_ONLY=1 bash init.sh
 
 已安装站点也可将最后的 `init.sh` 换成 `update.sh`。
 
 Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorctl 停启，不再自行 `webman.php start -d`：
 
-- supervisorctl 二进制按 PATH、`/www/server/panel/pyenv/bin`、`/usr/local/bin`、`/usr/bin` 顺序查找，可用 `SUPERVISORCTL` 覆盖。
-- 程序名从 `/www/server/panel/plugin/supervisor/profile/*.ini`、`/etc/supervisor/conf.d/*.conf`、`/etc/supervisord.d/*.ini` 中反查（取同时提到 webman.php 与本项目目录的那个文件），可用 `SUPERVISOR_PROGRAM` 覆盖。配置了 numprocs 时进程名是 `<程序名>_00`，脚本会自动用 `<程序名>:*` 这种组形式定位。
+- supervisorctl 二进制按 PATH、`/www/server/panel/pyenv/bin`、`/opt/ace/server/panel/pyenv/bin`、`/usr/local/bin`、`/usr/bin` 顺序查找，可用 `SUPERVISORCTL` 覆盖。
+- 程序名从 aaPanel 的 `/www/server/panel/plugin/supervisor/profile/*.ini`、AcePanel 的 `/opt/ace/server/panel/plugin/supervisor/profile/*.ini`、`/etc/supervisor/conf.d/*.conf`、`/etc/supervisord.d/*.ini` 中反查（取同时提到 webman.php 与本项目目录的那个文件），可用 `SUPERVISOR_PROGRAM` 覆盖。配置了 numprocs 时进程名是 `<程序名>_00`，脚本会自动用 `<程序名>:*` 这种组形式定位。
 
 托管情况下必须走 supervisorctl：supervisor 配置通常是 `autorestart=true`，手工 `webman.php stop` 之后 supervisord 会在几秒内把它重新拉起来占住端口，随后部署脚本自己的 start 就会撞上 `Address already in use`，并且起出一套 supervisord 不认、进程属主也不对的实例。
 
-另需注意 supervisor 配置里的 `command=` 应使用 Webman 包装脚本，例如 `command=PHP_BIN=/www/server/php/81/bin/php /bin/bash /www/wwwroot/v2board/scripts/webman.sh start`。包装脚本固定读取同版本 aaPanel `etc/php.ini`，仅为 Webman 注入 AdapterMan 所需覆盖；不要写裸 `php`、`-n` 或项目 ini。
+另需注意 supervisor 配置里的 `command=` 应使用 Webman 包装脚本，例如 `command=PHP_BIN=/www/server/php/81/bin/php /bin/bash /www/wwwroot/v2board/scripts/webman.sh start`，AcePanel 则替换为 `/opt/ace/server/php/81/bin/php`。包装脚本固定读取同版本面板 `etc/php.ini`，仅为 Webman 注入 AdapterMan 所需覆盖；不要写裸 `php`、`-n` 或项目 ini。
 
 ### 11.1 计划任务（部署必需）
 
@@ -681,14 +691,14 @@ init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），�
 | 项目 | 说明 |
 | --- | --- |
 | 标记行 | `# v2board-schedule <项目目录>`，脚本靠它识别自己写过的条目 |
-| 幂等 | 下列任一命中就整段跳过、一个字都不改：标记行已存在；crontab 里已有指向本目录的 schedule:run（含运维手写的）；`/etc/crontab` 或 `/etc/cron.d/*` 里已有同类条目；**`/var/spool/cron/*` 或 `/var/spool/cron/crontabs/*`（即别的用户的 crontab）里已有同类条目**；`/www/server/cron/*` 里已有提到本目录与 schedule:run 的面板计划任务脚本。追加时已有 crontab 内容逐字保留，只在末尾追加，不覆盖运维其它条目 |
+| 幂等 | 下列任一命中就整段跳过、一个字都不改：标记行已存在；crontab 里已有指向本目录的 schedule:run（含运维手写的）；`/etc/crontab` 或 `/etc/cron.d/*` 里已有同类条目；**`/var/spool/cron/*` 或 `/var/spool/cron/crontabs/*`（即别的用户的 crontab）里已有同类条目**；`/www/server/cron/*` 或 `/opt/ace/server/cron/*` 里已有提到本目录与 schedule:run 的面板计划任务脚本。追加时已有 crontab 内容逐字保留，只在末尾追加，不覆盖运维其它条目 |
 | 别的用户的 crontab | 运维常把调度装在 www 名下（`crontab -u www -e`，好让 storage/logs 里新建文件的属主与 Webman 一致），而 `bash update.sh` 一般以 root 跑：只看 `crontab -l`（root 自己那份）就看不见 www 的条目。脚本因此在 root 下额外扫 `/var/spool/cron`，否则会给一个本来配好的站点再追加一条。非 root 时这些文件读不到，会自动跳过 |
-| 面板计划任务 | aaPanel 把命令正文写进 `/www/server/cron/<id>`，crontab 里只留一行 `/bin/bash /www/server/cron/<id>`，光看 crontab 会误判成缺失。脚本因此额外扫这批文件 —— 否则会重复追加一条，每分钟两次 schedule:run，`v2board:statistics`、`reset:traffic`、`send:remindMail` 这些没有 withoutOverlapping 的命令会在同一分钟跑两遍 |
+| 面板计划任务 | aaPanel 把命令正文写进 `/www/server/cron/<id>`，AcePanel 把命令正文写进 `/opt/ace/server/cron/<id>`，crontab 里只留一行 `/bin/bash <panel>/cron/<id>`，光看 crontab 会误判成缺失。脚本因此额外扫这两批文件 —— 否则会重复追加一条，每分钟两次 schedule:run，`v2board:statistics`、`reset:traffic`、`send:remindMail` 这些没有 withoutOverlapping 的命令会在同一分钟跑两遍 |
 | 重复告警 | crontab 里已有 schedule:run、但没有一条提到本目录时，脚本照旧追加（同机多站点各需一条），同时打印 WARNING。若其中某条其实就是本站点（典型是 docroot 为软链，路径与解析后的目录不一致），请手工删掉重复的那条 |
 | SKIP_CRON | `SKIP_CRON=1 bash update.sh` 让脚本完全不碰 crontab。**用别的载体跑调度时请一直带上它**：典型是 systemd timer、外部调度器、容器 sidecar —— 这些脚本认不出来（systemd 单元只会打印 WARNING 后照旧追加，因为「单元文件存在」并不等于「timer 已启用」，认成已配置反而可能让调度彻底不跑） |
-| PHP 路径 | 使用同一 aaPanel PHP_BIN 与 PHP_INI 的绝对路径（cron 的 PATH 很短，写 `php` 容易解析到别的版本） |
+| PHP 路径 | 使用同一 aaPanel 或 AcePanel PHP_BIN 与 PHP_INI 的绝对路径（cron 的 PATH 很短，写 `php` 容易解析到别的版本） |
 | CRON_USER | 可选，把条目写进指定用户的 crontab，例如 `CRON_USER=www bash update.sh`；默认写当前用户 |
-| 日志属主 | 以 root 跑 cron 时 storage/logs 里新建的文件可能属 root，导致 Webman（www）写日志失败。aaPanel 环境建议 `CRON_USER=www`，或部署后由 update.sh 末尾的 `chown -R www .` 收尾 |
+| 日志属主 | 以 root 跑 cron 时 storage/logs 里新建的文件可能属 root，导致 Webman（www）写日志失败。面板环境建议 `CRON_USER=www`，或部署后由 update.sh 末尾的 `chown -R www .` 收尾 |
 
 条目的输出去向是分开的，不是 `>> /dev/null 2>&1`：
 
@@ -737,7 +747,7 @@ init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），�
 
     # 1b. 全机器一共有几条指向本目录的 schedule:run —— 应当只有 1 条。多于 1 条就是重复调度，
     #     send:remindMail / reset:traffic / v2board:statistics 会在同一分钟跑两遍
-    grep -rl 'schedule:run' /var/spool/cron /etc/crontab /etc/cron.d /www/server/cron 2>/dev/null \
+    grep -rl 'schedule:run' /var/spool/cron /etc/crontab /etc/cron.d /www/server/cron /opt/ace/server/cron 2>/dev/null \
         | xargs -r grep -H 'schedule:run' | grep -v '^[^:]*: *#' | grep '/www/wwwroot/v2board'
 
     # 2. cron 守护进程是否在跑（Debian/Ubuntu 是 cron）
@@ -745,6 +755,8 @@ init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），�
 
     # 3. 手动跑一次，看到期任务是否逐条执行
     /www/server/php/81/bin/php -c /www/server/php/81/etc/php.ini artisan schedule:run -v
+
+    # AcePanel 将上面的 PHP 路径替换为 /opt/ace/server/php/81/bin/php，php.ini 替换为对应的 /opt/ace/server/php/81/etc/php.ini
 
     # 4. 列出全部条目与执行时间
     php artisan schedule:list
@@ -767,7 +779,7 @@ init.sh 负责的是「代码依赖 + 数据库 + 管理员 + 计划任务」，
 | 步骤 | 说明 |
 | --- | --- |
 | Web 服务器 | 站点根目录指向 `public/`，保留上游 PHP-FPM/Webman 伪静态规则；Webman 监听 `127.0.0.1:6600`（端口取自 webman.php） |
-| 启动 Webman | supervisor 托管（推荐）或 `PHP_BIN=/www/server/php/81/bin/php /bin/bash /www/wwwroot/v2board/scripts/webman.sh start -d`；supervisor 的 `command=` 也必须调用该包装脚本 |
+| 启动 Webman | supervisor 托管（推荐）或 `PHP_BIN=/www/server/php/81/bin/php /bin/bash /www/wwwroot/v2board/scripts/webman.sh start -d`；AcePanel 将 PHP 路径替换为 `/opt/ace/server/php/81/bin/php`；supervisor 的 `command=` 也必须调用该包装脚本 |
 | 启动队列 | `PHP_BIN -c PHP_INI artisan horizon`，同样建议交给 supervisor。缺它则邮件、支付回调等队列任务堆积不消费 |
 | 计划任务 | init.sh 已写入，按 11.1 验证一遍 |
 | Redis | `.env.example` 里 CACHE_DRIVER、QUEUE_CONNECTION、SESSION_DRIVER 全是 redis，且安装器不会询问 Redis 参数。Redis 未装或不在 127.0.0.1:6379 时，装完就是 500 —— 需手工改 .env 的 REDIS_* 后 `artisan config:clear` |

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # AdapterMan replaces these native functions only inside the Workerman process.
-# They must remain enabled in aaPanel's shared PHP-FPM configuration so
+# They must remain enabled in the panel-managed PHP-FPM configuration so
 # phpMyAdmin and normal PHP routes keep working.
 DEPLOY_ADAPTERMAN_DISABLED_FUNCTIONS=(
     header header_remove headers_sent headers_list http_response_code
@@ -28,7 +28,7 @@ deploy_setup() {
 
     PHP_BIN="${PHP_BIN:-php}"
 
-    # All project processes must use the same aaPanel-managed PHP configuration.
+    # All project processes must use the same panel-managed PHP configuration.
     case "$PHP_BIN" in
         /*) ;;
         *)
@@ -44,22 +44,32 @@ deploy_setup() {
 
     case "$PHP_BIN" in
         /www/server/php/*/bin/php)
-            AAPANEL_PHP_DIR="${PHP_BIN%/bin/php}"
-            AAPANEL_PHP_VERSION="${AAPANEL_PHP_DIR##*/php/}"
-            AAPANEL_PHP_INI="$AAPANEL_PHP_DIR/etc/php.ini"
+            PANEL_NAME="aaPanel"
+            PANEL_PHP_DIR="${PHP_BIN%/bin/php}"
+            ;;
+        /opt/ace/server/php/*/bin/php)
+            PANEL_NAME="AcePanel"
+            PANEL_PHP_DIR="${PHP_BIN%/bin/php}"
             ;;
         *)
-            echo "ERROR: aaPanel PHP binary is required: $PHP_BIN" >&2
-            echo "Set PHP_BIN to /www/server/php/<version>/bin/php." >&2
+            echo "ERROR: aaPanel or AcePanel PHP binary is required: $PHP_BIN" >&2
+            echo "Set PHP_BIN to /www/server/php/<version>/bin/php or /opt/ace/server/php/<version>/bin/php." >&2
             return 1
             ;;
     esac
 
-    if [ -n "${PHP_INI:-}" ] && [ "$PHP_INI" != "$AAPANEL_PHP_INI" ]; then
-        echo "ERROR: PHP_INI must be the aaPanel configuration: $AAPANEL_PHP_INI" >&2
+    PANEL_PHP_VERSION="${PANEL_PHP_DIR##*/php/}"
+    PANEL_PHP_INI="$PANEL_PHP_DIR/etc/php.ini"
+    # Keep the old variable names available for deployments that source this file.
+    AAPANEL_PHP_DIR="$PANEL_PHP_DIR"
+    AAPANEL_PHP_VERSION="$PANEL_PHP_VERSION"
+    AAPANEL_PHP_INI="$PANEL_PHP_INI"
+
+    if [ -n "${PHP_INI:-}" ] && [ "$PHP_INI" != "$PANEL_PHP_INI" ]; then
+        echo "ERROR: PHP_INI must be the $PANEL_NAME configuration: $PANEL_PHP_INI" >&2
         return 1
     fi
-    PHP_INI="$AAPANEL_PHP_INI"
+    PHP_INI="$PANEL_PHP_INI"
     PHP_CMD=("$PHP_BIN" -c "$PHP_INI")
 
     if [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; then
@@ -67,7 +77,7 @@ deploy_setup() {
     fi
 
     if [ ! -f "$PHP_INI" ]; then
-        echo "ERROR: aaPanel PHP configuration not found: $PHP_INI" >&2
+        echo "ERROR: $PANEL_NAME PHP configuration not found: $PHP_INI" >&2
         return 1
     fi
     if ! command -v "$PHP_BIN" >/dev/null 2>&1 && [ ! -x "$PHP_BIN" ]; then
@@ -80,7 +90,7 @@ deploy_php() {
     "${PHP_CMD[@]}" "$@"
 }
 
-# Keep one aaPanel php.ini for every process. AdapterMan's function overrides
+# Keep one panel php.ini for every process. AdapterMan's function overrides
 # are supplied only to the Webman CLI process, preserving PHP-FPM/phpMyAdmin.
 deploy_prepare_webman_command() {
     local base_disabled function
@@ -262,9 +272,9 @@ deploy_check_webman_runtime() {
     done
 
     if [ "${#php_fpm_conflicts[@]}" -gt 0 ] || [ "${#adapterman_conflicts[@]}" -gt 0 ] || [ "${#workerman_conflicts[@]}" -gt 0 ]; then
-        echo "ERROR: aaPanel Disabled functions conflicts with this Webman deployment:" >&2
+        echo "ERROR: $PANEL_NAME Disabled functions conflicts with this Webman deployment:" >&2
         if [ "${#php_fpm_conflicts[@]}" -gt 0 ]; then
-            echo "  Remove from aaPanel Disabled functions (required by PHP-FPM/phpMyAdmin):" >&2
+            echo "  Remove from $PANEL_NAME Disabled functions (required by PHP-FPM/phpMyAdmin):" >&2
             printf '    %s\n' "${php_fpm_conflicts[*]}" >&2
             deploy_print_php_fpm_function_conflicts "${php_fpm_conflicts[*]}"
             echo "    AdapterMan disables these only for the Webman process; do not disable them globally." >&2
@@ -279,7 +289,7 @@ deploy_check_webman_runtime() {
             printf '    %s\n' "${workerman_conflicts[*]}" >&2
             deploy_print_enabled_function_conflicts "${workerman_conflicts[*]}"
         fi
-        echo "No aaPanel setting was changed automatically." >&2
+        echo "No $PANEL_NAME setting was changed automatically." >&2
         echo "Keeping any listed PHP-FPM or Workerman function disabled means this shared-PHP" >&2
         echo "AdapterMan/Webman deployment cannot run safely." >&2
         return 1
@@ -460,7 +470,7 @@ deploy_free_webman_port() {
     return 1
 }
 
-# aaPanel 把 supervisorctl 装在面板自带的 pyenv 里，不在 PATH 上，
+# aaPanel/AcePanel 把 supervisorctl 装在面板自带的 pyenv 里，不在 PATH 上，
 # 所以 command -v supervisorctl 会失败，不能用它来判断有没有 supervisor。
 deploy_supervisorctl_bin() {
     local candidate
@@ -474,6 +484,7 @@ deploy_supervisorctl_bin() {
     fi
     for candidate in \
         /www/server/panel/pyenv/bin/supervisorctl \
+        /opt/ace/server/panel/pyenv/bin/supervisorctl \
         /usr/local/bin/supervisorctl \
         /usr/bin/supervisorctl; do
         [ -x "$candidate" ] && { echo "$candidate"; return 0; }
@@ -485,6 +496,7 @@ deploy_supervisor_config() {
     local conf
 
     for conf in /www/server/panel/plugin/supervisor/profile/*.ini \
+                /opt/ace/server/panel/plugin/supervisor/profile/*.ini \
                 /etc/supervisor/conf.d/*.conf \
                 /etc/supervisord.d/*.ini; do
         [ -f "$conf" ] || continue
@@ -506,7 +518,7 @@ deploy_check_supervisor_php_config() {
         *"$PHP_BIN"*"-c"*"$PHP_INI"*"-d"*"disable_functions="*webman.php*) return 0 ;;
     esac
 
-    echo "ERROR: Supervisor Webman command does not use the aaPanel PHP configuration:" >&2
+    echo "ERROR: Supervisor Webman command does not use the $PANEL_NAME PHP configuration:" >&2
     echo "  $conf" >&2
     echo "Expected command=${ROOT_DIR}/scripts/webman.sh start" >&2
     echo "The wrapper reads ${PHP_INI} and applies AdapterMan overrides only to Webman." >&2
@@ -514,7 +526,7 @@ deploy_check_supervisor_php_config() {
     return 1
 }
 
-# 程序名不能写死：aaPanel 的配置在 supervisord.conf 的 files= 指向的
+# 程序名不能写死：面板的配置在 supervisord.conf 的 files= 指向的
 # plugin/supervisor/profile/*.ini 里，一个程序一个文件，通用部署一般也是这个布局。
 # 所以「哪个文件同时提到 webman.php 和本项目目录」就足够定位，不必解析 ini 分块。
 deploy_supervisor_program() {
@@ -641,9 +653,11 @@ deploy_start_webman() {
 }
 
 deploy_chown() {
-    if [ -f /etc/init.d/bt ]; then
-        chown -R www .
-    fi
+    case "${PANEL_NAME:-}" in
+        aaPanel|AcePanel)
+            chown -R www .
+            ;;
+    esac
 }
 
 # ---- Laravel 计划任务 --------------------------------------------------------
@@ -684,7 +698,7 @@ deploy_cron_log() {
     echo "${V2BOARD_CRON_LOG:-$ROOT_DIR/storage/logs/schedule-cron.log}"
 }
 
-# cron、Webman、Horizon、artisan 与 Composer 都使用同一套 aaPanel PHP 配置。
+# cron、Webman、Horizon、artisan 与 Composer 都使用同一套面板 PHP 配置。
 #
 # 输出去向是分开的，不是 >> /dev/null 2>&1：
 #   stdout -> /dev/null：Laravel 8 的 schedule:run 在没有到期任务时每分钟都会往 stdout 打一行
@@ -780,7 +794,7 @@ deploy_cron_has_schedule_run() {
 
 # 幂等：几种"已配置"都算命中并原样跳过 —— 我们自己的标记行、运维手写的任何指向本目录的
 # schedule:run、/etc/crontab 与 /etc/cron.d 里的系统级条目、其它用户的 crontab（/var/spool/cron）、
-# 以及 aaPanel 面板任务脚本。命中时一个字都不改。
+# 以及 aaPanel/AcePanel 面板任务脚本。命中时一个字都不改。
 #
 # 注意这里一律用 here-string 而不是 `printf ... | deploy_cron_has_schedule_run`：读取端一旦匹配
 # 就 return，管道左边的 printf/grep 会吃到 SIGPIPE 退出 141，而 init.sh / update.sh 都是
@@ -817,12 +831,12 @@ deploy_cron_already_configured() {
             return 0
         fi
     done
-    # aaPanel 的面板计划任务把命令正文写进 /www/server/cron/<id>，crontab 里只留一行
-    # `/bin/bash /www/server/cron/<id>`，既没有 schedule:run 也没有本目录。不看这些脚本就会
+    # 面板计划任务把命令正文写进面板 cron 目录，crontab 里只留一行
+    # `/bin/bash <panel>/cron/<id>`，既没有 schedule:run 也没有本目录。不看这些脚本就会
     # 把面板里已经配好的调度判成缺失，于是再追加一条 —— 每分钟两次 schedule:run，而
     # v2board:statistics / reset:traffic / send:remindMail 这些没有 withoutOverlapping 的
     # 命令就会在同一分钟里跑两遍（重复发信、重复统计）。
-    for conf in /www/server/cron/*; do
+    for conf in /www/server/cron/* /opt/ace/server/cron/*; do
         [ -f "$conf" ] || continue
         case "$conf" in
             *.log) continue ;;
