@@ -6,13 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Models\RiskRule;
 use App\Models\Subscription;
 use App\Models\SubscriptionRiskManual;
+use App\Models\SubscriptionRiskNotify;
 use App\Models\User;
 use App\Services\RiskRuleService;
+use App\Services\SubscriptionRiskNotifyService;
 use App\Services\SubscriptionRiskService;
 use App\Utils\CacheKey;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 
 class RiskRuleController extends Controller
@@ -58,7 +61,9 @@ class RiskRuleController extends Controller
             // decimal(18,8) 的整数部分只有 10 位，超过就会被 MySQL 截断或报错。
             'threshold' => 'required|numeric|min:0|max:9999999999',
             'enabled' => 'nullable|boolean',
-            'sort' => 'nullable|integer|min:0'
+            'sort' => 'nullable|integer|min:0',
+            // 命中该规则给风险值加多少分（0-100）。0 = 只标记不计分。
+            'weight' => 'nullable|integer|min:0|max:100'
         ], [
             'label.required' => '规则名称不能为空',
             'label.max' => '规则名称过长',
@@ -69,7 +74,10 @@ class RiskRuleController extends Controller
             'threshold.required' => '阈值不能为空',
             'threshold.numeric' => '阈值必须为数字',
             'threshold.min' => '阈值不能为负数',
-            'threshold.max' => '阈值超出可存储范围'
+            'threshold.max' => '阈值超出可存储范围',
+            'weight.integer' => '权重必须是 0-100 的整数',
+            'weight.min' => '权重必须是 0-100 的整数',
+            'weight.max' => '权重必须是 0-100 的整数'
         ]);
 
         $this->requireRuleTable();
@@ -80,6 +88,13 @@ class RiskRuleController extends Controller
             unset($params['enabled']);
         } else {
             $params['enabled'] = (int)(bool)$params['enabled'];
+        }
+        // 权重与 enabled 同一处理：缺席时不写，更新路径沿用当前值（编辑一条规则的阈值
+        // 不该把权重悄悄重置成默认值）。创建路径缺席则由列默认值兜底。
+        if ($request->input('weight') === null) {
+            unset($params['weight']);
+        } else {
+            $params['weight'] = max(0, min(RiskRuleService::MAX_RULE_WEIGHT, (int)$params['weight']));
         }
         // sort 由 /risk/rule/sort 统一维护。显式传 null 会写出 NULL，而 MySQL 的
         // ORDER BY sort ASC 把 NULL 排在最前面，等于静默把这条规则提到第一位。
@@ -175,7 +190,7 @@ class RiskRuleController extends Controller
     public function drop(Request $request)
     {
         $rule = $this->findRule($request);
-        $snapshot = $rule->only(['id', 'label', 'dimension', 'operator', 'threshold']);
+        $snapshot = $rule->only(['id', 'label', 'dimension', 'operator', 'threshold', 'weight']);
         if (!$rule->delete()) {
             abort(500, __('删除失败'));
         }
@@ -217,6 +232,9 @@ class RiskRuleController extends Controller
 
         $this->audit($request, 'RISK RECOMPUTE user_id=' . $userId
             . ' subscriptions=' . $subscriptions . ' cycles=' . $cycles);
+
+        // 重算可能把某条订阅推过阈值：提醒汇总跟在审计之后、响应之前。
+        $this->notifyHighRisk();
 
         return response([
             'data' => [
@@ -283,6 +301,8 @@ class RiskRuleController extends Controller
             Cache::forget($key);
             $this->audit($request, 'RISK RECOMPUTE ALL done subscriptions=' . $state['subscriptions']
                 . ' cycles=' . $state['cycles']);
+            // 只在整轮收尾时汇总提醒一次：分批中途发会让管理员收到半程快照。
+            $this->notifyHighRisk();
         } else {
             $state['touched_at'] = time();
             Cache::put($key, $state, self::CURSOR_TTL);
@@ -425,37 +445,51 @@ class RiskRuleController extends Controller
             ->get();
 
         $flaggedRows = [];
+        // 暂存表与结果表同时具备 risk_score 列时才写分数（未升级的库上两表都还没有）。
+        $hasScoreColumn = $service->scoreColumnAvailable('v2_subscription_risk_manual_stage')
+            && $service->scoreColumnAvailable('v2_subscription_risk_manual');
         $timedOut = false;
         foreach ($batch as $subscription) {
             $assessment = $service->assessWindow($subscription, (int)$state['start_at'], (int)$state['end_at']);
             // 每批只写暂存表，绝不让半轮结果影响用户列表。重试同一批时按
             // (run_id, subscription_id) 原子 UPSERT；完整轮次才会发布到正式结果表。
             $now = time();
+            // risk_score 是后加列：未升级的库里它不存在，整段 SQL 要绕开它，
+            // 否则手动评估会直接抛「未知列」。升级后下一批自动带上。
+            $scoreColumns = $hasScoreColumn ? ',`risk_score`' : '';
+            $scoreValues = $hasScoreColumn ? ',?' : '';
+            $scoreUpdate = $hasScoreColumn ? ', `risk_score` = VALUES(`risk_score`)' : '';
+            $stageBindings = [
+                (string)$state['run_id'],
+                (int)$subscription->user_id,
+                (int)$subscription->id,
+                (string)$assessment['status'],
+                (int)$state['start_at'],
+                (int)$state['end_at'],
+                json_encode($assessment['reasons'], JSON_UNESCAPED_UNICODE),
+                json_encode([
+                    'v' => 1,
+                    'metrics' => $assessment['metrics'],
+                    'fired_rules' => $assessment['fired'],
+                    'score' => $assessment['score']
+                ], JSON_UNESCAPED_UNICODE),
+                $now,
+                $now
+            ];
+            if ($hasScoreColumn) {
+                // 绑参顺序必须与列顺序一致：risk_score 插在 status 之后。
+                array_splice($stageBindings, 4, 0, [$assessment['score']]);
+            }
             DB::statement(
                 'INSERT INTO `v2_subscription_risk_manual_stage`
-                    (`run_id`,`user_id`,`subscription_id`,`status`,`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`)
-                 VALUES (?,?,?,?,?,?,?,?,?,?)
+                    (`run_id`,`user_id`,`subscription_id`,`status`' . $scoreColumns . ',`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`)
+                 VALUES (?,?,?,?' . $scoreValues . ',?,?,?,?,?,?)
                  ON DUPLICATE KEY UPDATE
                     `run_id` = VALUES(`run_id`), `user_id` = VALUES(`user_id`),
-                    `status` = VALUES(`status`), `window_start` = VALUES(`window_start`),
+                    `status` = VALUES(`status`)' . $scoreUpdate . ', `window_start` = VALUES(`window_start`),
                     `window_end` = VALUES(`window_end`), `risk_reasons` = VALUES(`risk_reasons`),
                     `metrics` = VALUES(`metrics`), `updated_at` = VALUES(`updated_at`)',
-                [
-                    (string)$state['run_id'],
-                    (int)$subscription->user_id,
-                    (int)$subscription->id,
-                    (string)$assessment['status'],
-                    (int)$state['start_at'],
-                    (int)$state['end_at'],
-                    json_encode($assessment['reasons'], JSON_UNESCAPED_UNICODE),
-                    json_encode([
-                        'v' => 1,
-                        'metrics' => $assessment['metrics'],
-                        'fired_rules' => $assessment['fired']
-                    ], JSON_UNESCAPED_UNICODE),
-                    $now,
-                    $now
-                ]
+                $stageBindings
             );
             $state['scanned']++;
             if ($assessment['status'] !== 'no_data') {
@@ -469,7 +503,8 @@ class RiskRuleController extends Controller
                         'email' => null,
                         'subscription_id' => (int)$subscription->id,
                         'reasons' => $assessment['reasons'],
-                        'metrics' => $assessment['metrics']
+                        'metrics' => $assessment['metrics'],
+                        'score' => $assessment['score']
                     ];
                 } else {
                     $state['overflow']++;
@@ -497,22 +532,24 @@ class RiskRuleController extends Controller
         if ($done) {
             // 只有游标仍归本轮时才发布。暂存结果和正式结果的替换同一事务提交，
             // 中断、超时或被接管的轮次都不会改变用户列表的风险判定。
-            $published = DB::transaction(function () use ($key, $state) {
+            $published = DB::transaction(function () use ($key, $state, $hasScoreColumn) {
                 $current = Cache::get($key);
                 if (!is_array($current)
                     || (string)($current['run_id'] ?? '') !== (string)$state['run_id']) {
                     return false;
                 }
 
+                $scoreColumns = $hasScoreColumn ? ',`risk_score`' : '';
+                $scoreUpdate = $hasScoreColumn ? ', `risk_score` = VALUES(`risk_score`)' : '';
                 DB::statement(
                     'INSERT INTO `v2_subscription_risk_manual`
-                        (`run_id`,`user_id`,`subscription_id`,`status`,`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`)
-                     SELECT `run_id`,`user_id`,`subscription_id`,`status`,`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`
+                        (`run_id`,`user_id`,`subscription_id`,`status`' . $scoreColumns . ',`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`)
+                     SELECT `run_id`,`user_id`,`subscription_id`,`status`' . $scoreColumns . ',`window_start`,`window_end`,`risk_reasons`,`metrics`,`created_at`,`updated_at`
                      FROM `v2_subscription_risk_manual_stage`
                      WHERE `run_id` = ?
                      ON DUPLICATE KEY UPDATE
                         `run_id` = VALUES(`run_id`), `user_id` = VALUES(`user_id`),
-                        `status` = VALUES(`status`), `window_start` = VALUES(`window_start`),
+                        `status` = VALUES(`status`)' . $scoreUpdate . ', `window_start` = VALUES(`window_start`),
                         `window_end` = VALUES(`window_end`), `risk_reasons` = VALUES(`risk_reasons`),
                         `metrics` = VALUES(`metrics`), `updated_at` = VALUES(`updated_at`)',
                     [(string)$state['run_id']]
@@ -533,6 +570,11 @@ class RiskRuleController extends Controller
                 . ' scanned=' . $state['scanned']
                 . ' flagged=' . $state['flagged']
                 . ' window=[' . $state['start_at'] . ',' . $state['end_at'] . ']');
+
+            // 只在发布事务提交之后汇总提醒：事务内发送会让消息跨在未提交的判定上，
+            // 一旦回滚就留下一批「已提醒但判定不存在」的通知。也不能在暂存写入时发 ——
+            // 暂存只是草稿，半轮结果不代表最终判定。
+            $this->notifyHighRisk();
         } else {
             $current = Cache::get($key);
             if (!is_array($current) || (string)($current['run_id'] ?? '') !== (string)$state['run_id']) {
@@ -567,12 +609,125 @@ class RiskRuleController extends Controller
     }
 
     /**
+     * 「待处理」区块：提醒台账里未处理的行，按风险值倒序。
+     * 数据来自 v2_subscription_risk_notify（collect 阶段登记的），与用户列表的分数同源。
+     */
+    public function highRisk(Request $request)
+    {
+        $notify = new SubscriptionRiskNotifyService();
+        $threshold = $notify->threshold();
+
+        if (!(new SubscriptionRiskService())->scoreSource()) {
+            // 未升级的库上没有分数列：待办必然为空，直接告诉前端而不是空跑两条 join。
+            return response([
+                'data' => [],
+                'total' => 0,
+                'available' => false,
+                'threshold' => $threshold
+            ]);
+        }
+
+        $current = max(1, (int)$request->input('current', 1));
+        $pageSize = (int)$request->input('pageSize', 20);
+        $pageSize = max(10, min(100, $pageSize > 0 ? $pageSize : 20));
+
+        $query = $notify->pendingQuery();
+        $total = (clone $query)->count();
+        $rows = $query->forPage($current, $pageSize)->get();
+
+        $data = [];
+        foreach ($rows as $row) {
+            $data[] = [
+                'id' => (int)$row->id,
+                'user_id' => (int)$row->user_id,
+                'email' => (string)($row->user_email ?? ''),
+                'subscription_id' => (int)$row->subscription_id,
+                'risk_score' => (int)$row->risk_score,
+                'source' => (string)$row->source,
+                'window_start' => (int)$row->window_start,
+                'window_end' => (int)$row->window_end,
+                'reasons' => $this->decodeReasons($row->reasons),
+                // Unix 秒，与列表其它时间字段一致；未提醒/未处理为 null。
+                'sent_at' => $row->sent_at === null ? null : (int)$row->sent_at,
+                'handled_at' => $row->handled_at === null ? null : (int)$row->handled_at
+            ];
+        }
+
+        return response([
+            'data' => $data,
+            'total' => $total,
+            'available' => true,
+            'threshold' => $threshold,
+            // 0 表示提醒发不出去（没有管理员绑定 Telegram），前端要显式提示。
+            'notifiable_admins' => $notify->notifiableAdminCount(),
+            'notify_enabled' => $notify->enabled()
+        ]);
+    }
+
+    /**
+     * 标记待办已处理。语义是「这条我看过了」：不改变判定本身，只清待办；
+     * 同一订阅在下个周期若仍超标会重新登记（每周期一次，直到被处理）。
+     */
+    public function handleHighRisk(Request $request)
+    {
+        if (!Schema::hasTable('v2_subscription_risk_notify')) {
+            abort(500, __('提醒台账尚未安装，请先执行数据库升级'));
+        }
+
+        $params = $request->validate([
+            'id' => 'nullable|integer|min:1',
+            'ids' => 'nullable|array|max:200',
+            'ids.*' => 'integer|min:1'
+        ]);
+        $ids = array_map('intval', (array)($params['ids'] ?? []));
+        if (!empty($params['id'])) {
+            $ids[] = (int)$params['id'];
+        }
+        $ids = array_values(array_unique($ids));
+        if (!$ids) {
+            abort(500, __('参数有误'));
+        }
+
+        $now = time();
+        $updated = SubscriptionRiskNotify::whereIn('id', $ids)
+            ->whereNull('handled_at')
+            ->update([
+                'handled_at' => $now,
+                'handled_by' => $this->actor($request),
+                'updated_at' => $now
+            ]);
+        $this->audit($request, 'RISK NOTIFY HANDLE ids=' . implode(',', $ids) . ' updated=' . $updated);
+
+        return response(['data' => ['handled' => $updated]]);
+    }
+
+    /**
+     * 判定写完之后的提醒汇总。服务内部已有锁与异常兜底，这里再兜一层：
+     * 提醒永远不能改变评估/重算本身的结果。
+     */
+    private function notifyHighRisk(): void
+    {
+        try {
+            (new SubscriptionRiskNotifyService())->run();
+        } catch (\Throwable $e) {
+            info('RISK NOTIFY RUN FAILED: ' . $e->getMessage());
+        }
+    }
+
+    private function decodeReasons($reasons): array
+    {
+        $decoded = json_decode((string)$reasons, true);
+
+        return is_array($decoded) ? array_values($decoded) : [];
+    }
+
+    /**
      * 没有这张表时给出和 save 一致的中文 500，而不是让 Eloquent 抛 QueryException。
      */
     private function requireRuleTable(): void
     {
         if (!(new RiskRuleService())->available()) {
-            abort(500, __('风控规则表尚未安装，请先执行数据库升级'));
+            abort(500, __('清洗策略表尚未安装，请先执行数据库升级'));
         }
     }
 

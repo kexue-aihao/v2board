@@ -16,6 +16,8 @@ class SubscriptionRiskManual extends Model
     protected $casts = [
         'user_id' => 'integer',
         'subscription_id' => 'integer',
+        // 可空：no_data 的行不写分数（NULL = 没判过，0 = 判过且干净）。
+        'risk_score' => 'integer',
         'window_start' => 'integer',
         'window_end' => 'integer',
         'created_at' => 'timestamp',

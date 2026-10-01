@@ -18,6 +18,8 @@ class SubscriptionRiskCycle extends Model
         'city_count' => 'integer',
         'region_count' => 'integer',
         'country_count' => 'integer',
+        // 可空：没有证据的周期不写分数（NULL = 没判过，0 = 判过且干净）。
+        'risk_score' => 'integer',
         'cycle_start' => 'timestamp',
         'cycle_end' => 'timestamp',
         'evaluated_at' => 'timestamp',

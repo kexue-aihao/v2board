@@ -37,7 +37,8 @@ class SchemaUpgradeService
         'telegram_registration_schema' => 'telegram_registration_schema_v1',
         'telegram_registration_invite_schema' => 'telegram_registration_invite_schema_v1',
         'two_factor_schema' => 'two_factor_schema_v1',
-        'server_tls_pin_schema' => 'server_tls_pin_schema_v1'
+        'server_tls_pin_schema' => 'server_tls_pin_schema_v1',
+        'risk_score_schema' => 'risk_score_schema_v1'
     ];
 
     public function run(): array
@@ -163,6 +164,9 @@ class SchemaUpgradeService
                 return;
             case 'server_tls_pin_schema':
                 $this->applyServerTlsPinSchema();
+                return;
+            case 'risk_score_schema':
+                $this->applyRiskScoreSchema();
                 return;
         }
 
@@ -753,6 +757,87 @@ class SchemaUpgradeService
                 [$label, $dimension, $operator, $threshold, $sort, $now, $now, $dimension, $operator, $threshold]
             );
         }
+    }
+
+    /**
+     * 风险值（0-100 百分比）与管理员提醒台账。
+     *
+     * 全部是加列/建表，刻意不新建 v2_user 列：用户表是 traffic:update 每分钟改写的热表，
+     * 用户级别的风险值是「各订阅取最大」，读的时候用同一个子查询表达式算即可（排序、筛选、
+     * 徽标共用一个表达式，口径不会漂）。
+     *
+     * 新列一律不进 SubscriptionRiskService::available()：那是「缺列即停用全部风控」的硬闸门，
+     * 多一个条件就会让未升级的库静默失去全部评估。缺列时读不到就是 NULL，界面显示「—」。
+     *
+     * v2_subscription_risk_notify 同时承担三件事：
+     *   提醒幂等 —— notify_once 唯一键 = 同一订阅、同一来源、同一窗口只产生一条；
+     *   发送台账 —— sent_at 为空表示待发，发送失败下轮自动补发（先记后发，至少一次）；
+     *   管理员待办 —— handled_at 为空即「未处理」，未处理期间不再产生新提醒行。
+     */
+    private function applyRiskScoreSchema(): void
+    {
+        // apply() 每次 v2board:update 都会重跑每个版本体，且库结构可能被手工改动过，
+        // 所以这里一律「表在才加列」，不用 requireTable 把整次升级打断。
+        if (Schema::hasTable('v2_risk_rule')) {
+            $this->ensureColumn('v2_risk_rule', 'weight', "tinyint(3) unsigned NOT NULL DEFAULT '20'");
+        }
+
+        foreach ([
+            'v2_subscription_risk_cycle',
+            'v2_subscription_risk_manual',
+            'v2_subscription_risk_manual_stage'
+        ] as $table) {
+            if (Schema::hasTable($table)) {
+                $this->ensureColumn($table, 'risk_score', 'tinyint(3) unsigned DEFAULT NULL');
+            }
+        }
+        if (Schema::hasTable('v2_subscription_risk_manual')) {
+            $this->ensureIndex('v2_subscription_risk_manual', 'risk_score', ['risk_score']);
+        }
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_notify` (
+            `id` bigint(20) NOT NULL AUTO_INCREMENT,
+            `user_id` int(11) NOT NULL,
+            `subscription_id` bigint(20) NOT NULL,
+            `source` varchar(16) NOT NULL,
+            `window_start` bigint(20) NOT NULL,
+            `window_end` bigint(20) NOT NULL,
+            `risk_score` tinyint(3) unsigned NOT NULL,
+            `reasons` text DEFAULT NULL,
+            `recipients` int(11) NOT NULL DEFAULT '0',
+            `sent_at` bigint(20) DEFAULT NULL,
+            `handled_at` bigint(20) DEFAULT NULL,
+            `handled_by` varchar(255) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        foreach ([
+            'user_id' => 'int(11) NOT NULL',
+            'subscription_id' => 'bigint(20) NOT NULL',
+            'source' => "varchar(16) NOT NULL",
+            'window_start' => 'bigint(20) NOT NULL',
+            'window_end' => 'bigint(20) NOT NULL',
+            'risk_score' => 'tinyint(3) unsigned NOT NULL',
+            'reasons' => 'text DEFAULT NULL',
+            'recipients' => "int(11) NOT NULL DEFAULT '0'",
+            'sent_at' => 'bigint(20) DEFAULT NULL',
+            'handled_at' => 'bigint(20) DEFAULT NULL',
+            'handled_by' => 'varchar(255) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscription_risk_notify', $column, $definition);
+        }
+
+        // 幂等闸门：同一订阅、同一来源、同一窗口只可能有一行。
+        $this->ensureUniqueIndex('v2_subscription_risk_notify', 'notify_once', ['subscription_id', 'source', 'window_start']);
+        // 待发队列的取数顺序是 WHERE sent_at IS NULL ORDER BY risk_score DESC。
+        $this->ensureIndex('v2_subscription_risk_notify', 'pending', ['sent_at', 'risk_score']);
+        // 生成提醒前要问「这个订阅有没有未处理的待办」。
+        $this->ensureIndex('v2_subscription_risk_notify', 'pending_subscription', ['subscription_id', 'handled_at']);
+        $this->ensureIndex('v2_subscription_risk_notify', 'user_id', ['user_id']);
     }
 
     /**

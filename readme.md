@@ -360,6 +360,9 @@ period 支持值：
 | reseller_enable | 0/1 | 0 | 启用分销/倒卖商模块 |
 | reseller_allowed_payment_drivers | array | [] | 倒卖商可用支付驱动白名单 |
 | telegram_subscription_binding_enable | 0/1 | 0 | 启用 Telegram 订阅绑定 |
+| risk_notify_enable | 0/1 | 1 | 订阅清洗网关的管理员提醒总闸；关闭时仍登记待办，只是不发消息 |
+| risk_notify_threshold | integer | 60 | 触发提醒的风险值百分比（1-100） |
+| risk_notify_max_per_run | integer | 20 | 单条摘要里展开的明细行数上限（1-200），超出只报数量 |
 | telegram_binding_check_interval | integer | 300 | Telegram 绑定校验间隔（秒），60-3600 |
 | telegram_account_binding_enable | 0/1 | 0 | 登录后引导未绑定的普通存量账号绑定 Telegram（需配置机器人 Token） |
 | telegram_register_enable | 0/1 | 0 | 启用 Telegram 机器人注册 |
@@ -454,7 +457,7 @@ IP 归属字段：
 | 知识库 | /knowledge/fetch、getCategory、save、show、drop、sort |
 | 系统 | /system/getSystemStatus、getQueueStats、getQueueWorkload、getQueueMasters、getSystemLog |
 | 主题 | /theme/getThemes、saveThemeConfig、getThemeConfig |
-| 风控规则 | /risk/rule/fetch、save、show、sort、drop、recompute、manual-evaluate |
+| 订阅清洗网关 | /risk/rule/fetch、save、show、sort、drop、recompute、manual-evaluate、high-risk、high-risk/handle |
 | 订阅溯源 | /risk/trace/fetch、history、token/lookup、token/reveal |
 | 多账号同 IP | /risk/shared-ip/fetch、detail |
 | 倒卖商审批 | /reseller/summary、accounts、stores、review-logs、accounts/review、stores/review、accounts/reset-password |
@@ -584,9 +587,23 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 | region_count | 不同地区数量 |
 | country_count | 不同国家数量 |
 | status | pending、normal、suspicious |
+| risk_score | 风险值百分比（0-100）：命中策略的权重累加、封顶 100；pending 与未升级的库为 NULL |
 | risk_reasons | 风险原因 JSON |
 
 风险数据只对已完成的固定 30 天周期计算。IP 归属查询失败不会阻断订阅接口。
+
+### 10.1 订阅清洗网关（原「风控规则」）
+
+管理端 `风控规则` 页已更名为**订阅清洗网关**（路由仍是 `/risk/rule/*`，表名与类名不变）：
+
+- **策略 = 条件 + 权重**：每条规则有 0-100 的权重（默认 20）。判定命中时把权重累加得到风险值，封顶 100%。三条内置规则全部命中正好 60%，与提醒阈值对齐。权重只影响分数，不影响是否命中。
+- **分值语义**：`suspicious`/`normal` 写真实分数（0 表示判过且干净）；`pending` 与没有依据的周期写 NULL（"没判过"），按分数筛选/排序时两者不会混在一起。
+- **排序与筛选**：用户列表「风险值」列显示百分比并可排序（`sort=risk_score`），筛选支持 `= > >= < <=`，与风险徽标同源同口径。
+- **提醒**：风险值达到 `risk_notify_threshold`（默认 60）时，给**每位绑定了 Telegram 的管理员发一条私聊摘要**（不是群消息）。同一订阅每个评估窗口只提醒一次；在页面的「待处理」区块点「标记已处理」之前，不会为同一订阅再产生新提醒。
+- **节奏（重要）**：判定来自每日 0:20 的 `subscription:risk`（每个订阅每个 30 天周期最多产出一个新分值）与管理员手动评估，**不实时更新**。提醒在判定产出后立即发出，`risk:notify` 每 15 分钟兜底补发。
+- **投递**：走 `send_telegram` 队列，需要 Horizon 在跑；`telegram_bot_enable` 或 `telegram_bot_token` 未配置时只登记待办不发送，日志留 `风险提醒已登记但未发送`；一个绑定 Telegram 的管理员都没有时同样不发送（日志留 `风险提醒无法送达`），避免"以为发了"。
+- **接口**：`GET /risk/rule/high-risk` 待办列表（按风险值倒序，只含未处理行）、`POST /risk/rule/high-risk/handle`（`id` 或 `ids[]`，标记已处理）。
+- **配置**：`risk_notify_enable`（默认 1）、`risk_notify_threshold`（默认 60）、`risk_notify_max_per_run`（单条摘要的明细行上限，默认 20，超出只报数量）。编译产物的配置表单不提交这三项，需手工写 `config/v2board.php` 后 `artisan config:clear`；`/config/fetch` 会回显当前生效值。
 
 ## 十一、运维命令
 
@@ -597,7 +614,8 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 | php artisan payment:invalidate-legacy --force | 作废所有未绑定支付尝试的旧待支付订单；支付安全升级后首次部署必须执行 |
 | php artisan ip:clear-location-cache | 清理 IP 归属缓存 |
 | php artisan ip:backfill-subscribe-locations | 回填历史 IP 归属 |
-| php artisan subscription:risk | 计算已完成风险周期（--force 重算已评估周期） |
+| php artisan subscription:risk | 计算已完成风险周期（--force 重算已评估周期），随后汇总管理员提醒 |
+| php artisan risk:notify | 订阅清洗网关：汇总高风险订阅并发提醒（--dry-run 只登记不发送）；每 15 分钟由调度兜底 |
 | php artisan reward:prune-rooms | 关闭超时的 Telegram 娱乐房间 |
 | php artisan audit:ip-link | 手动聚合「IP + 账号 + UA」累积记录（选项 --full/--force/--prune-days/--dry-run） |
 | php artisan audit:clean | 手动按保留期清理订阅审计日志（选项 --days/--dry-run） |
@@ -881,7 +899,7 @@ Cloudflare Turnstile 本身可免费使用，但**不能**直接填入本项目�
 | 订单与退款服务 | app/Services/OrderService.php |
 | 支付驱动与回调 | app/Services/PaymentService.php |
 | 余额原语与资金流水 | app/Services/UserService.php、app/Models/BalanceLog.php |
-| 风控规则与共享 IP | app/Services/RiskRuleService.php、app/Http/Controllers/V1/Admin/RiskSharedIpController.php |
+| 订阅清洗网关与共享 IP | app/Services/RiskRuleService.php、app/Services/SubscriptionRiskNotifyService.php、app/Http/Controllers/V1/Admin/RiskSharedIpController.php |
 
 ## 十四、倒卖商与店铺 API
 

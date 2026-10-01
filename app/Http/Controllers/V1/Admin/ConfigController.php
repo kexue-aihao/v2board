@@ -186,7 +186,12 @@ class ConfigController extends Controller
                 'telegram_discuss_id' => config('v2board.telegram_discuss_id'),
                 'telegram_discuss_link' => config('v2board.telegram_discuss_link'),
                 'telegram_subscription_binding_enable' => (int)config('v2board.telegram_subscription_binding_enable', 0),
-                'telegram_binding_check_interval' => (int)config('v2board.telegram_binding_check_interval', 300)
+                'telegram_binding_check_interval' => (int)config('v2board.telegram_binding_check_interval', 300),
+                // 订阅清洗网关的提醒参数。编辑产物里的配置表单只提交固定字段，这三项
+                // 需要手工写 config/v2board.php；回填出来是为了让管理员能核对当前生效值。
+                'risk_notify_enable' => (int)config('v2board.risk_notify_enable', 1),
+                'risk_notify_threshold' => (int)config('v2board.risk_notify_threshold', 60),
+                'risk_notify_max_per_run' => (int)config('v2board.risk_notify_max_per_run', 20)
             ],
             'app' => [
                 'windows_version' => config('v2board.windows_version'),

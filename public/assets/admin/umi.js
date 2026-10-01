@@ -21761,7 +21761,7 @@
                         title: "风控",
                         type: "heading"
                     }, {
-                        title: "风控规则",
+                        title: "订阅清洗网关",
                         type: "item",
                         href: "/risk/rule",
                         icon: o.a.createElement("i", {
@@ -72317,6 +72317,21 @@
                         }, r)
                     }
                 }, {
+                    title: "风险值",
+                    key: "risk_score",
+                    dataIndex: "risk",
+                    sorter: !0,
+                    render: e=>{
+                        var score = e && null !== e.score && void 0 !== e.score ? Number(e.score) : null;
+                        return null === score || isNaN(score) ? g.a.createElement("span", {
+                            className: "text-muted"
+                        }, "—") : g.a.createElement("span", {
+                            style: {
+                                fontWeight: 600
+                            }
+                        }, score + "%")
+                    }
+                }, {
                     title: "\u8ba2\u9605",
                     dataIndex: "plan_name",
                     key: "plan_id",
@@ -72566,6 +72581,10 @@
                             key: "正常",
                             value: "normal"
                         }]
+                    }, {
+                        key: "risk_score",
+                        title: "风险值",
+                        condition: [">=", ">", "<", "<=", "="]
                     }, {
                         key: "invite_by_email",
                         title: "\u9080\u8bf7\u4eba\u90ae\u7bb1",
@@ -117645,7 +117664,7 @@
     riskrulepage: function(e, t, n) {
         "use strict";
         n.r(t);
-        // 手工补丁：风控规则页面。故意不建 dva model —— 数据访问直接走 t3Un 请求助手，
+        // 手工补丁：订阅清洗网关页面（原「风控规则」）。故意不建 dva model —— 数据访问直接走 t3Un 请求助手，
         // 与 d1ca 里的订阅审计补丁同一路数。维度与运算符列表全部来自 /risk/rule/fetch
         // 的响应，前端不留第二份副本（唯一事实源是 RiskRuleService 的类常量）。
         var r = n("jehZ")
@@ -117690,6 +117709,14 @@
             var num = Number(value);
             return isNaN(num) ? String(value) : String(num)
         }
+        // 权重是后加列：未升级的库与老记录里没有它，展示与回填一律按默认 20% 处理
+        // （后端缺列时同样按默认值计分，两边口径一致）。
+        function riskWeightText(value) {
+            if (null === value || void 0 === value || "" === value)
+                return "20";
+            var num = Number(value);
+            return isNaN(num) ? "20" : String(Math.max(0, Math.min(100, Math.round(num))))
+        }
         // 重算会改写被冻结的判定结果，确认文案必须带全部四行保真度警告。
         var RISK_RECOMPUTE_WARNING = ["重算会用当前规则重新判定所有已完成周期，覆盖此前的判定结果。", "若审计证据已被保留期清理，重算结果可能低于当初的真实值，原本「疑似内鬼」的周期可能被改为「正常」。", "节点连接记录按 last_seen_at 清理，历史周期的连接指标尤其容易失真。", "此操作不可撤销。"];
         // 手动评估与重算是两回事：前者纯计算不落库，后者改写账本。说明文案必须把
@@ -117715,6 +117742,7 @@
                     dimension: void 0,
                     operator: ">",
                     threshold: "",
+                    weight: "20",
                     enabled: !0
                 },
                 this.state = {
@@ -117726,6 +117754,15 @@
                     available: !0,
                     fetchLoading: !0,
                     saveLoading: !1,
+                    // 待处理区块：提醒台账里未处理的高风险订阅。分值来自 30 天周期账本或
+                    // 管理员手动评估，不实时更新；达到阈值时管理员会收到 Telegram 私聊提醒。
+                    pending: [],
+                    pendingTotal: 0,
+                    pendingThreshold: 60,
+                    // null = 还没取到；0 = 一个绑定 Telegram 的管理员都没有（提醒发不出去）。
+                    pendingNotifiable: null,
+                    pendingAvailable: !0,
+                    pendingLoading: !0,
                     visible: !1,
                     submit: i()({}, this.defaultSubmit),
                     recomputeVisible: !1,
@@ -117750,7 +117787,8 @@
                 this.manualRunId = ""
             }
             componentDidMount() {
-                this.fetch()
+                this.fetch(),
+                this.fetchPending()
             }
             componentWillUnmount() {
                 this.recomputeToken++,
@@ -117778,6 +117816,39 @@
                     fetchLoading: !1
                 }))
             }
+            fetchPending() {
+                this.setState({
+                    pendingLoading: !0
+                }),
+                riskGet("/risk/rule/high-risk", {
+                    current: 1,
+                    pageSize: 20
+                }).then(res=>{
+                    if (200 !== res.code)
+                        return void this.setState({
+                            pendingLoading: !1
+                        });
+                    this.setState({
+                        pending: res.data || [],
+                        pendingTotal: res.total || 0,
+                        pendingThreshold: res.threshold || 60,
+                        pendingNotifiable: null === res.notifiable_admins || void 0 === res.notifiable_admins ? null : Number(res.notifiable_admins),
+                        pendingAvailable: !1 !== res.available,
+                        pendingLoading: !1
+                    })
+                }
+                ).catch(()=>this.setState({
+                    pendingLoading: !1
+                }))
+            }
+            handlePending(record) {
+                riskPost("/risk/rule/high-risk/handle", {
+                    id: record.id
+                }).then(res=>{
+                    200 === res.code && this.fetchPending()
+                }
+                )
+            }
             openModal(record) {
                 this.setState({
                     visible: !0,
@@ -117787,6 +117858,7 @@
                         dimension: record.dimension,
                         operator: record.operator,
                         threshold: riskNumberText(record.threshold),
+                        weight: riskWeightText(record.weight),
                         enabled: riskEnabled(record.enabled)
                     } : i()({}, this.defaultSubmit)
                 })
@@ -117810,7 +117882,7 @@
                 if (!label)
                     return void c["a"].warning({
                         title: "提示",
-                        content: "请填写规则名称"
+                        content: "请填写策略名称"
                     });
                 if (!submit.dimension)
                     return void c["a"].warning({
@@ -117827,6 +117899,12 @@
                         title: "提示",
                         content: "请填写有效的阈值"
                     });
+                var weightText = String(null === submit.weight || void 0 === submit.weight ? "20" : submit.weight).trim();
+                if ("" === weightText || isNaN(Number(weightText)) || Number(weightText) < 0 || 100 < Number(weightText))
+                    return void c["a"].warning({
+                        title: "提示",
+                        content: "请填写 0-100 之间的权重"
+                    });
                 this.setState({
                     saveLoading: !0
                 }),
@@ -117836,6 +117914,7 @@
                     dimension: submit.dimension,
                     operator: submit.operator,
                     threshold: Number(submit.threshold),
+                    weight: Number(weightText),
                     enabled: submit.enabled ? 1 : 0
                 }).then(res=>{
                     this.setState({
@@ -118232,6 +118311,13 @@
                         return (operators[record.operator] || record.operator) + " " + riskNumberText(record.threshold) + (dimension.unit || "")
                     }
                 }, {
+                    title: "权重",
+                    dataIndex: "weight",
+                    key: "weight",
+                    render: value=>{
+                        return riskWeightText(value) + "%"
+                    }
+                }, {
                     title: "启用",
                     dataIndex: "enabled",
                     key: "enabled",
@@ -118283,10 +118369,55 @@
                             onClick: ()=>this.drop(record)
                         }, "删除"))
                     }
+                }]
+                  , pendingColumns = [{
+                    title: "用户",
+                    key: "email",
+                    render: (value,record)=>(record.email || "#" + record.user_id) + "（订阅 #" + record.subscription_id + "）"
+                }, {
+                    title: "风险值",
+                    key: "risk_score",
+                    align: "center",
+                    render: (value,record)=>{
+                        var score = null === record.risk_score || void 0 === record.risk_score ? null : Number(record.risk_score);
+                        return null === score || isNaN(score) ? p.a.createElement("span", {
+                            className: "text-muted"
+                        }, "—") : p.a.createElement("span", {
+                            style: {
+                                color: "#c0392b",
+                                fontWeight: 600
+                            }
+                        }, score + "%")
+                    }
+                }, {
+                    title: "命中理由",
+                    key: "reasons",
+                    render: (value,record)=>{
+                        return p.a.createElement("div", null, (record.reasons || []).slice(0, 3).map((reason,index)=>p.a.createElement("div", {
+                            key: index,
+                            className: "text-muted font-size-sm"
+                        }, reason)))
+                    }
+                }, {
+                    title: "窗口",
+                    key: "window",
+                    render: (value,record)=>manualTimeText(record.window_start) + " ~ " + manualTimeText(record.window_end)
+                }, {
+                    title: "提醒",
+                    key: "sent_at",
+                    render: (value,record)=>record.sent_at ? manualTimeText(record.sent_at) : "未发送"
+                }, {
+                    title: "操作",
+                    key: "action",
+                    align: "right",
+                    render: (value,record)=>p.a.createElement("a", {
+                        href: "javascript:void(0);",
+                        onClick: ()=>this.handlePending(record)
+                    }, "标记已处理")
                 }];
                 // 必须展开路由 props，否则侧边栏会在 location.pathname 上崩。
                 return p.a.createElement(m["a"], i()({}, this.props, {
-                    title: "风控规则"
+                    title: "订阅清洗网关"
                 }), p.a.createElement(g["a"], {
                     loading: state.fetchLoading
                 }, p.a.createElement("div", {
@@ -118302,7 +118433,7 @@
                     onClick: ()=>this.openModal(null)
                 }, p.a.createElement(l["a"], {
                     type: "plus"
-                }), " 新增规则"), p.a.createElement("div", null, p.a.createElement(a["a"], {
+                }), " 新增策略"), p.a.createElement("div", null, p.a.createElement(a["a"], {
                     style: {
                         marginRight: 8
                     },
@@ -118322,7 +118453,9 @@
                     className: "mb-1 text-muted font-size-sm"
                 }, "规则改动只影响之后新完成的周期；要让改动应用到历史周期，请点击「重算历史周期」。"), p.a.createElement("p", {
                     className: "mb-0 text-muted font-size-sm"
-                }, "「自定义周期评估」用当前规则对最近一段时间做全站体检，结果落库并驱动用户列表的「风险」列与筛选，30 天周期账本不受影响。"), !state.fetchLoading && !state.available && p.a.createElement("div", {
+                }, "「自定义周期评估」用当前规则对最近一段时间做全站体检，结果落库并驱动用户列表的「风险」列与筛选，30 天周期账本不受影响。"), p.a.createElement("p", {
+                    className: "mb-0 text-muted font-size-sm"
+                }, "风险值（0-100%）由命中策略的权重累加得到；达到提醒阈值（默认 60%）时会给已绑定 Telegram 的管理员发私聊提醒。判定来自 30 天周期账本与管理员手动评估，不实时更新。"), !state.fetchLoading && !state.available && p.a.createElement("div", {
                     className: "alert alert-warning mb-0",
                     role: "alert",
                     style: {
@@ -118330,7 +118463,7 @@
                     }
                 }, p.a.createElement("p", {
                     className: "mb-0"
-                }, "风控规则表尚未安装（数据库尚未升级），当前仍按内置默认规则判定；升级数据库后才能增删规则。")), !state.fetchLoading && state.available && 0 === enabledCount && p.a.createElement("div", {
+                }, "清洗策略表尚未安装（数据库尚未升级），当前仍按内置默认策略判定；升级数据库后才能增删策略。")), !state.fetchLoading && state.available && 0 === enabledCount && p.a.createElement("div", {
                     className: "alert alert-warning mb-0",
                     role: "alert",
                     style: {
@@ -118338,20 +118471,57 @@
                     }
                 }, p.a.createElement("p", {
                     className: "mb-0"
-                }, "当前没有启用任何风控规则，之后完成的周期都会被判定为「正常」。"))), p.a.createElement(o["a"], {
+                }, "当前没有启用任何清洗策略，之后完成的周期都不会再触发动作。"))), p.a.createElement("div", {
+                    className: "block block-rounded"
+                }, p.a.createElement("div", {
+                    className: "bg-white"
+                }, p.a.createElement("div", {
+                    className: "d-flex justify-content-between align-items-center",
+                    style: {
+                        padding: 15
+                    }
+                }, p.a.createElement("h3", {
+                    className: "block-title mb-0"
+                }, "待处理高风险订阅（≥ ", String(state.pendingThreshold), "%）"), p.a.createElement("span", {
+                    className: "text-muted font-size-sm"
+                }, state.pendingLoading ? "加载中…" : "共 " + state.pendingTotal + " 条")), !state.pendingLoading && state.pendingAvailable && 0 === state.pendingNotifiable && p.a.createElement("div", {
+                    className: "alert alert-warning mb-0",
+                    role: "alert",
+                    style: {
+                        margin: "0 15px 15px"
+                    }
+                }, "没有管理员绑定 Telegram，提醒发不出去；请先让管理员在机器人里发送 /bind 完成绑定。"), !state.pendingLoading && state.pendingAvailable && 0 === state.pending.length && p.a.createElement("div", {
+                    className: "alert alert-success mb-0",
+                    role: "alert",
+                    style: {
+                        margin: "0 15px 15px"
+                    }
+                }, "当前没有待处理的高风险订阅。"), p.a.createElement(o["a"], {
+                    tableLayout: "auto",
+                    rowKey: record=>record.id,
+                    dataSource: state.pending,
+                    columns: pendingColumns,
+                    pagination: !1,
+                    locale: {
+                        emptyText: state.pendingAvailable ? "暂无待处理订阅" : "数据库尚未升级，风险值与待办不可用"
+                    },
+                    scroll: {
+                        x: 900
+                    }
+                }))), p.a.createElement(o["a"], {
                     tableLayout: "auto",
                     rowKey: record=>record.id,
                     dataSource: rules,
                     columns: columns,
                     pagination: !1,
                     locale: {
-                        emptyText: "暂无风控规则"
+                        emptyText: "暂无清洗策略"
                     },
                     scroll: {
                         x: 900
                     }
                 })))), p.a.createElement(c["a"], {
-                    title: state.submit.id ? "编辑规则" : "新增规则",
+                    title: state.submit.id ? "编辑策略" : "新增策略",
                     visible: state.visible,
                     onCancel: ()=>this.closeModal(),
                     onOk: ()=>this.save(),
@@ -118407,6 +118577,16 @@
                 }), p.a.createElement("p", {
                     className: "mb-0 mt-1 text-muted font-size-sm"
                 }, "流量使用率填 0 ~ 1 的小数（如 0.4），计数类维度填整数。")), p.a.createElement("div", {
+                    className: "form-group"
+                }, p.a.createElement("label", null, "权重"), p.a.createElement(s["a"], {
+                    type: "number",
+                    placeholder: "请输入权重（0-100）",
+                    addonAfter: "%",
+                    value: state.submit.weight,
+                    onChange: e=>this.submitChange("weight", e.target.value)
+                }), p.a.createElement("p", {
+                    className: "mb-0 mt-1 text-muted font-size-sm"
+                }, "命中该规则给风险值加多少分；多条命中累加、封顶 100%。默认 20%，三条内置规则全中即 60%，正好等于提醒阈值。")), p.a.createElement("div", {
                     className: "form-group"
                 }, p.a.createElement("label", {
                     style: {

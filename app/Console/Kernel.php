@@ -32,6 +32,10 @@ class Kernel extends ConsoleKernel
         // v2board
         $schedule->command('v2board:statistics')->dailyAt('0:10');
         $schedule->command('subscription:risk')->dailyAt('0:20')->withoutOverlapping();
+        // 风险提醒的兜底：判定产出时（subscription:risk、手动评估、重算）各自会调一次，
+        // 这条只补漏 —— 崩溃、发送失败留在待发状态、判定发生在别的路径（如 GET /user/risk）。
+        // 台账唯一键保证重复跑不会重复提醒。
+        $schedule->command('risk:notify')->everyFifteenMinutes()->withoutOverlapping();
         // check
         $schedule->command('check:order')->everyMinute()->withoutOverlapping();
         $schedule->command('check:commission')->everyFifteenMinutes();

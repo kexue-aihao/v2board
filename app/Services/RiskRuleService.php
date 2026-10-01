@@ -35,13 +35,21 @@ class RiskRuleService
     ];
 
     /**
+     * 新规则的默认权重，也是缺权重时的兜底值。20 的用意：三条内置默认规则全部命中时正好
+     * 60%，与管理员提醒的默认阈值（risk_notify_threshold）对齐 —— 开箱即提醒，管理员再按
+     * 自己的口径逐条调。
+     */
+    public const DEFAULT_RULE_WEIGHT = 20;
+    public const MAX_RULE_WEIGHT = 100;
+
+    /**
      * 规则表缺失时的内置兜底，与 SchemaUpgradeService 写入的三条种子一致。
      * 未升级的库必须与升级前逐位同构，这一点不可妥协。
      */
     private const FALLBACK_RULES = [
-        ['id' => null, 'label' => '订阅 UA 种类过多', 'dimension' => 'user_agent_count', 'operator' => '>', 'threshold' => 3.0],
-        ['id' => null, 'label' => '跨省/州请求过多', 'dimension' => 'region_count', 'operator' => '>=', 'threshold' => 3.0],
-        ['id' => null, 'label' => '跨市请求过多', 'dimension' => 'city_count', 'operator' => '>=', 'threshold' => 3.0]
+        ['id' => null, 'label' => '订阅 UA 种类过多', 'dimension' => 'user_agent_count', 'operator' => '>', 'threshold' => 3.0, 'weight' => self::DEFAULT_RULE_WEIGHT],
+        ['id' => null, 'label' => '跨省/州请求过多', 'dimension' => 'region_count', 'operator' => '>=', 'threshold' => 3.0, 'weight' => self::DEFAULT_RULE_WEIGHT],
+        ['id' => null, 'label' => '跨市请求过多', 'dimension' => 'city_count', 'operator' => '>=', 'threshold' => 3.0, 'weight' => self::DEFAULT_RULE_WEIGHT]
     ];
 
     private $availability;
@@ -56,7 +64,7 @@ class RiskRuleService
             return $this->availability = Schema::hasTable('v2_risk_rule');
         } catch (\Throwable $e) {
             // 探测失败按「表不存在」处理，让判定退回内置规则而不是变成无规则可用。
-            Log::warning('风控规则表探测失败，按未安装处理并使用内置默认规则', ['error' => $e->getMessage()]);
+            Log::warning('清洗策略表探测失败，按未安装处理并使用内置默认规则', ['error' => $e->getMessage()]);
             return $this->availability = false;
         }
     }
@@ -78,12 +86,12 @@ class RiskRuleService
             $rows = RiskRule::where('enabled', 1)
                 ->orderBy('sort', 'ASC')
                 ->orderBy('id', 'ASC')
-                ->get(['id', 'label', 'dimension', 'operator', 'threshold']);
+                ->get(['id', 'label', 'dimension', 'operator', 'threshold', 'weight']);
         } catch (\Throwable $e) {
             // 表存在但读取失败时返回空规则集，而不是回落到内置默认规则。管理员清空规则表
             // 正是「关掉风控标记」的唯一手段，一次瞬时数据库错误不应该把默认规则重新装回去
             // 并重新给用户打标。
-            Log::warning('风控规则读取失败，本轮不启用任何规则', ['error' => $e->getMessage()]);
+            Log::warning('清洗策略读取失败，本轮不启用任何规则', ['error' => $e->getMessage()]);
             return $this->rules = [];
         }
 
@@ -99,7 +107,8 @@ class RiskRuleService
                 'label' => (string)$row->label,
                 'dimension' => (string)$row->dimension,
                 'operator' => (string)$row->operator,
-                'threshold' => (float)$row->threshold
+                'threshold' => (float)$row->threshold,
+                'weight' => $this->normalizeWeight($row->weight ?? null)
             ];
         }
 
@@ -128,7 +137,10 @@ class RiskRuleService
                 'label' => (string)($rule['label'] ?? ''),
                 'dimension' => (string)$rule['dimension'],
                 'operator' => (string)$rule['operator'],
-                'threshold' => (float)$rule['threshold']
+                'threshold' => (float)$rule['threshold'],
+                // 老快照里没有这一项（跨部署残留的游标状态），缺键按默认值补齐 —— 绝不能因为
+                // 少一个字段就把整条规则丢掉，那会让手动评估整轮判不出结果。
+                'weight' => $this->normalizeWeight($rule['weight'] ?? null)
             ];
         }
         $this->rules = $clean;
@@ -136,12 +148,16 @@ class RiskRuleService
 
     /**
      * @param array $metrics 维度 => 值。缺键或 null 代表本周期拿不到该依据。
-     * @return array{has_risk: bool, reasons: string[], fired: array[]}
+     * @return array{has_risk: bool, score: int, reasons: string[], fired: array[]}
+     *
+     * score 是风险值百分比：命中规则的权重累加，封顶 100。0 表示「判过且干净」，
+     * 调用方在「没有依据」时必须自己写 NULL 而不是 0（见 SubscriptionRiskService）。
      */
     public function evaluate(array $metrics): array
     {
         $reasons = [];
         $fired = [];
+        $score = 0;
 
         foreach ($this->enabledRules() as $rule) {
             $dimension = $rule['dimension'];
@@ -156,7 +172,9 @@ class RiskRuleService
                 continue;
             }
 
-            $reasons[] = '命中风控规则「' . $rule['label'] . '」：'
+            $weight = $this->normalizeWeight($rule['weight'] ?? null);
+            $score += $weight;
+            $reasons[] = '命中清洗策略「' . $rule['label'] . '」：'
                 . self::DIMENSIONS[$dimension]['label'] . ' ' . $this->formatNumber($value)
                 . ' ' . self::OPERATORS[$rule['operator']] . ' ' . $this->formatNumber($threshold);
             $fired[] = [
@@ -165,15 +183,30 @@ class RiskRuleService
                 'dimension' => $dimension,
                 'operator' => $rule['operator'],
                 'threshold' => $threshold,
-                'value' => $value
+                'value' => $value,
+                'weight' => $weight
             ];
         }
 
         return [
             'has_risk' => count($fired) > 0,
+            'score' => min(self::MAX_RULE_WEIGHT, $score),
             'reasons' => $reasons,
             'fired' => $fired
         ];
+    }
+
+    /**
+     * 权重钳位：0-100 之外的值、缺键、空串一律收敛到默认值。规则表可能还没有 weight 列
+     * （未升级的库），那时 Eloquent 取出的是 null —— 与「快照里没有这个键」同一处理。
+     */
+    private function normalizeWeight($value): int
+    {
+        if ($value === null || $value === '') {
+            return self::DEFAULT_RULE_WEIGHT;
+        }
+
+        return max(0, min(self::MAX_RULE_WEIGHT, (int)$value));
     }
 
     private function compare(float $value, string $operator, float $threshold): bool

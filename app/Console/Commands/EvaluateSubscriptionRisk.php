@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Subscription;
+use App\Services\SubscriptionRiskNotifyService;
 use App\Services\SubscriptionRiskService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Schema;
@@ -34,6 +35,12 @@ class EvaluateSubscriptionRisk extends Command
             }
         });
         $this->info("已评估 {$evaluated} 个新周期。");
+
+        // 判定产出后立刻汇总提醒（订阅清洗网关）。run() 自带锁与异常兜底：提醒失败只留日志，
+        // 待发行留在台账里由 risk:notify 的定时兜底补发，不会影响本轮评估结果。
+        $notify = (new SubscriptionRiskNotifyService())->run();
+        $this->info("风险提醒：登记 {$notify['collected']} 条，发送 {$notify['sent']} 条。");
+
         return self::SUCCESS;
     }
 }

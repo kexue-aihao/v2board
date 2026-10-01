@@ -99,6 +99,10 @@ class UserController extends Controller
                     $this->applyRiskFilter($builder, (string)$filter['condition'], (string)$filter['value'], $riskService);
                     continue;
                 }
+                if ($filter['key'] === 'risk_score') {
+                    $this->applyRiskScoreFilter($builder, (string)$filter['condition'], (string)$filter['value'], $riskService);
+                    continue;
+                }
                 if ($filter['condition'] === '模糊') {
                     $filter['condition'] = 'like';
                     $filter['value'] = "%{$filter['value']}%";
@@ -266,19 +270,84 @@ class UserController extends Controller
             ->whereNotExists($judgedRow('odd'));
     }
 
+    /**
+     * 用户级风险值（0-100）的 SQL 表达式，与 SubscriptionRiskService::summaryForUser 同源：
+     * 手动评估表就位时取它（只算现存订阅），否则取周期账本里「每个订阅最新的一个已评估周期」。
+     * 排序、筛选、徽标三处共用这一个表达式 —— 本文件的既有约定：口径不一致就会出现
+     * 「筛出来的行和列上的牌子对不上」。
+     *
+     * 返回 null 表示当前没有可用的分数列（未升级的库）：调用方按「无分数」退化处理。
+     */
+    private function riskScoreExpr(SubscriptionRiskService $riskService): ?string
+    {
+        $source = $riskService->scoreSource();
+        if ($source === 'manual') {
+            // 与 applyManualRiskFilter/manualSummaryForUser 同一锚点：只统计现存订阅的判定行。
+            return 'SELECT MAX(risk_score_src.risk_score)'
+                . ' FROM v2_subscription AS risk_score_sub'
+                . ' JOIN v2_subscription_risk_manual AS risk_score_src'
+                . ' ON risk_score_src.subscription_id = risk_score_sub.id'
+                . ' WHERE risk_score_sub.user_id = v2_user.id';
+        }
+        if ($source === 'cycle') {
+            // 周期账本按用户取，不 join 现存订阅 —— 与 cycleSummaryForUser 一致。
+            return 'SELECT MAX(risk_score_src.risk_score)'
+                . ' FROM v2_subscription_risk_cycle AS risk_score_src'
+                . ' WHERE risk_score_src.user_id = v2_user.id'
+                . ' AND NOT EXISTS (SELECT 1 FROM v2_subscription_risk_cycle AS risk_score_newer'
+                . ' WHERE risk_score_newer.subscription_id = risk_score_src.subscription_id'
+                . ' AND risk_score_newer.cycle_end > risk_score_src.cycle_end)';
+        }
+        return null;
+    }
+
+    /**
+     * 风险值数值筛选（= > >= < <=）。与「风险」徽标走同一个表达式，所以「筛出 >= 60 的行」
+     * 与「徽标显示 >= 60% 的行」永远一致；NULL（没判过）在两边都不命中，与排序表现一致。
+     */
+    private function applyRiskScoreFilter($builder, string $condition, string $value, ?SubscriptionRiskService $riskService = null): void
+    {
+        // 数值比较字段只有算术语义；词汇表外的 condition 属 API 面误用，拒绝。
+        if (!in_array($condition, ['=', '>', '>=', '<', '<='], true)) {
+            abort(500, __('参数有误'));
+        }
+        if (!is_numeric($value)) {
+            // 非数值按空集处理，与「风险」筛选遇到词汇表外的值同一口径：不拿 500 打断列表。
+            $builder->whereRaw('1 = 0');
+            return;
+        }
+
+        $riskService = $riskService ?: new SubscriptionRiskService();
+        $expr = $this->riskScoreExpr($riskService);
+        if ($expr === null) {
+            $builder->whereRaw('1 = 0');
+            return;
+        }
+
+        // $condition 已白名单、$value 已 is_numeric，这里是安全的参数绑定。
+        $builder->whereRaw("({$expr}) {$condition} ?", [(float)$value]);
+    }
+
     public function fetch(UserFetch $request)
     {
         $current = $request->input('current') ? $request->input('current') : 1;
         $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
+        // 提前建好：风险值排序、风险过滤与下方徽标循环共享实例，schema 探测只跑一次。
+        $riskService = new SubscriptionRiskService();
         $userModel = User::select(
             DB::raw('*'),
             DB::raw('(u+d) as total_used')
-        )
-            ->orderBy($sort, $sortType);
-        // 提前建好传给 filter()：风险过滤与下方徽标循环共享实例，schema 探测只跑一次。
-        $riskService = new SubscriptionRiskService();
+        );
+        if ($sort === 'risk_score') {
+            // 风险值是派生值，v2_user 上没有这一列，用手动表/周期账本的同源表达式排序。
+            // 表达式不可用（未升级的库）时退回默认排序，而不是让整个列表 500。
+            $scoreExpr = $this->riskScoreExpr($riskService);
+            $userModel->orderByRaw(($scoreExpr === null ? 'created_at' : "({$scoreExpr})") . ' ' . $sortType);
+        } else {
+            $userModel->orderBy($sort, $sortType);
+        }
         $this->filter($request, $userModel, $riskService);
         $total = $userModel->count();
         $res = $userModel->forPage($current, $pageSize)

@@ -122,6 +122,10 @@ class ConfigSave extends FormRequest
         'payment_return_url_allowlist' => 'nullable|array',
         'telegram_subscription_binding_enable' => 'in:0,1',
         'telegram_binding_check_interval' => 'integer|min:60|max:3600',
+        // 订阅清洗网关：高风险订阅的管理员提醒（阈值与单轮明细上限）
+        'risk_notify_enable' => 'in:0,1',
+        'risk_notify_threshold' => 'integer|min:1|max:100',
+        'risk_notify_max_per_run' => 'integer|min:1|max:200',
         'oauth_telegram_enable' => 'in:0,1',
         'oauth_google_enable' => 'in:0,1',
         'oauth_google_client_id' => 'nullable|string|max:255',

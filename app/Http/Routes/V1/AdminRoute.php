@@ -150,6 +150,9 @@ class AdminRoute
             $router->post('/risk/rule/drop', 'V1\\Admin\\RiskRuleController@drop');
             $router->post('/risk/rule/recompute', 'V1\\Admin\\RiskRuleController@recompute');
             $router->post('/risk/rule/manual-evaluate', 'V1\\Admin\\RiskRuleController@manualEvaluate');
+            // 订阅清洗网关的待处理区块：提醒台账里未处理的高风险订阅。
+            $router->get ('/risk/rule/high-risk', 'V1\\Admin\\RiskRuleController@highRisk');
+            $router->post('/risk/rule/high-risk/handle', 'V1\\Admin\\RiskRuleController@handleHighRisk');
             $router->get ('/risk/trace/fetch', 'V1\\Admin\\RiskTraceController@fetch');
             $router->get ('/risk/trace/history', 'V1\\Admin\\RiskTraceController@history');
             // lookup 与 reveal 用 POST 而非 GET：GET 会把 token 拼进 query string，落进

@@ -19,6 +19,9 @@ class SubscriptionRiskService
     private $manualStagingAvailability;
     private $ruleService;
     private $metricsColumn;
+    // 表名 => 该表是否已有 risk_score 列。未升级的库上没有这一列，任何一次把它写进
+    // INSERT/UPDATE 或 SELECT 列表都会抛 SQL 错误，所以写入与读取都要先问这里。
+    private $riskScoreColumns = [];
     private $nodeLogAvailability;
     private $nodeMetricKeys;
     private $locationService;
@@ -256,6 +259,13 @@ class SubscriptionRiskService
                 ? 'suspicious'
                 : ($mergedRatio !== null ? 'normal' : 'pending');
             $record->risk_reasons = json_encode(array_values(array_unique($reasons)), JSON_UNESCAPED_UNICODE);
+            // 风险值 = 命中规则权重之和（封顶 100）。pending 记 NULL 而不是 0：
+            // 「没判过」与「判过且干净」必须在数值维度上分得开，否则按分数筛选/排序时
+            // 会把没有依据的订阅当成 0 分的正常用户。
+            $riskScore = $record->status === 'pending' ? null : $ruleResult['score'];
+            if ($this->riskScoreColumn('v2_subscription_risk_cycle')) {
+                $record->risk_score = $riskScore;
+            }
             if ($this->metricsColumnAvailable()) {
                 // 手工 encode 而不是靠 Eloquent 的 array cast：cast 走的是不带
                 // JSON_UNESCAPED_UNICODE 的 json_encode，规则名会存成 \uXXXX 转义，而相邻的
@@ -263,7 +273,9 @@ class SubscriptionRiskService
                 $record->metrics = json_encode([
                     'v' => 1,
                     'metrics' => $metrics,
-                    'fired_rules' => $ruleResult['fired']
+                    'fired_rules' => $ruleResult['fired'],
+                    // 分数同时留在证据信封里：事后核对「当时为什么是 75%」不用再去反推权重。
+                    'score' => $riskScore
                 ], JSON_UNESCAPED_UNICODE);
             }
         }
@@ -305,7 +317,7 @@ class SubscriptionRiskService
         // 窗口内三路证据全空时不进规则引擎：本方法不读历史判定行，无旧值可沿用，
         // 「没有数据」必须与「判定为正常」区分开，否则短窗口会给全站发一遍正常牌。
         if (!$window['has_log_basis'] && !$window['has_node_basis'] && !$window['has_traffic_basis']) {
-            return ['status' => 'no_data', 'metrics' => $metrics, 'reasons' => [], 'fired' => []];
+            return ['status' => 'no_data', 'score' => null, 'metrics' => $metrics, 'reasons' => [], 'fired' => []];
         }
 
         $ruleResult = $this->ruleService()->evaluate($metrics);
@@ -321,6 +333,8 @@ class SubscriptionRiskService
 
         return [
             'status' => $ruleResult['has_risk'] ? 'suspicious' : 'normal',
+            // 有证据的窗口才给分数：no_data 早退分支返回 null，调用方按 NULL 落库。
+            'score' => $ruleResult['score'],
             'metrics' => $metrics,
             'reasons' => array_values(array_unique($reasons)),
             'fired' => $ruleResult['fired']
@@ -414,6 +428,49 @@ class SubscriptionRiskService
         } catch (\Throwable $e) {
             return $this->nodeLogAvailability = false;
         }
+    }
+
+    /**
+     * risk_score 是后加的可空列（risk_score_schema）。未升级的库上它不存在：
+     *   - 写：跳过赋值，行为退回本次改动之前（判定照跑，只是没有分数）；
+     *   - 读：不进 SELECT 列表，摘要里的 score 为 null，界面显示「—」。
+     * 与 metrics 列同一路数，都刻意不进 available()。
+     */
+    private function riskScoreColumn(string $table): bool
+    {
+        if (array_key_exists($table, $this->riskScoreColumns)) {
+            return $this->riskScoreColumns[$table];
+        }
+        try {
+            return $this->riskScoreColumns[$table] = Schema::hasColumn($table, 'risk_score');
+        } catch (\Throwable $e) {
+            return $this->riskScoreColumns[$table] = false;
+        }
+    }
+
+    /**
+     * 用户列表要按风险值排序/筛选，得知道哪张表能提供分数，且那一列确实存在
+     * （未升级的库上没有 risk_score）。返回 'manual' / 'cycle'，都没有则 null。
+     * 数据源选择必须与 summaryForUser() 一致，否则排序、筛选、徽标三处口径会漂。
+     */
+    public function scoreSource(): ?string
+    {
+        if ($this->manualAvailable() && $this->riskScoreColumn('v2_subscription_risk_manual')) {
+            return 'manual';
+        }
+        if ($this->available() && $this->riskScoreColumn('v2_subscription_risk_cycle')) {
+            return 'cycle';
+        }
+        return null;
+    }
+
+    /**
+     * 管理端要拼原生 SQL（手动评估的暂存/发布、待办列表），需要自己判断 risk_score
+     * 是否就位；未升级的库上要整段绕开这一列，而不是让 SQL 报未知列。
+     */
+    public function scoreColumnAvailable(string $table): bool
+    {
+        return $this->riskScoreColumn($table);
     }
 
     private function nodeMetricKeys(): array
@@ -624,10 +681,14 @@ class SubscriptionRiskService
         // 按订阅清单取行而不是按行上的 user_id：行里的 user_id 是评估时刻的快照，
         // 订阅换绑后会过时；过滤（applyManualRiskFilter）走的是「现存订阅 join 判定行」，
         // 摘要必须用同一锚点，否则筛出来的行和列上的牌子对不上。
+        $manualColumns = ['subscription_id', 'status', 'risk_reasons', 'metrics'];
+        if ($this->riskScoreColumn('v2_subscription_risk_manual')) {
+            $manualColumns[] = 'risk_score';
+        }
         $rows = $subscriptionIds->isEmpty()
             ? collect()
             : SubscriptionRiskManual::whereIn('subscription_id', $subscriptionIds)
-                ->get(['subscription_id', 'status', 'risk_reasons', 'metrics'])
+                ->get($manualColumns)
                 ->keyBy('subscription_id');
 
         $reasons = [];
@@ -636,6 +697,8 @@ class SubscriptionRiskService
         $cityCount = 0;
         $regionCount = 0;
         $countryCount = 0;
+        // 用户级风险值 = 各订阅风险值的最大值；没有一行带分数时保持 null（界面显示「—」）。
+        $score = null;
         // 无订阅的用户没有可评估对象，与「未评估」同牌：待观察。
         $hasPending = $subscriptionIds->isEmpty();
         foreach ($subscriptionIds as $subscriptionId) {
@@ -652,6 +715,9 @@ class SubscriptionRiskService
             } elseif ($row->status !== 'normal') {
                 $hasPending = true;
             }
+            if (isset($row->risk_score) && $row->risk_score !== null) {
+                $score = $score === null ? (int)$row->risk_score : max($score, (int)$row->risk_score);
+            }
             $decoded = json_decode((string)$row->metrics, true);
             $metrics = is_array($decoded) && isset($decoded['metrics']) && is_array($decoded['metrics'])
                 ? $decoded['metrics'] : [];
@@ -664,6 +730,7 @@ class SubscriptionRiskService
         return [
             'status' => $suspiciousCount > 0 ? 'suspicious' : ($hasPending ? 'pending' : 'normal'),
             'suspicious_count' => $suspiciousCount,
+            'score' => $score,
             'reasons' => array_values(array_unique($reasons)),
             'distinct_ip_count' => $distinctIpCount,
             'city_count' => $cityCount,
@@ -676,19 +743,23 @@ class SubscriptionRiskService
     {
         if (!$this->available()) {
             return [
-                'status' => 'pending', 'suspicious_count' => 0, 'reasons' => [],
+                'status' => 'pending', 'suspicious_count' => 0, 'score' => null, 'reasons' => [],
                 'distinct_ip_count' => 0, 'city_count' => 0, 'region_count' => 0, 'country_count' => 0
             ];
         }
 
         // 显式列清单：这个方法在 UserController@fetch 里按用户行调用（N+1），SELECT * 会让
         // 每一行都把 metrics 这个 TEXT blob 一起拉出来，而这里从头到尾没有解码它。
+        $cycleColumns = [
+            'subscription_id', 'cycle_end', 'status', 'risk_reasons',
+            'distinct_ip_count', 'city_count', 'region_count', 'country_count'
+        ];
+        if ($this->riskScoreColumn('v2_subscription_risk_cycle')) {
+            $cycleColumns[] = 'risk_score';
+        }
         $records = SubscriptionRiskCycle::where('user_id', $userId)
             ->orderByDesc('cycle_end')
-            ->get([
-                'subscription_id', 'cycle_end', 'status', 'risk_reasons',
-                'distinct_ip_count', 'city_count', 'region_count', 'country_count'
-            ]);
+            ->get($cycleColumns);
         $latestBySubscription = [];
         foreach ($records as $record) {
             if (!isset($latestBySubscription[$record->subscription_id])) {
@@ -702,6 +773,8 @@ class SubscriptionRiskService
         $cityCount = 0;
         $regionCount = 0;
         $countryCount = 0;
+        // 与手动摘要同一口径：用户级风险值取各订阅最新周期的最大值，无分数时保持 null。
+        $score = null;
         $hasPending = count($latestBySubscription) === 0;
         foreach (Subscription::where('user_id', $userId)->get(['id', 'started_at']) as $subscription) {
             $startedAt = (int)$subscription->started_at;
@@ -725,11 +798,15 @@ class SubscriptionRiskService
             } elseif ($record->status === 'pending') {
                 $hasPending = true;
             }
+            if (isset($record->risk_score) && $record->risk_score !== null) {
+                $score = $score === null ? (int)$record->risk_score : max($score, (int)$record->risk_score);
+            }
         }
 
         return [
             'status' => $suspiciousCount > 0 ? 'suspicious' : ($hasPending ? 'pending' : 'normal'),
             'suspicious_count' => $suspiciousCount,
+            'score' => $score,
             'reasons' => array_values(array_unique($reasons)),
             'distinct_ip_count' => $distinctIpCount,
             'city_count' => $cityCount,
