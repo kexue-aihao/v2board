@@ -21,7 +21,11 @@ function harness(respond) {
         jehZ: Object.assign,
         p0pE: Object.assign,
         yWgo: { a: value => copied.push(value), f: () => false },
-        kLXV: { a: { info: options => {
+        kLXV: { a: { confirm: options => {
+            const modal = { options, updates: [], destroyed: false, update(update) { this.updates.push(update); Object.assign(this.options, update); }, destroy() { this.destroyed = true; } };
+            modals.push(modal);
+            return modal;
+        }, success: () => {}, error: () => {}, info: options => {
             const modal = {
                 options, updates: [], destroyed: false,
                 update(update) { this.updates.push(update); Object.assign(this.options, update); },
@@ -30,10 +34,17 @@ function harness(respond) {
             modals.push(modal);
             return modal;
         } } },
-        t3Un: { a: async (url, params) => {
-            requests.push({ url, params });
-            return respond(url, params);
-        } },
+        t3Un: {
+            // a = GET，b = POST；解绑走 b
+            a: async (url, params) => {
+                requests.push({ url, params });
+                return respond(url, params);
+            },
+            b: async (url, params) => {
+                requests.push({ url, params });
+                return respond(url, params);
+            }
+        },
     };
     function requireModule(id) { return modules[id] || { a: () => {} }; }
     requireModule.r = () => {};
@@ -147,4 +158,36 @@ test('leaving user management closes the details and ignores its pending respons
     resolve(bound());
     await pending;
     assert.equal(h.modals[0].updates.length, 0);
+});
+
+test('the unbind entry only shows for a bound account and asks for confirmation first', async () => {
+    const h = harness(() => bound());
+    await h.component.showTelegramInfo(user);
+
+    const button = nodes(h.modals[0].options.content).find(node => text(node) === "解绑");
+    assert.ok(button, "已绑定时要给出解绑入口");
+    assert.equal(button.props.type, "danger");
+
+    button.props.onClick();
+    const confirm = h.modals[h.modals.length - 1];
+    assert.match(text(confirm.options.content), /解除/);
+    assert.equal(confirm.options.okType, "danger");
+    // 点确定之前不能发请求：解绑要人明确确认过
+    assert.equal(h.requests.filter(request => request.url.endsWith("/user/telegramUnbind")).length, 0);
+
+    await confirm.options.onOk();
+    const post = h.requests.find(request => request.url.endsWith("/user/telegramUnbind"));
+    assert.ok(post, "确认后必须真的发出解绑请求");
+    // vm 沙箱里的对象与 Node realm 原型不同，deepEqual 会误判，比 JSON 更稳
+    assert.equal(JSON.stringify(post.params), JSON.stringify({ id: 17, confirm: 1 }));
+});
+
+test('an unbound account has no unbind entry', async () => {
+    const h = harness(() => ({ code: 200, data: {
+        bound: false, telegram_id: null, username: null, username_status: "unbound",
+        message: "该用户尚未绑定 Telegram 账号",
+    } }));
+    await h.component.showTelegramInfo(user);
+
+    assert.equal(nodes(h.modals[0].options.content).find(node => text(node) === "解绑"), undefined);
 });

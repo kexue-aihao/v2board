@@ -382,6 +382,8 @@ period 支持值：
 | POST | /user/ban | filter、sort | 批量封禁并清会话 |
 | POST | /user/resetSecret | id | 重置主订阅 Token/UUID |
 | POST | /user/resetPassword | id | 生成新随机密码并一次性返回明文，同时清会话 |
+| GET | /user/telegramInfo | id | 查询用户的 Telegram 绑定（只读；会向 Telegram 查用户名，查不到不影响「已绑定」的判定） |
+| POST | /user/telegramUnbind | id、confirm | 解绑用户的 Telegram 账号：只清 v2_user.telegram_id，不动订阅链接、密码与售后群成员身份；未绑定的用户返回 422 而不是静默成功 |
 | POST | /user/delUser | id | 删除用户及其订单/邀请/工单与审计数据 |
 | POST | /user/allDel | filter | 按筛选批量删除 |
 | POST | /user/setInviteUser | id；可选 invite_user_id 或 invite_user_email | 设置推荐关系；两个可选参数均未传时清空推荐人。推荐人必须存在且不能是用户本人，成功返回 `data: true` |
