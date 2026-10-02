@@ -120,6 +120,14 @@ class TelegramAdminOperationService
         $token = trim((string)config('v2board.telegram_bot_token', ''));
         $rawChatId = trim((string)config('v2board.telegram_discuss_id', ''));
         if ($token === '' || !preg_match('/^-?\d+$/', $rawChatId)) {
+            // 开关开着却发不出去，说明是配置问题。这里不能静默 return：管理员开关节点、
+            // 新增节点之后什么也没发生，只会得出「通知功能没做」的结论 —— 而真正的原因
+            // （没填群 ID、或者填成了 @用户名 / t.me 链接）就藏在这个 return 后面。
+            \Log::warning('Admin operation notification skipped: bot token or discuss id is unusable.', [
+                'bot_token_configured' => $token !== '',
+                'discuss_id' => $rawChatId,
+                'hint' => 'telegram_discuss_id 必须是数字群 ID（形如 -1001234567890）；@用户名与群链接都会被忽略'
+            ]);
             return;
         }
 
