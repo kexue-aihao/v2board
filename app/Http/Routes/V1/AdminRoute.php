@@ -46,6 +46,13 @@ class AdminRoute
             $router->post('/server/manage/nodes/delete', 'V1\\Admin\\Server\\ManageController@deleteNodes');
             $router->post('/server/manage/protocol/preview', 'V1\\Admin\\Server\\ManageController@previewProtocolSettings');
             $router->post('/server/manage/protocol/apply', 'V1\\Admin\\Server\\ManageController@applyProtocolSettings');
+
+            // 动态倍率：时段规则 / 峰值参数 / 实时状态
+            $router->get ('/rate/fetch', 'V1\\Admin\\RateController@fetch');
+            $router->post('/rate/rule/save', 'V1\\Admin\\RateController@saveRule');
+            $router->post('/rate/rule/drop', 'V1\\Admin\\RateController@dropRule');
+            $router->post('/rate/settings/save', 'V1\\Admin\\RateController@saveSettings');
+            $router->post('/rate/explain', 'V1\\Admin\\RateController@explain');
             $router->group([
                 'prefix' => 'server/trojan'
             ], function ($router) {
