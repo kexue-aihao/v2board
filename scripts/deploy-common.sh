@@ -451,6 +451,13 @@ deploy_webman_master_running() {
     pgrep -f 'WorkerMan: master process.*webman\.php' >/dev/null 2>&1
 }
 
+# 主进程 pid。supervisor 的程序名就靠它反查（见 deploy_supervisor_program_for_pid）——
+# 配置文件可能被面板或人工编辑弄丢 [program:x] 段头，supervisord 的实时视图不会。
+deploy_webman_master_pid() {
+    command -v pgrep >/dev/null 2>&1 || return 1
+    pgrep -f 'WorkerMan: master process.*webman\.php' 2>/dev/null | head -n 1
+}
+
 # 必须按端口找残留：Workerman 会把 worker 的进程标题改成
 # "WorkerMan: worker process AdapterMan http://127.0.0.1:6600"，里面没有 webman.php，
 # 所以任何 pgrep -f webman.php 都看不见它们，而它们才是继续占着监听套接字的那批进程。
@@ -466,6 +473,25 @@ deploy_port_pids() {
         pids="$(fuser -n tcp "$port" 2>/dev/null | tr -s ' ' '\n')"
     fi
     { printf '%s\n' "$pids" | grep -E '^[0-9]+$' | sort -u; } || true
+}
+
+# 把占用端口的进程连同父进程、命令行一起列出来。排查「谁把它拉起来的」时，
+# 父进程是 supervisord 还是 1（孤儿进程）是两条完全不同的线索，光看 pid 看不出来。
+deploy_report_port_holders() {
+    local port="$1" pid ppid cmd
+    for pid in $(deploy_port_pids "$port"); do
+        ppid=""
+        cmd=""
+        # 先判可读再读：`cmd < "/proc/…" 2>/dev/null` 这种写法里，重定向失败是 shell 自己报的
+        # 错，那时 2>/dev/null 还没生效，会把一行 "No such file or directory" 混进部署输出。
+        if [ -r "/proc/$pid/status" ]; then
+            ppid="$(sed -n 's/^PPid:[[:space:]]*//p' "/proc/$pid/status")"
+        fi
+        if [ -r "/proc/$pid/cmdline" ]; then
+            cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline")"
+        fi
+        printf '  pid %s  ppid %s  %s\n' "$pid" "${ppid:-?}" "$cmd" >&2
+    done
 }
 
 # 进程标题被 Workerman 改写过，所以三种可能的写法都认；认不出来的一律不动，
@@ -489,7 +515,9 @@ deploy_free_webman_port() {
                 kill "-$signal" "$pid" 2>/dev/null || true
             else
                 echo "ERROR: port ${port} is held by pid ${pid}, which is not a Webman process." >&2
-                echo "$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)" >&2
+                if [ -r "/proc/$pid/cmdline" ]; then
+                    echo "$(tr '\0' ' ' < "/proc/$pid/cmdline")" >&2
+                fi
                 return 1
             fi
         done
@@ -553,6 +581,18 @@ deploy_check_supervisor_php_config() {
     local conf command
 
     conf="$(deploy_supervisor_config)" || return 0
+
+    # 段头丢了不影响本脚本（它按 pid 反查程序名），但影响 supervisord 自己：reread 会因为
+    # 「文件里找不到节」报错，update 更可能把程序整个移除，站点从此失去自动重启。而它现在
+    # 照跑不误，是因为配置在 supervisord 启动时就已读进内存 —— 所以这里只警告、不阻断部署。
+    if ! grep -qE '^[[:space:]]*\[(program|group):' "$conf"; then
+        local program_hint
+        program_hint="$(deploy_supervisor_program 2>/dev/null || true)"
+        echo "WARNING: $conf has no [program:...] section header." >&2
+        echo "  supervisord still runs this program because it read the file at startup," >&2
+        echo "  but the next reread or supervisord restart cannot parse it and may drop the program." >&2
+        echo "  Fix: sed -i '1i [program:${program_hint:-webman}]' $conf && supervisorctl reread && supervisorctl update" >&2
+    fi
     command="$(sed -n 's/^[[:space:]]*command[[:space:]]*=[[:space:]]*//p' "$conf" | head -n 1)"
     case "$command" in
         *"$ROOT_DIR/scripts/webman.sh"*) return 0 ;;
@@ -567,19 +607,83 @@ deploy_check_supervisor_php_config() {
     return 1
 }
 
-# 程序名不能写死：面板的配置在 supervisord.conf 的 files= 指向的
-# plugin/supervisor/profile/*.ini 里，一个程序一个文件，通用部署一般也是这个布局。
-# 所以「哪个文件同时提到 webman.php 和本项目目录」就足够定位，不必解析 ini 分块。
+# 程序名不能写死，也不能只信配置文件。
+#
+# 2026-10-02 的事故就栽在这里：/etc/supervisor/conf.d/webman.conf 里的 [program:webman]
+# 段头被编辑弄丢了，文件只剩 command= / directory= / autorestart= 这些键。于是「从配置
+# 文件反查程序名」返回空，脚本判定「没有 supervisor 托管」，转去手工 webman.php stop ——
+# 而 supervisord 内存里那条程序还在、配置是 autorestart=true，几秒后就把进程重新拉起来
+# 占住端口。一分多钟后脚本自己 start 时撞上 Address already in use，部署死在最后一步。
+# 而 supervisord 的实时视图（supervisorctl status）里明明写着程序名和 pid，只是没人问它。
+#
+# 所以顺序是：环境变量 → 按 pid 反查（supervisord 实时视图）→ 程序名里带 webman 的那条
+# → 最后才是读配置文件。前两条不依赖配置文件长什么样。
 deploy_supervisor_program() {
-    local conf name
+    local conf name sc
     if [ -n "${SUPERVISOR_PROGRAM:-}" ]; then
         echo "$SUPERVISOR_PROGRAM"
         return 0
+    fi
+    if sc="$(deploy_supervisorctl_bin)"; then
+        if name="$(deploy_supervisor_program_for_pid "$sc" "$(deploy_webman_master_pid || true)")"; then
+            echo "$name"
+            return 0
+        fi
+        if name="$(deploy_supervisor_program_by_name "$sc")"; then
+            echo "$name"
+            return 0
+        fi
     fi
     if conf="$(deploy_supervisor_config)"; then
         name="$(sed -n 's/^\[program:\([^]]*\)\].*/\1/p' "$conf" | head -n 1)"
         [ -n "$name" ] && { echo "$name"; return 0; }
     fi
+    return 1
+}
+
+# 用 pid 反查 supervisor 程序名。supervisorctl status 是 supervisord 的实时视图，每行形如
+# 「webman   RUNNING   pid 1236757, uptime 0:04:46」，那个 pid 就是这条配置真正拉起来的进程。
+# 包装脚本用 exec 起 php，pid 不会变，所以它同时就是 Workerman 主进程的 pid。
+# 这条路不依赖配置文件的布局、程序名怎么写、numprocs 是几。
+deploy_supervisor_program_for_pid() {
+    local sc="$1" want="$2" line name pid
+    [ -n "$sc" ] && [ -n "$want" ] || return 1
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        name="${line%%[[:space:]]*}"
+        pid="$(printf '%s\n' "$line" | sed -n 's/.*[[:space:]]pid \([0-9][0-9]*\).*/\1/p')"
+        [ -n "$pid" ] && [ "$pid" = "$want" ] || continue
+        # 「foo:foo_00」（分组）与「webman_00」（numprocs）都归一成组名，
+        # 因为停 / 启要用 <程序名>:* 这种组形式。
+        name="${name%%:*}"
+        case "$name" in
+            *_[0-9][0-9]) name="${name%_[0-9][0-9]}" ;;
+        esac
+        echo "$name"
+        return 0
+    done <<< "$("$sc" status 2>/dev/null || true)"
+    return 1
+}
+
+# 退路：程序名里带 webman 的那条。只在 pid 认不出来时用（进程已经停了、标题被改写过…），
+# 仍然比读配置文件可靠 —— 这个名字至少是 supervisord 自己认的。
+deploy_supervisor_program_by_name() {
+    local sc="$1" line name
+    [ -n "$sc" ] || return 1
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        name="${line%%[[:space:]]*}"
+        case "$name" in
+            *[Ww]eb[Mm]an*) ;;
+            *) continue ;;
+        esac
+        name="${name%%:*}"
+        case "$name" in
+            *_[0-9][0-9]) name="${name%_[0-9][0-9]}" ;;
+        esac
+        echo "$name"
+        return 0
+    done <<< "$("$sc" status 2>/dev/null || true)"
     return 1
 }
 
@@ -600,6 +704,51 @@ deploy_supervisor_knows_program() {
 
 deploy_supervisor_running() {
     "$1" status "$2" 2>/dev/null | grep -q RUNNING
+}
+
+# 启动前再认一次 supervisor。
+#
+# 停的那一步没认出来时（配置丢了 [program:x] 段头、程序名对不上……），脚本会绕过
+# supervisord 手工停进程，而 supervisord 按 autorestart=true 几秒后又把它拉回来 ——
+# 等走到 start，端口已经被占住。这时按「占着端口的那个 pid」反查，一定能从
+# supervisorctl status 里认出程序名，改用 supervisorctl restart 收尾，而不是对着一个
+# 不属于自己的进程报 Address already in use。
+deploy_supervisor_adopt_running() {
+    local sc program port pid
+    sc="$(deploy_supervisorctl_bin)" || return 1
+    port="$(deploy_webman_port)"
+    pid="$(deploy_webman_master_pid || true)"
+    if [ -z "$pid" ]; then
+        pid="$(deploy_port_pids "$port" | head -n 1)"
+    fi
+    # 刻意只用 pid 反查、不用名字兜底：这一步决定「重启谁」，认错了就是把别的守护重启
+    # 一遍而站点仍然没人起。pid 对不上就老实走手工分支并报错。
+    program="$(deploy_supervisor_program_for_pid "$sc" "$pid")" || return 1
+    SUPERVISORCTL_BIN="$sc"
+    SUPERVISOR_PROGRAM="$program"
+    SUPERVISOR_TARGET="$(deploy_supervisor_target "$program")"
+    WEBMAN_MANAGER=supervisor
+    return 0
+}
+
+# 手工停完盯 5 秒。先无条件等一会儿再看：进程刚停、supervisord 还没反应过来，
+# 立刻查一定是「端口是空的」，什么都发现不了。真被重新拉起来了就把现场打出来 ——
+# 否则要等一分多钟后的 start 才以一句 already in use 收场，那时 pid 已经换了一批，
+# 看不出是谁干的。返回非 0 只是给调用处读，调用处一律 || true：此刻中止部署只会把
+# 站点留在「已经停了但没人起」的状态，比继续往下走更糟。
+deploy_watch_webman_respawn() {
+    local port="$1" attempt
+    for attempt in 1 2 3 4 5; do
+        sleep 1
+        if deploy_port_listening "$port"; then
+            echo "WARNING: port ${port} is occupied again ${attempt}s after Webman was stopped." >&2
+            echo "Something is auto-restarting it — supervisord with autorestart=true does exactly that." >&2
+            echo "Holders (pid / parent pid / command):" >&2
+            deploy_report_port_holders "$port"
+            return 1
+        fi
+    done
+    return 0
 }
 
 deploy_stop_webman() {
@@ -644,6 +793,8 @@ deploy_stop_webman() {
                 return 1
             }
         fi
+        # 停干净之后再盯几秒，见 deploy_watch_webman_respawn。
+        deploy_watch_webman_respawn "$port" || true
     fi
     WEBMAN_STOPPED=1
 }
@@ -652,8 +803,19 @@ deploy_start_webman() {
     local port attempt
     WEBMAN_START_ATTEMPTED=1
     port="$(deploy_webman_port)"
+
+    # 停的那一步没认出 supervisor 时（配置丢了 [program:x] 段头、程序名对不上……），
+    # 这里按「占着端口的那个 pid」再认一次，见 deploy_supervisor_adopt_running。
+    if [ "${WEBMAN_MANAGER:-webman}" != supervisor ] && deploy_supervisor_adopt_running; then
+        echo "Webman is managed by supervisor: $SUPERVISOR_TARGET"
+        echo "  (依据是正在跑的进程，不是配置文件里那个可能已被改坏的名字)"
+    fi
     if [ "${WEBMAN_MANAGER:-webman}" = supervisor ]; then
-        "$SUPERVISORCTL_BIN" start "$SUPERVISOR_TARGET"
+        # restart 而不是 start：supervisord 可能已经按 autorestart 把它拉起来了，
+        # 这时 start 会以 ERROR (already started) 退出、把 set -e 引到 ERR trap 上；
+        # 而且那批 worker 是部署中途 fork 的，可能还握着 git reset 之前的代码，
+        # 重启一次才能保证它们加载的是这次部署的代码。
+        "$SUPERVISORCTL_BIN" restart "$SUPERVISOR_TARGET"
         # start 返回不代表端口已经 bind 好，配置里 startsecs=3 还要再等一会儿。
         for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if deploy_supervisor_running "$SUPERVISORCTL_BIN" "$SUPERVISOR_TARGET" \
@@ -672,6 +834,7 @@ deploy_start_webman() {
         # stream_socket_server / Address already in use 的堆栈出来。
         if deploy_port_listening "$port"; then
             echo "ERROR: 127.0.0.1:${port} is already in use by pid(s): $(deploy_port_pids "$port" | tr '\n' ' ')" >&2
+            deploy_report_port_holders "$port"
             echo "Webman cannot start until they are gone." >&2
             return 1
         fi

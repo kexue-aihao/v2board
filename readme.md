@@ -743,15 +743,20 @@ AcePanel：
 Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorctl 停启，不再自行 `webman.php start -d`：
 
 - supervisorctl 二进制按 PATH、`/www/server/panel/pyenv/bin`（aaPanel 的进程守护插件把它装在面板自带的 pyenv 里，不在 PATH 上）、`/usr/local/bin`、`/usr/bin` 顺序查找，可用 `SUPERVISORCTL` 覆盖。AcePanel 相反：它的 Supervisor 应用直接 `dnf/apt install supervisor`，面板自己也调用 PATH 上的 supervisorctl，所以二进制就在 `/usr/bin`。
-- 程序名从 aaPanel 的 `/www/server/panel/plugin/supervisor/profile/*.ini`、AcePanel 与通用部署的 `/etc/supervisor/conf.d/*.conf`（Debian/Ubuntu）或 `/etc/supervisord.d/*.conf`（RHEL；AcePanel 的安装脚本会把主配置里的 `files = supervisord.d/*.ini` 改写成 `*.conf`，只按 `.ini` 扫会整个漏掉）中反查（取同时提到 webman.php 与本项目目录的那个文件），可用 `SUPERVISOR_PROGRAM` 覆盖。配置了 numprocs 时进程名是 `<程序名>_00`，脚本会自动用 `<程序名>:*` 这种组形式定位。
+- 程序名按 **环境变量 `SUPERVISOR_PROGRAM` → 用 Workerman 主进程 pid 在 `supervisorctl status` 里反查 → 程序名里带 webman 的那条 → 最后才解析配置文件** 的顺序确定。前两条问的是 supervisord 自己，不依赖配置文件长什么样：`supervisorctl status` 每行都带 pid，而包装脚本用 `exec` 起 php，pid 不会变，所以那个 pid 同时就是 Workerman 主进程的 pid。配置文件的解析只作兜底，它扫 aaPanel 的 `/www/server/panel/plugin/supervisor/profile/*.ini`、AcePanel 与通用部署的 `/etc/supervisor/conf.d/*.conf`（Debian/Ubuntu）或 `/etc/supervisord.d/*.conf`（RHEL；AcePanel 的安装脚本会把主配置里的 `files = supervisord.d/*.ini` 改写成 `*.conf`，只按 `.ini` 扫会整个漏掉）。配置了 numprocs 时进程名是 `<程序名>_00`，脚本会自动用 `<程序名>:*` 这种组形式定位。
+- **配置文件里的 `[program:<名字>]` 段头不能丢。** 有站点在改 `command=` 时把段头一起覆盖掉了，文件只剩 `command=` / `directory=` / `autorestart=` 这些键 —— supervisord 内存里那条程序照跑不误，重新读盘才会发现文件已经不可解析。脚本现在不再依赖它，但面板/`supervisorctl reread` 依赖它：段头没了，下一次 `reread` 就会报错、`update` 更可能把程序整个移除，站点失去自动重启。改这个文件时先 `grep -n '^\[' /etc/supervisor/conf.d/webman.conf` 确认段头还在 —— 已经丢了的话，部署的前置检查会打印一条 WARNING 并给出补段头的命令（只警告不阻断：脚本自己已经能按 pid 认出程序）。
 
 托管情况下必须走 supervisorctl：supervisor 配置通常是 `autorestart=true`，手工 `webman.php stop` 之后 supervisord 会在几秒内把它重新拉起来占住端口，随后部署脚本自己的 start 就会撞上 `Address already in use`，并且起出一套 supervisord 不认、进程属主也不对的实例。
+
+**2026-10-02 的实际事故就是这条链**：段头丢了 → 反查程序名返回空 → 脚本判定「没有 supervisor 托管」→ 手工 `webman.php stop`（这一步什么都没打印，看起来正常）→ supervisord 按 `autorestart=true` 在 4 秒后把进程拉回来 → 一分多钟后 `deploy_start_webman` 撞上 `already in use`，部署死在这一步，后面的计划任务与文件属主都没跑。三处改进针对它：识别不再只看配置文件；`deploy_start_webman` 启动前会用端口上那个 pid 再认一次，认得出来就改用 `supervisorctl restart`（顺带保证跑的是 `git reset` 之后的代码）；手工分支停完会盯 5 秒，一旦端口被重新占住就当场把占用者的 pid 与父进程打出来，而不是等一分钟后以一句 `already in use` 收场。回归测试：`bash scripts/tests/deploy-supervisor-detect.test.sh`。
 
 另需注意 supervisor 配置里的 `command=` 应使用 Webman 包装脚本，并通过 `environment=` 传入 PHP 路径。例如 aaPanel 使用 `command=/bin/bash /www/wwwroot/v2board/scripts/webman.sh start` 与 `environment=PHP_BIN=/www/server/php/81/bin/php,PHP_INI=/www/server/php/81/etc/php.ini`；AcePanel 将两处路径替换为 `/opt/ace/server/php/81/...`。不要把 `PHP_BIN=...` 直接写在 `command=` 前面，也不要写裸 `php`、`-n` 或项目 ini。包装脚本固定读取同版本面板 `etc/php.ini`，仅为 Webman 注入 AdapterMan 所需覆盖。
 
 ### 11.1 部署失败与验收
 
-**update.sh 任何一步失败都会中断，且不会自动回滚。** 失败时 ERR trap 会打印失败的行号、命令，以及「本次部署是半成品」的说明和恢复步骤 —— 因为 拉代码 / 装依赖 / 数据库迁移 / 缓存清理 / 计划任务 / 文件属主 里至少有一项没做。
+**update.sh 任何一步失败都会中断，且不会自动回滚。** 每个步骤都打印 `▶ <步骤名>`，失败时 ERR trap 报的就是这个**步骤名**（不是行号 —— 函数定义在被 source 的 `deploy-common.sh` 里时，`$LINENO` 报的是那个文件的行号，任何 `deploy_php xxx` 失败都会显示同一行，照着去找会找到无关的一句），外加「本次部署是半成品」的说明和恢复步骤 —— 因为 拉代码 / 装依赖 / 数据库迁移 / 缓存清理 / 计划任务 / 文件属主 里至少有一项没做。
+
+**最典型的一次失败长这样**：`deploy_start_webman` 报 `ERROR: 127.0.0.1:6600 is already in use by pid(s): …`。含义是「要起 Webman 时端口已经被占着」，多半是 supervisord 的 `autorestart` 在我们停掉进程之后又把它拉了回来。脚本会把占用者的 pid、父进程和命令行一起打出来：**父进程是 supervisord 就说明这台机器其实是托管的**（照上面的段头检查去看配置文件），父进程是 1 则是上一轮留下的孤儿进程。站点此时通常还在正常服务（有进程在 6600 上应答），没跑的只剩后面的计划任务与文件属主 —— 补跑前先 `chown -R www /站点目录`，把部署期间 root 生成的 `bootstrap/cache/` 与日志交还给站点用户。
 
 **前置检查失败（PHP 版本、扩展、面板 vhost、Supervisor 配置、禁用函数）时脚本在动任何东西之前就退出**，不留下半成品，按报错改环境即可。
 
