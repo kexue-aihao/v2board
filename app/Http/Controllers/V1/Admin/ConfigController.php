@@ -189,22 +189,11 @@ class ConfigController extends Controller
                 'telegram_register_enable' => (int)config('v2board.telegram_register_enable', 0),
                 'telegram_register_code_delay' => (int)config('v2board.telegram_register_code_delay', 10),
                 'telegram_bot_token_configured' => !empty(config('v2board.telegram_bot_token')),
-                // 掩码：bot id 全留（它本来就出现在每条 API 路径里），密钥只留头尾各 4 位。
-                // 够管理员对照确认「存进去的是哪个 token」，又不足以被拿去调用 API。
-                'telegram_bot_token_preview' => (function (string $token): string {
-                    if ($token === '') {
-                        return '';
-                    }
-                    $parts = explode(':', $token, 2);
-                    if (count($parts) !== 2) {
-                        return mb_substr($token, 0, 6) . '…';
-                    }
-                    $secret = $parts[1];
-                    if (mb_strlen($secret) <= 8) {
-                        return $parts[0] . ':…';
-                    }
-                    return $parts[0] . ':' . mb_substr($secret, 0, 4) . '…' . mb_substr($secret, -4);
-                })((string)config('v2board.telegram_bot_token', '')),
+                // 按运维要求**不打掩码**：直接回显完整 token，前端输入框因此能看到当前存的值。
+                // 代价是任何能打开后台的人都能从这个响应里拿到密钥（备份分支原本就是明文回显）。
+                // 要改回掩码：把下面两行换成只回 token 的前 6 位 + 后 4 位即可。
+                'telegram_bot_token' => (string)config('v2board.telegram_bot_token', ''),
+                'telegram_bot_token_preview' => (string)config('v2board.telegram_bot_token', ''),
                 'telegram_discuss_id' => config('v2board.telegram_discuss_id'),
                 'telegram_discuss_link' => config('v2board.telegram_discuss_link'),
                 'telegram_subscription_binding_enable' => (int)config('v2board.telegram_subscription_binding_enable', 0),
