@@ -80,7 +80,8 @@ function harness(respond) {
         '2fM7': { a: Object.assign(function Select() {}, { Option: 'Option' }) },
         mr32: { a: 'Tag' },
         Bl7J: { a: 'Page' },
-        v32e: { a: 'Card' },
+        // v32e 是包了 antd Spin 的容器（spinning 取自 props.loading），不是 Card。
+        v32e: { a: 'Spin' },
         'wd/R': () => ({ format: () => '20261002-120000' }),
         t3Un: {
             a: async (url, params) => {
@@ -179,6 +180,13 @@ function flatten(node) {
     if (Array.isArray(node)) return node.flatMap(flatten);
     if (node.children) return flatten(node.children);
     return [];
+}
+
+// 遍历整棵元素树（flatten 只取文本，这个取元素本身）。
+function nodes(node) {
+    if (Array.isArray(node)) return node.flatMap(nodes);
+    if (!node || typeof node !== 'object') return [];
+    return [node, ...(node.children || []).flatMap(nodes)];
 }
 
 function columnTitles(page) {
@@ -345,6 +353,23 @@ test('请求被拒时表格的 loading 必须清掉，否则整块会盖上不�
     assert.equal(page.state.loading, false, 'main table must stop spinning');
     assert.equal(page.state.rulesLoading, false, 'rules table must stop spinning');
     assert.equal(page.state.historyLoading, false, 'history table must stop spinning');
+});
+
+test('外层 Spin 容器必须显式关掉，否则整页发灰且点不动', () => {
+    // v32e 不是 Card，是包了 antd Spin 的容器，spinning 取自 props.loading。
+    // 不传这个 prop 时 spinning 是 undefined，而 antd 的 Spin 默认就是转 —— 整块内容
+    // 会被 .ant-spin-blur（opacity .5 + pointer-events: none）盖住：看得见、点不动。
+    const { Page } = harness(respondFor([]));
+    const page = new Page({});
+    const spinner = nodes(page.render()).find(node => node.type === 'Spin');
+    assert.ok(spinner, '外层容器必须渲染');
+    assert.equal(spinner.props.loading, false, '外层容器必须被显式告知不要转');
+
+    // 表未安装那条分支同样走这个容器，别漏。
+    page.setState({ available: false });
+    const bare = nodes(page.render()).find(node => node.type === 'Spin');
+    assert.ok(bare, '未安装分支也要渲染容器');
+    assert.equal(bare.props.loading, false, '未安装分支同样不能转');
 });
 
 test('留存设置保存到 /risk/gateway/config/save', async () => {

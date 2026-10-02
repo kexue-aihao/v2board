@@ -118956,6 +118956,16 @@
         function gatewayTimeText(value) {
             return value ? String(value) : "-"
         }
+        // g["a"]（产物里的 v32e）**不是 Card**，而是一个把 antd Spin 包了一层的容器：
+        //     spinning: this.props.loading
+        // 而 antd 的 Spin 在 `spinning` 为 undefined 时是**默认转圈**的。所以这个容器
+        // 必须显式传 loading: !1 —— 图省事写成 createElement(g["a"], null, ...) 的话，
+        // 整块内容会被套进一层永不停止的 Spin，而 antd 给转圈容器加的 .ant-spin-blur
+        // 是 opacity: .5 + pointer-events: none，表现就是「整页发灰、什么都点不动」，
+        // 且侧栏（在容器之外）照常可点。各表格自己有 loading，外层只需要别转。
+        var SPIN_OFF = {
+            loading: !1
+        };
         var CLEAN_FILTER_KEYS = ["email", "user_id", "plan_id", "subscription_id", "ip", "carrier", "asn", "user_agent", "hit_condition", "hit_count", "blocked", "start_time", "end_time"];
         var CLEAN_EMPTY_FILTERS = {
             email: "",
@@ -119958,14 +119968,14 @@
                 if (!this.state.available) {
                     return p.a.createElement(m["a"], i()({}, this.props, {
                         title: "订阅清洗网关"
-                    }), p.a.createElement(g["a"], null, p.a.createElement("div", {
+                    }), p.a.createElement(g["a"], SPIN_OFF, p.a.createElement("div", {
                         className: "alert alert-warning mb-0",
                         role: "alert"
                     }, "订阅拉取记录表尚未安装。请先执行 php artisan v2board:update 完成数据库升级，升级后历史拉取记录会自动回填。")))
                 }
                 return p.a.createElement(m["a"], i()({}, this.props, {
                     title: "订阅清洗网关"
-                }), p.a.createElement(g["a"], null, this.section("日志留存", p.a.createElement(a["a"], {
+                }), p.a.createElement(g["a"], SPIN_OFF, this.section("日志留存", p.a.createElement(a["a"], {
                     size: "small",
                     onClick: ()=>this.fetch()
                 }, p.a.createElement(l["a"], {
