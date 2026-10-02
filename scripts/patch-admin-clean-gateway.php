@@ -250,6 +250,12 @@ if ($moduleSource === false
     fwrite(STDERR, "Admin cleaning gateway module source is invalid.\n");
     exit(1);
 }
+// 上面拒掉了 CRLF 的产物，这里得同样拒掉 CRLF 的模块源码：两者行尾不一致时，
+// 整块源码会被原样塞进 LF 的产物里，产出的是行尾混排的文件。
+if (strpos($moduleSource, "\r\n") !== false) {
+    fwrite(STDERR, "Admin cleaning gateway module source has CRLF line endings; run this patch on the LF checkout.\n");
+    exit(1);
+}
 
 $gatewayModule = "    riskgatewaypage: function(e, t, n) {";
 $gatewayRange = clean_gateway_module_range($bundle, $gatewayModule);

@@ -379,14 +379,43 @@ class SubscribeCleanGatewayController extends Controller
                 'retention_days' => $retention->retentionDays(),
                 'retention_default' => SubscribeAuditRetentionService::DEFAULT_RETENTION_DAYS,
                 'retention_min' => SubscribeAuditRetentionService::MIN_RETENTION_DAYS,
-                'records' => $service->available() ? (int)DB::table(SubscribeCleanGatewayService::TABLE)->count() : 0,
-                'raw_logs' => $this->hasTable('v2_subscribe_request_log')
-                    ? (int)DB::table('v2_subscribe_request_log')->count() : 0,
+                // 行数取 information_schema 的估算值。这个接口在每次打开列表时都会和
+                // fetch 并发打出去，而 COUNT(*) 在 InnoDB 上等于把索引扫一遍 ——
+                // 原始审计表装着保留期内的全站拉取记录，几百万行时单个 COUNT(*) 就要
+                // 若干秒，几个并发请求叠起来足以让页面长时间转圈。这里要的是量级
+                // （有没有数据、涨得快不快），估算值够用。
+                'records' => $this->estimatedRows(SubscribeCleanGatewayService::TABLE),
+                'raw_logs' => $this->estimatedRows('v2_subscribe_request_log'),
                 'earliest_text' => $this->earliestText($service),
                 'last_cleaned_at' => $lastCleanedAt,
                 'last_cleaned_text' => $service->beijingText($lastCleanedAt)
             ]
         ]);
+    }
+
+    /**
+     * information_schema 的行数估算，常数级开销。
+     *
+     * InnoDB 的 TABLE_ROWS 是采样值，误差可达 ±50%，所以调用方把它当「量级」用，
+     * 不要拿它做等值判断。COUNT(*) 才是准的，但它的开销随表线性增长，不能放在
+     * 每次打开页面都要走的路径上。
+     */
+    private function estimatedRows(string $table): int
+    {
+        try {
+            if (!$this->hasTable($table)) {
+                return 0;
+            }
+            $row = DB::selectOne(
+                'SELECT TABLE_ROWS AS row_count FROM information_schema.TABLES '
+                . 'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+                [$table]
+            );
+
+            return $row === null ? 0 : (int)$row->row_count;
+        } catch (\Throwable $e) {
+            return 0;
+        }
     }
 
     /**
@@ -438,7 +467,13 @@ class SubscribeCleanGatewayController extends Controller
             return '';
         }
         try {
-            $earliest = DB::table(SubscribeCleanGatewayService::TABLE)->min('first_seen_at');
+            // 按主键取第一行再读它的 first_seen_at。first_seen_at 上没有索引（这张表
+            // 是全站最高频的写路径，无用的二级索引一律不加），MIN() 会退化成全表扫；
+            // 主键有序，ORDER BY id LIMIT 1 是一次索引定位。
+            $earliest = DB::table(SubscribeCleanGatewayService::TABLE)
+                ->orderBy('id')
+                ->limit(1)
+                ->value('first_seen_at');
         } catch (\Throwable $e) {
             return '';
         }

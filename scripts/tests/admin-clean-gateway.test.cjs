@@ -7,7 +7,14 @@ const { test } = require('node:test');
 // 直接跑打进产物里的「订阅清洗网关」模块，而不是断言源码字符串：列、筛选器、导出链路
 // 任何一处被打回或补丁失配，这里都会红。同时断言两个旧页面确实从产物里消失了 ——
 // 「合并成一个栏目」这件事在产物层面就是：/risk/rule 路由、菜单项、模块三者都不在了。
-const bundle = fs.readFileSync(path.join(__dirname, '../../public/assets/admin/umi.js'), 'utf8');
+//
+// 读进来先归一化成 LF：仓库里存的是 LF，但 core.autocrlf=true 的 Windows 工作副本会被
+// 检出成 CRLF，而下面的模块边界扫描与菜单断言都按 \n 锚定 —— 不归一化的话，同一份产物
+// 在这台机器上会假报失败。
+const bundle = fs
+    .readFileSync(path.join(__dirname, '../../public/assets/admin/umi.js'), 'utf8')
+    .split('\r\n')
+    .join('\n');
 
 function moduleSource(key) {
     const marker = '    ' + key + ': function(e, t, n) {';
