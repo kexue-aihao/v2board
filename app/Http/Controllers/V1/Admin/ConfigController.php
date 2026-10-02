@@ -189,6 +189,22 @@ class ConfigController extends Controller
                 'telegram_register_enable' => (int)config('v2board.telegram_register_enable', 0),
                 'telegram_register_code_delay' => (int)config('v2board.telegram_register_code_delay', 10),
                 'telegram_bot_token_configured' => !empty(config('v2board.telegram_bot_token')),
+                // 掩码：bot id 全留（它本来就出现在每条 API 路径里），密钥只留头尾各 4 位。
+                // 够管理员对照确认「存进去的是哪个 token」，又不足以被拿去调用 API。
+                'telegram_bot_token_preview' => (function (string $token): string {
+                    if ($token === '') {
+                        return '';
+                    }
+                    $parts = explode(':', $token, 2);
+                    if (count($parts) !== 2) {
+                        return mb_substr($token, 0, 6) . '…';
+                    }
+                    $secret = $parts[1];
+                    if (mb_strlen($secret) <= 8) {
+                        return $parts[0] . ':…';
+                    }
+                    return $parts[0] . ':' . mb_substr($secret, 0, 4) . '…' . mb_substr($secret, -4);
+                })((string)config('v2board.telegram_bot_token', '')),
                 'telegram_discuss_id' => config('v2board.telegram_discuss_id'),
                 'telegram_discuss_link' => config('v2board.telegram_discuss_link'),
                 'telegram_subscription_binding_enable' => (int)config('v2board.telegram_subscription_binding_enable', 0),
@@ -273,6 +289,12 @@ class ConfigController extends Controller
         // server_token => NULL，所有节点鉴权失败。
         if (array_key_exists('server_token', $data) && trim((string)$data['server_token']) === '') {
             unset($data['server_token']);
+        }
+        // bot token 同理，而且这里更容易中招：配置接口刻意不回显密钥（只回一个布尔值），
+        // 于是输入框每次打开都是空的，管理员只要保存一次配置就会提交空串 —— 旧行为会把
+        // 已配置的 token 直接抹成 NULL，表现成「保存后 token 没了、机器人也不回话」。
+        if (array_key_exists('telegram_bot_token', $data) && trim((string)$data['telegram_bot_token']) === '') {
+            unset($data['telegram_bot_token']);
         }
         if (array_key_exists('reseller_allowed_payment_drivers', $data)) {
             $data['reseller_allowed_payment_drivers'] = array_values(array_filter(
