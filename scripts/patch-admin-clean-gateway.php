@@ -254,8 +254,12 @@ function clean_gateway_module_range($bundle, $marker) {
 
 $modulePath = __DIR__ . '/admin-clean-gateway-module.js';
 $moduleSource = file_get_contents($modulePath);
+// 注意用 ltrim 再比开头：模块源码是产物里对象字面量的一项，**开头那 4 个空格是有意的**
+// （拼接时正是靠它们对齐，见下面 $gatewayModule 的字面量）。所以「以 riskgatewaypage:
+// 开头」这个判断必须先去掉缩进 —— 直接 strpos(...) !== 0 会拿到 4，任何情况下都判无效，
+// 而这一条在本地用 Node 校验器复现时被写成了带空格的正则，于是从来没被发现。
 if ($moduleSource === false
-    || strpos($moduleSource, 'riskgatewaypage: function(e, t, n) {') !== 0
+    || strpos(ltrim($moduleSource), 'riskgatewaypage: function(e, t, n) {') !== 0
     || substr($moduleSource, -2) !== ",\n") {
     fwrite(STDERR, "Admin cleaning gateway module source is invalid.\n");
     exit(1);

@@ -44,7 +44,13 @@ if (moduleSource.includes('\r\n')) {
     console.log('模块源码原本是 CRLF，已就地归一化成 LF');
 }
 
-if (!/^    riskgatewaypage: function\(e, t, n\) \{/.test(moduleSource)) {
+// 与 scripts/patch-admin-clean-gateway.php 里那条判断**逐字对应**：
+//   那边是 strpos(ltrim($moduleSource), 'riskgatewaypage: function(e, t, n) {') !== 0
+// 两边写法必须一致。曾经这里是 /^    riskgatewaypage…/（带缩进的锚定），而 PHP 那边
+// 是不带缩进的 strpos !== 0 —— 模块开头本来就有 4 个空格，于是 PHP 的条件恒为假、
+// 每次部署都在「source is invalid」处中断，而本地校验一直是绿的，查了很久。
+const moduleHead = moduleSource.replace(/^\s+/, '');
+if (!moduleHead.startsWith('riskgatewaypage: function(e, t, n) {')) {
     throw new Error('模块源码开头不对');
 }
 if (!/,\n$/.test(moduleSource)) {
