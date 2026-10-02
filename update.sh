@@ -24,32 +24,35 @@ trap 'if [ "$WEBMAN_STOPPED" = 1 ] && [ "$WEBMAN_RESTARTED" = 0 ] && [ "$WEBMAN_
 # 「前置检查没过」和「部署做到一半失败」的处置完全不同，所以用 DEPLOY_MUTATED 分开：
 # 前者服务器上什么都没变，后者才是半成品。
 #
+# 「死在哪一步」**不用 $LINENO 报**：函数定义在被 source 的 deploy-common.sh 里时，
+# bash 报的是那个文件的行号（deploy-common.sh:121 = deploy_php 的函数体），于是
+# 任何 deploy_php xxx 失败都显示同一行 —— 有运维照着「第 121 行」去 update.sh 里找，
+# 找到的是完全无关的一句。实测确认（bash 5.2：函数在同文件时报调用点、跨文件时报
+# 定义点，不一致）。所以改成自己打点：每个步骤用 deploy_step 包一层，失败时报出
+# 步骤名，这个值由脚本自己维护，不依赖任何 bash 内部变量。
+#
+# 同理不报 FUNCNAME：ERR trap 里它只有处理函数自己，实测一台上是空的、另一台上
+# 给的是没有信息量的「main」。
+#
 # 处理函数只摘掉自己的 trap：万一输出过程中哪条命令也失败，直接让 shell 退出，
 # 不会递归刷屏。**刻意不写 `set +e`** —— trap 里的 set 是会留下来的，那会让
 # `set -e` 在后面全程失效：失败一次之后脚本继续往下跑，最后还以退出码 0 结束，
-# 比现在这种静默掐断更糟（这个坑是实测出来的，不是想出来的）。
-#
-# 也刻意不报「失败在哪个函数里」：ERR trap 触发时 FUNCNAME 里只有处理函数自己，
-# 在 bash 5.2 上是空的、在别的版本上会给出「main」这种没有信息量的名字 ——
-# 行号 + 失败的命令已经够定位，多那一句只会误导（这是实测出来的第二处）。
+# 比现在这种静默掐断更糟（这个坑也是实测出来的）。
 DEPLOY_MUTATED=0
+DEPLOY_CURRENT_STEP="（还没进入部署主体，在前置检查阶段）"
+# 包一层只为把步骤名记牢并打出来。参数原样透传，退出码原样返回。
+deploy_step() {
+    DEPLOY_CURRENT_STEP="$*"
+    echo "▶ ${DEPLOY_CURRENT_STEP}"
+    "$@"
+}
 deploy_report_failure() {
     trap - ERR
-    local line="$1" command="$2"
     {
         echo
         echo "=============================================================="
-        echo "部署失败：脚本在第 ${line} 行中断，后面的步骤都没有执行。"
-        case "$command" in
-            return\ *)
-                # 检查类函数失败时会走到这里，$BASH_COMMAND 只剩一句 "return 1"，
-                # 真正的原因在它自己刚打印的输出里。
-                echo "失败的命令：（这一步返回了失败，原因见它上面刚打印的内容）"
-                ;;
-            *)
-                echo "失败的命令：${command}"
-                ;;
-        esac
+        echo "部署失败：在「${DEPLOY_CURRENT_STEP}」这一步中断，后面的步骤都没有执行。"
+        echo "失败原因见上面该步骤自己的输出。"
         echo
         if [ "$DEPLOY_MUTATED" = 0 ]; then
             echo "前置检查未通过：脚本在动任何东西之前就退出了，"
@@ -69,7 +72,7 @@ deploy_report_failure() {
         echo "=============================================================="
     } >&2
 }
-trap 'deploy_report_failure "$LINENO" "$BASH_COMMAND"' ERR
+trap 'deploy_report_failure' ERR
 
 [ -d .git ] || {
     echo "ERROR: Please deploy using Git." >&2
@@ -84,9 +87,9 @@ command -v git >/dev/null 2>&1 || {
     exit 1
 }
 
-deploy_setup
-deploy_check_runtime
-deploy_check_webman_runtime
+deploy_step deploy_setup
+deploy_step deploy_check_runtime
+deploy_step deploy_check_webman_runtime
 
 if [ "${DEPLOY_CHECK_ONLY:-0}" = "1" ]; then
     echo "Deployment preflight passed. No files, database, services, or cron entries were changed."
@@ -103,7 +106,7 @@ echo "Deploying branch: $DEPLOY_BRANCH"
 # 从这里开始真的会改东西（停服务、reset --hard、装依赖、迁移……）。之前失败都是
 # 「什么都没动」，之后失败就是半成品 —— ERR trap 按这个标记分开措辞。
 DEPLOY_MUTATED=1
-deploy_stop_webman
+deploy_step deploy_stop_webman
 git config --global --add safe.directory "$ROOT_DIR"
 UPDATE_SCRIPT_BEFORE="$(git rev-parse --verify HEAD:update.sh 2>/dev/null || true)"
 git fetch origin "$DEPLOY_BRANCH"
@@ -155,38 +158,38 @@ if [ -d "$ROOT_DIR/public/reseller" ] && [ -z "$(find "$ROOT_DIR/public/reseller
     rmdir "$ROOT_DIR/public/reseller"
 fi
 
-deploy_setup
-deploy_check_runtime
-deploy_check_webman_runtime
-deploy_download_composer
-deploy_install_composer
-deploy_patch_adapterman
-deploy_php scripts/patch-admin-reward.php
-deploy_php scripts/patch-admin-clean-gateway.php
-deploy_check_mmdb
+deploy_step deploy_setup
+deploy_step deploy_check_runtime
+deploy_step deploy_check_webman_runtime
+deploy_step deploy_download_composer
+deploy_step deploy_install_composer
+deploy_step deploy_patch_adapterman
+deploy_step deploy_php scripts/patch-admin-reward.php
+deploy_step deploy_php scripts/patch-admin-clean-gateway.php
+deploy_step deploy_check_mmdb
 
 if [ "${LEGACY_DB_UPDATE:-0}" = "1" ]; then
-    deploy_php artisan v2board:update --legacy
+    deploy_step deploy_php artisan v2board:update --legacy
 fi
 # Always run the idempotent schema migrations. Legacy mode only prepares
 # historical installations; it does not include newer reward schema changes.
-deploy_php artisan v2board:update
-deploy_php artisan audit:backfill-summaries --chunk=1000
-deploy_php artisan optimize:clear
-deploy_php scripts/refresh-telegram-webhook.php
-deploy_php artisan ip:clear-location-cache
-deploy_php artisan ip:backfill-subscribe-locations --chunk=500
+deploy_step deploy_php artisan v2board:update
+deploy_step deploy_php artisan audit:backfill-summaries --chunk=1000
+deploy_step deploy_php artisan optimize:clear
+deploy_step deploy_php scripts/refresh-telegram-webhook.php
+deploy_step deploy_php artisan ip:clear-location-cache
+deploy_step deploy_php artisan ip:backfill-subscribe-locations --chunk=500
 # 上一条会清空 IP 归属缓存，也会把清洗网关那批冗余归属地一并重置；这里立刻补回来，
 # 否则升级后到下一次 access:locations 定时任务之间，列表按运营商/ASN 筛选会筛不出东西。
-deploy_php artisan access:locations --chunk=500
+deploy_step deploy_php artisan access:locations --chunk=500
 # 重算账号风险台账。加 --refresh-only 是为了不在部署时给管理员发提醒 ——
 # 真正的提醒交给每 15 分钟的调度，它本来就是「未处理就重复发」的。
-deploy_php artisan risk:notify --refresh-only
-deploy_php artisan horizon:terminate || true
-deploy_start_webman
+deploy_step deploy_php artisan risk:notify --refresh-only
+deploy_step deploy_php artisan horizon:terminate || true
+deploy_step deploy_start_webman
 # 升级也要跑：早于本次改动安装的站点从来没被写过这条 cron，而检查是幂等的 —— 运维手写的
 # 条目（或系统级 /etc/cron.d 条目）会被识别并原样保留，不会重复追加。
-deploy_install_cron
-deploy_chown
+deploy_step deploy_install_cron
+deploy_step deploy_chown
 
 echo "Upgrade completed."
