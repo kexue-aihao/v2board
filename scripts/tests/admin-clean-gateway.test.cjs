@@ -372,6 +372,77 @@ test('外层 Spin 容器必须显式关掉，否则整页发灰且点不动', ()
     assert.equal(bare.props.loading, false, '未安装分支同样不能转');
 });
 
+test('风险程度列：有值显示百分比，没算过显示「—」', () => {
+    const { Page } = harness(respondFor([]));
+    const page = new Page({});
+    page.setState({ riskThreshold: 60 });
+    const column = page.renderTable().props.columns.find(c => c.key === 'risk_percent');
+    assert.ok(column, '必须有一列风险程度');
+
+    const over = flatten(column.render(87.5, sampleRow({ risk_percent: 87.5, risk_blocked_count: 35, risk_total_count: 40 }))).join('|');
+    assert.ok(over.includes('87.5%'), '百分比要显示出来');
+    assert.ok(over.includes('35'), '要带阻断次数');
+    assert.ok(over.includes('40'), '要带总次数');
+
+    // 台账里没有这个账号 → null，不能当成 0%
+    const unknown = flatten(column.render(null, sampleRow({ risk_percent: null }))).join('|');
+    assert.equal(unknown.trim(), '—');
+
+    // 已处理的账号在列里标出来
+    const handled = flatten(column.render(70, sampleRow({ risk_percent: 70, risk_handled_at: 1 }))).join('|');
+    assert.ok(handled.includes('已处理'));
+});
+
+test('风险程度筛选按条件 + 数值回传', async () => {
+    const { Page, requests } = harness(respondFor([sampleRow()]));
+    const page = new Page({});
+    await page.componentDidMount();
+    page.setFilter('risk_condition', '>');
+    page.setFilter('risk_percent', '60');
+    requests.length = 0;
+    await page.fetch(1);
+    const call = requests.find(r => endpoint(r.url) === '/risk/gateway/fetch');
+    assert.ok(call, 'fetch must be called');
+    assert.equal(call.params.risk_condition, '>');
+    assert.equal(call.params.risk_percent, '60');
+});
+
+test('待处理风险账号区块：列出账号并带「标记已处理」', () => {
+    const pending = [{
+        user_id: 9, user_email: 'bad@example.com', risk_percent: 87.5,
+        blocked_count: 35, total_count: 40, last_seen_text: '2026-10-02 09:15:00',
+        notify_count: 3, notified_at_text: '2026-10-02 09:30:00',
+    }];
+    const { Page } = harness(respondFor([]));
+    const page = new Page({});
+    page.setState({ risk: pending, riskTotal: 1, riskLoading: false });
+    const table = page.renderRiskPending();
+    assert.equal(table.props.dataSource, pending);
+    const action = table.props.columns.find(c => c.key === 'action');
+    assert.equal(flatten(action.render(null, pending[0])).join(''), '标记已处理');
+    // 列的 render 不会被 flatten 走到（Table 的列是 props 不是 children），逐列渲染来断言
+    const percent = table.props.columns.find(c => c.key === 'risk_percent');
+    assert.ok(flatten(percent.render(pending[0].risk_percent, pending[0])).join('').includes('87.5%'), '风险程度要显示');
+    const ratio = table.props.columns.find(c => c.key === 'ratio');
+    assert.ok(flatten(ratio.render(null, pending[0])).join('').includes('35'), '要显示阻断次数');
+});
+
+test('标记已处理走 POST /risk/gateway/risk/handle', async () => {
+    const { Page, requests, notices } = harness(respondFor([]));
+    const page = new Page({});
+    await page.componentDidMount();
+    requests.length = 0;
+    page.handleRisk({ user_id: 9, user_email: 'bad@example.com' });
+    // confirm 是桩，取出它记下的 onOk 手动执行
+    const confirm = notices.find(([type]) => type === 'confirm');
+    assert.ok(confirm, '必须先弹确认');
+    await confirm[1].onOk();
+    const call = requests.find(r => endpoint(r.url) === '/risk/gateway/risk/handle');
+    assert.ok(call, 'handle must be called');
+    assert.equal(call.method, 'post');
+    assert.equal(call.params.user_id, 9);
+});
+
 test('留存设置保存到 /risk/gateway/config/save', async () => {
     const { Page, requests } = harness(respondFor([]));
     const page = new Page({});

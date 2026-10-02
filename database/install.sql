@@ -678,6 +678,7 @@ CREATE TABLE `v2_subscribe_access_summary` (
     `ua_hash` char(64) NOT NULL,
     `user_agent` varchar(1000) NOT NULL,
     `hit_count` bigint(20) NOT NULL DEFAULT '0',
+    `blocked_count` bigint(20) NOT NULL DEFAULT '0',
     `first_seen_at` bigint(20) NOT NULL,
     `last_seen_at` bigint(20) NOT NULL,
     `recent_audit_id` bigint(20) NOT NULL,
@@ -700,6 +701,27 @@ CREATE TABLE `v2_subscribe_access_summary` (
     KEY `request_ip` (`request_ip`),
     KEY `asn` (`asn`),
     KEY `location_resolved_at` (`location_resolved_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_subscribe_account_risk`;
+CREATE TABLE `v2_subscribe_account_risk` (
+    `user_id` int(11) NOT NULL,
+    `total_count` bigint(20) NOT NULL DEFAULT '0',
+    `blocked_count` bigint(20) NOT NULL DEFAULT '0',
+    `risk_percent` decimal(5,2) NOT NULL DEFAULT '0.00',
+    `first_seen_at` bigint(20) DEFAULT NULL,
+    `last_seen_at` bigint(20) DEFAULT NULL,
+    `computed_at` bigint(20) NOT NULL DEFAULT '0',
+    `notified_at` bigint(20) DEFAULT NULL,
+    `notify_count` int(11) NOT NULL DEFAULT '0',
+    `handled_at` bigint(20) DEFAULT NULL,
+    `handled_by` int(11) DEFAULT NULL,
+    `handled_note` varchar(255) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`user_id`),
+    KEY `risk_percent` (`risk_percent`),
+    KEY `pending` (`handled_at`,`risk_percent`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 DROP TABLE IF EXISTS `v2_subscribe_block_rule`;

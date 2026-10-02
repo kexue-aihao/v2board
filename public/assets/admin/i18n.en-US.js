@@ -4,6 +4,7 @@
 window.__v2AdminI18nApply && window.__v2AdminI18nApply({
     locale: "en-US",
     rules: {
+        "clean_times": "$1 times",
         "clean_retention_min": "Retention must be 0 (keep forever) or at least $1 days",
         "total_items": "Total $1 items",
         "per_page": "$1 / page",
@@ -26,6 +27,19 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "Ticket #$1 · User #$2",
     },
     dict: {
+        "风险程度": "Risk level",
+        "风险程度（%）": "Risk level (%)",
+        "待处理风险账号": "Accounts awaiting handling",
+        "确认标记": "Confirm",
+        "已标记": "Marked",
+        "已处理": "Handled",
+        "已提醒": "Notifications sent",
+        "尚未发送": "Not sent yet",
+        "阻断 / 总次数": "Blocked / total",
+        "如 60": "e.g. 60",
+        "读取待处理风险账号失败，请稍后重试": "Failed to load accounts awaiting handling, please try again later",
+        "标记后该账号不再出现在待处理列表，也不会再收到风险提醒。风险程度本身继续照常统计。": "After marking, this account leaves the pending list and no longer triggers risk notifications. Its risk level keeps being computed as usual.",
+        "未处理的会持续提醒管理员（每 15 分钟一次），直到在这里标记已处理": "Unhandled accounts keep notifying administrators every 15 minutes until marked as handled here",
         "国家/地区": "Country/region",
         "IP 记录": "IP records",
         "拉取记录": "Fetch records",

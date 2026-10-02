@@ -118,6 +118,9 @@ deploy_php artisan ip:backfill-subscribe-locations --chunk=500
 # 上一条会清空 IP 归属缓存，也会把清洗网关那批冗余归属地一并重置；这里立刻补回来，
 # 否则升级后到下一次 access:locations 定时任务之间，列表按运营商/ASN 筛选会筛不出东西。
 deploy_php artisan access:locations --chunk=500
+# 重算账号风险台账。加 --refresh-only 是为了不在部署时给管理员发提醒 ——
+# 真正的提醒交给每 15 分钟的调度，它本来就是「未处理就重复发」的。
+deploy_php artisan risk:notify --refresh-only
 deploy_php artisan horizon:terminate || true
 deploy_start_webman
 # 升级也要跑：早于本次改动安装的站点从来没被写过这条 cron，而检查是幂等的 —— 运维手写的

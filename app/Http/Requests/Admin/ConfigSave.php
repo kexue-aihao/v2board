@@ -147,6 +147,8 @@ class ConfigSave extends FormRequest
         'admin_2fa_force_enable' => 'in:0,1',
         // 声明成数组而不是字符串：rules() 里要往后追加闭包，对字符串做 $rules[$k][] 会 fatal。
         'subscribe_audit_retention_days' => ['nullable', 'integer'],
+        // 订阅清洗网关：账号风险程度达到该百分比就提醒管理员（未处理前每 15 分钟一次）
+        'subscribe_risk_notify_threshold' => ['nullable', 'integer', 'min:0', 'max:100'],
     ];
     /**
      * Get the validation rules that apply to the request.

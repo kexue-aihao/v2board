@@ -8,6 +8,7 @@ use App\Models\SubscribeAccessSummary;
 use App\Models\SubscribeBlockRule;
 use App\Models\SubscribeBlockRuleEvent;
 use App\Models\User;
+use App\Services\SubscribeAccountRiskService;
 use App\Services\SubscribeAuditRetentionService;
 use App\Services\SubscribeCleanGatewayService;
 use App\Utils\CacheKey;
@@ -102,8 +103,8 @@ class SubscribeCleanGatewayController extends Controller
         }
 
         $columns = [
-            __('账号'), __('账号ID'), __('订阅ID'), __('订阅'), __('IP 地址'), __('运营商'),
-            __('ASN'), __('归属机构'), __('国家/地区'), __('User-Agent'), __('拉取次数'),
+            __('账号'), __('账号ID'), __('风险程度（%）'), __('订阅ID'), __('订阅'), __('IP 地址'), __('运营商'),
+            __('ASN'), __('归属机构'), __('国家/地区'), __('User-Agent'), __('拉取次数'), __('阻断次数'),
             __('首次拉取（UTC+8）'), __('最近拉取（UTC+8）'), __('阻断状态'), __('阻断原因')
         ];
 
@@ -118,6 +119,7 @@ class SubscribeCleanGatewayController extends Controller
                 $fields = [
                     $row['user_email'],
                     $row['user_id'],
+                    $row['risk_percent'] === null ? '' : (string)$row['risk_percent'],
                     $row['subscription_id'],
                     $service->subscriptionsText($row['subscriptions']),
                     $row['request_ip'],
@@ -131,6 +133,7 @@ class SubscribeCleanGatewayController extends Controller
                     })))),
                     $row['user_agent'],
                     $row['hit_count'],
+                    $row['risk_blocked_count'],
                     $row['first_seen_text'],
                     $row['last_seen_text'],
                     $block ? __('已阻断') : __('未阻断'),
@@ -375,6 +378,90 @@ class SubscribeCleanGatewayController extends Controller
         return response(['data' => $data, 'total' => $total, 'available' => true]);
     }
 
+    // ------------------------------------------------------------ 风险程度
+
+    /**
+     * 未处理且风险达到阈值的账号，按风险程度倒序。
+     *
+     * 与列表页那列同源（v2_subscribe_account_risk），但这里是「待办」视角：只要没被
+     * 标记已处理就一直列在这里，也正是每 15 分钟那次提醒发送的对象。
+     */
+    public function riskPending(Request $request)
+    {
+        $risk = new SubscribeAccountRiskService();
+        if (!$risk->available()) {
+            return response(['data' => [], 'total' => 0, 'available' => false]);
+        }
+
+        $format = new SubscribeCleanGatewayService();
+        [$page, $pageSize] = $this->pagination($request);
+        $threshold = $risk->threshold();
+
+        try {
+            $query = DB::table(SubscribeAccountRiskService::TABLE)
+                ->whereNull('handled_at')
+                ->where('risk_percent', '>=', $threshold);
+            $total = (int)(clone $query)->count();
+            $rows = $query->orderByDesc('risk_percent')
+                ->orderBy('user_id')
+                ->forPage($page, $pageSize)
+                ->get();
+        } catch (\Throwable $e) {
+            report($e);
+            return response(['data' => [], 'total' => 0, 'available' => false]);
+        }
+
+        $emails = User::whereIn('id', $rows->pluck('user_id')->all())->pluck('email', 'id');
+
+        $data = [];
+        foreach ($rows as $row) {
+            $userId = (int)$row->user_id;
+            $data[] = [
+                'user_id' => $userId,
+                'user_email' => (string)($emails[$userId] ?? ''),
+                'risk_percent' => (float)$row->risk_percent,
+                'blocked_count' => (int)$row->blocked_count,
+                'total_count' => (int)$row->total_count,
+                'last_seen_text' => $format->beijingText($row->last_seen_at),
+                'notify_count' => (int)$row->notify_count,
+                'notified_at_text' => $format->beijingText($row->notified_at)
+            ];
+        }
+
+        return response([
+            'data' => $data,
+            'total' => $total,
+            'available' => true,
+            'threshold' => $threshold
+        ]);
+    }
+
+    /**
+     * 标记已处理。这是「未处理就一直提醒」唯一的终止动作，所以它必须是个显式按钮，
+     * 而不是靠风险自己降下去。
+     */
+    public function handleRisk(Request $request)
+    {
+        $request->validate([
+            'user_id' => 'required|integer|min:1',
+            'note' => 'nullable|string|max:255'
+        ]);
+
+        $risk = new SubscribeAccountRiskService();
+        if (!$risk->available()) {
+            abort(500, __('风险台账尚未安装，请先执行 php artisan v2board:update'));
+        }
+
+        $userId = (int)$request->input('user_id');
+        if (!$risk->handle($userId, $this->actorId($request), (string)$request->input('note'))) {
+            abort(404, __('该账号没有风险记录'));
+        }
+
+        $this->audit($request, 'CLEAN GATEWAY RISK HANDLED user_id=' . $userId);
+
+        return response(['data' => true, 'available' => true]);
+    }
+
     // ------------------------------------------------------------ 留存设置
 
     public function config()
@@ -391,6 +478,9 @@ class SubscribeCleanGatewayController extends Controller
                 'retention_days' => $retention->retentionDays(),
                 'retention_default' => SubscribeAuditRetentionService::DEFAULT_RETENTION_DAYS,
                 'retention_min' => SubscribeAuditRetentionService::MIN_RETENTION_DAYS,
+                // 风险程度阈值：达到它就会每 15 分钟提醒一次管理员，直到被标记已处理。
+                // 页面用它给超过阈值的百分比上红色。
+                'risk_threshold' => (new SubscribeAccountRiskService())->threshold(),
                 'records' => $records,
                 'raw_logs' => $rawLogs,
                 // 触顶时前端在数字后面补一个「+」。触顶说明表已经很大，这时候

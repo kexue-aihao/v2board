@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\ConfigSave;
 use App\Jobs\SendEmailJob;
 use App\Models\User;
 use App\Models\UserTwoFactor;
+use App\Services\SubscribeAccountRiskService;
 use App\Services\SubscribeAuditRetentionService;
 use App\Services\TelegramBindingService;
 use App\Services\TelegramService;
@@ -230,6 +231,10 @@ class ConfigController extends Controller
                 'subscribe_audit_retention_days' => (int)config(
                     'v2board.subscribe_audit_retention_days',
                     SubscribeAuditRetentionService::DEFAULT_RETENTION_DAYS
+                ),
+                'subscribe_risk_notify_threshold' => (int)config(
+                    'v2board.subscribe_risk_notify_threshold',
+                    SubscribeAccountRiskService::DEFAULT_THRESHOLD
                 )
             ]
         ];

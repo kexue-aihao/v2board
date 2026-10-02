@@ -212,6 +212,9 @@ class SubscribeAuditService
         $requestedAt = (int) $audit->getRawOriginal('requested_at');
         $auditId = (int) $audit->id;
         $decision = $this->auditDecision($audit);
+        // 这一笔是不是被阻断的。风险程度 = blocked_count / hit_count，所以每一次拉取都要
+        // 在同一个 UPSERT 里把两边的账同时记上 —— 分两次写会在并发下对不齐。
+        $blocked = $decision === 'blocked' ? 1 : 0;
         // 「最近一次」的判定条件：时间更新的赢；同一秒内（bigint 秒级精度下很常见）
         // 审计 ID 更大的赢。少了后半句，同一秒内的并发拉取会让最近值随机漂移。
         $isNewer = 'VALUES(`last_seen_at`) > `last_seen_at` OR '
@@ -219,17 +222,20 @@ class SubscribeAuditService
 
         DB::statement(
             'INSERT INTO `v2_subscribe_access_summary` '
-            . '(`user_id`,`subscription_id`,`request_ip`,`ua_hash`,`user_agent`,`hit_count`,'
+            . '(`user_id`,`subscription_id`,`request_ip`,`ua_hash`,`user_agent`,`hit_count`,`blocked_count`,'
             . '`first_seen_at`,`last_seen_at`,`recent_audit_id`,`recent_decision`,`created_at`,`updated_at`) '
-            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE '
+            . 'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE '
             . '`hit_count` = `hit_count` + 1,'
+            // VALUES(recent_decision) 就是这一笔的判定，所以「本笔是否被阻断」直接从它读，
+            // 不用多传一个绑定参数。
+            . '`blocked_count` = `blocked_count` + IF(VALUES(`recent_decision`) = \'blocked\', 1, 0),'
             . '`user_agent` = IF(' . $isNewer . ', VALUES(`user_agent`), `user_agent`),'
             . '`recent_decision` = IF(' . $isNewer . ', VALUES(`recent_decision`), `recent_decision`),'
             . '`recent_audit_id` = IF(' . $isNewer . ', VALUES(`recent_audit_id`), `recent_audit_id`),'
             . '`first_seen_at` = LEAST(`first_seen_at`, VALUES(`first_seen_at`)),'
             . '`last_seen_at` = GREATEST(`last_seen_at`, VALUES(`last_seen_at`)),'
             . '`updated_at` = VALUES(`updated_at`)',
-            [$userId, $subscriptionId, $requestIp, $uaHash, $userAgent, 1,
+            [$userId, $subscriptionId, $requestIp, $uaHash, $userAgent, 1, $blocked,
                 $requestedAt, $requestedAt, $auditId, $decision, $now, $now]
         );
     }

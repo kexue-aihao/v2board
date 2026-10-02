@@ -4,6 +4,7 @@
 window.__v2AdminI18nApply && window.__v2AdminI18nApply({
     locale: "vi-VN",
     rules: {
+        "clean_times": "$1 lần",
         "clean_retention_min": "Số ngày lưu phải là 0 (vĩnh viễn) hoặc tối thiểu $1 ngày",
         "total_items": "Tổng cộng $1 mục",
         "per_page": "$1 / trang",
@@ -26,6 +27,19 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "Phiếu hỗ trợ #$1 · Người dùng #$2",
     },
     dict: {
+        "风险程度": "Mức rủi ro",
+        "风险程度（%）": "Mức rủi ro (%)",
+        "待处理风险账号": "Tài khoản rủi ro chờ xử lý",
+        "确认标记": "Xác nhận",
+        "已标记": "Đã đánh dấu",
+        "已处理": "Đã xử lý",
+        "已提醒": "Đã thông báo",
+        "尚未发送": "Chưa gửi",
+        "阻断 / 总次数": "Chặn / Tổng",
+        "如 60": "ví dụ 60",
+        "读取待处理风险账号失败，请稍后重试": "Không đọc được tài khoản chờ xử lý, vui lòng thử lại sau",
+        "标记后该账号不再出现在待处理列表，也不会再收到风险提醒。风险程度本身继续照常统计。": "Sau khi đánh dấu, tài khoản này rời danh sách chờ và không còn nhận thông báo rủi ro. Mức rủi ro vẫn được tính như thường.",
+        "未处理的会持续提醒管理员（每 15 分钟一次），直到在这里标记已处理": "Tài khoản chưa xử lý sẽ nhắc quản trị viên mỗi 15 phút cho đến khi được đánh dấu tại đây",
         "国家/地区": "Quốc gia/Khu vực",
         "IP 记录": "Bản ghi IP",
         "拉取记录": "Bản ghi tải",

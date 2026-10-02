@@ -160,6 +160,9 @@ class AdminRoute
             $router->post('/risk/gateway/config/save', 'V1\\Admin\\SubscribeCleanGatewayController@saveConfig');
             $router->get ('/risk/gateway/rules', 'V1\\Admin\\SubscribeCleanGatewayController@rules');
             $router->get ('/risk/gateway/history', 'V1\\Admin\\SubscribeCleanGatewayController@history');
+            // 账号风险程度（阻断次数 ÷ 拉取总次数）的待办与处理
+            $router->get ('/risk/gateway/risk', 'V1\\Admin\\SubscribeCleanGatewayController@riskPending');
+            $router->post('/risk/gateway/risk/handle', 'V1\\Admin\\SubscribeCleanGatewayController@handleRisk');
             $router->post('/risk/gateway/block', 'V1\\Admin\\SubscribeCleanGatewayController@block');
             $router->post('/risk/gateway/release', 'V1\\Admin\\SubscribeCleanGatewayController@release');
             // Stat

@@ -13,6 +13,7 @@ class SchemaUpgradeService
         'risk_audit_schema' => 'risk_audit_schema_v1',
         'subscribe_gateway_schema' => 'subscribe_gateway_schema_v1',
         'subscribe_access_summary_schema' => 'subscribe_access_summary_schema_v1',
+        'subscribe_account_risk_schema' => 'subscribe_account_risk_schema_v1',
         'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
         'ip_location_enrichment_schema' => 'ip_location_enrichment_schema_v1',
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
@@ -85,6 +86,9 @@ class SchemaUpgradeService
                 return;
             case 'subscribe_access_summary_schema':
                 $this->applySubscribeAccessSummarySchema();
+                return;
+            case 'subscribe_account_risk_schema':
+                $this->applySubscribeAccountRiskSchema();
                 return;
             case 'ip_location_cache_schema':
                 $this->applyIpLocationCacheSchema();
@@ -455,6 +459,7 @@ class SchemaUpgradeService
             `ua_hash` char(64) NOT NULL,
             `user_agent` varchar(1000) NOT NULL,
             `hit_count` bigint(20) NOT NULL DEFAULT '0',
+            `blocked_count` bigint(20) NOT NULL DEFAULT '0',
             `first_seen_at` bigint(20) NOT NULL,
             `last_seen_at` bigint(20) NOT NULL,
             `recent_audit_id` bigint(20) NOT NULL,
@@ -479,6 +484,7 @@ class SchemaUpgradeService
             'ua_hash' => 'char(64) NOT NULL',
             'user_agent' => 'varchar(1000) NOT NULL',
             'hit_count' => "bigint(20) NOT NULL DEFAULT '0'",
+            'blocked_count' => "bigint(20) NOT NULL DEFAULT '0'",
             'first_seen_at' => 'bigint(20) NOT NULL',
             'last_seen_at' => 'bigint(20) NOT NULL',
             'recent_audit_id' => 'bigint(20) NOT NULL',
@@ -514,6 +520,64 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_subscribe_access_summary', 'asn', ['asn']);
         // 归属地回填命令的取数顺序：WHERE location_resolved_at IS NULL ORDER BY id。
         $this->ensureIndex('v2_subscribe_access_summary', 'location_resolved_at', ['location_resolved_at']);
+    }
+
+    /**
+     * 账号级风险台账：一行 = 一个账号。
+     *
+     * 风险程度 = 该账号的阻断次数 ÷ 该账号的订阅拉取总次数，来源是 access_summary 的
+     * SUM(blocked_count) / SUM(hit_count)。
+     *
+     * 为什么单独落一张表，而不是每次查询现算：
+     *   1. 列表要按风险程度排序、按数值筛选。现算就得在 ORDER BY / WHERE 里塞一个
+     *      GROUP BY 的子查询，那是全表聚合，翻页一次算一次；
+     *   2. 定时的「超阈值提醒」本来就要扫全站账号一遍，结果顺手落库，页面直接读；
+     *   3. 「已处理」状态得有地方存 —— 提醒要持续发到有人处理为止，这就需要一行
+     *      按账号去重的台账。
+     *
+     * 刷新由 risk:notify 命令完成（每 15 分钟），它与 access_summary 之间允许最多
+     * 一个周期的延迟：风险程度是 180 天窗口上的比值，15 分钟的滞后没有意义。
+     */
+    private function applySubscribeAccountRiskSchema(): void
+    {
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscribe_account_risk` (
+            `user_id` int(11) NOT NULL,
+            `total_count` bigint(20) NOT NULL DEFAULT '0',
+            `blocked_count` bigint(20) NOT NULL DEFAULT '0',
+            `risk_percent` decimal(5,2) NOT NULL DEFAULT '0.00',
+            `first_seen_at` bigint(20) DEFAULT NULL,
+            `last_seen_at` bigint(20) DEFAULT NULL,
+            `computed_at` bigint(20) NOT NULL DEFAULT '0',
+            `notified_at` bigint(20) DEFAULT NULL,
+            `notify_count` int(11) NOT NULL DEFAULT '0',
+            `handled_at` bigint(20) DEFAULT NULL,
+            `handled_by` int(11) DEFAULT NULL,
+            `handled_note` varchar(255) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`user_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'total_count' => "bigint(20) NOT NULL DEFAULT '0'",
+            'blocked_count' => "bigint(20) NOT NULL DEFAULT '0'",
+            'risk_percent' => "decimal(5,2) NOT NULL DEFAULT '0.00'",
+            'first_seen_at' => 'bigint(20) DEFAULT NULL',
+            'last_seen_at' => 'bigint(20) DEFAULT NULL',
+            'computed_at' => "bigint(20) NOT NULL DEFAULT '0'",
+            'notified_at' => 'bigint(20) DEFAULT NULL',
+            'notify_count' => "int(11) NOT NULL DEFAULT '0'",
+            'handled_at' => 'bigint(20) DEFAULT NULL',
+            'handled_by' => 'int(11) DEFAULT NULL',
+            'handled_note' => 'varchar(255) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_subscribe_account_risk', $column, $definition);
+        }
+        // 列表按风险程度排序 / 按数值筛选走它。
+        $this->ensureIndex('v2_subscribe_account_risk', 'risk_percent', ['risk_percent']);
+        // 提醒命令的取数顺序：WHERE handled_at IS NULL AND risk_percent >= ? ORDER BY risk_percent DESC。
+        $this->ensureIndex('v2_subscribe_account_risk', 'pending', ['handled_at', 'risk_percent']);
     }
 
     /**

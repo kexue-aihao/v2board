@@ -356,6 +356,7 @@ period 支持值：
 | oauth_register_only | 0/1 | 0 | 仅允许第三方 OAuth 注册，关闭邮箱注册入口 |
 | admin_2fa_force_enable | 0/1 | 0 | 强制管理员/员工绑定二步验证；开启前若仍有管理员或员工未绑定，保存返回 422 |
 | subscribe_audit_retention_days | integer | 180 | 订阅审计保留天数，0=不清理，否则须在 1-3650 之间。同时决定「订阅清洗网关」列表能看到多久的记录 |
+| subscribe_risk_notify_threshold | integer | 60 | 账号风险程度（阻断次数 ÷ 拉取总次数）达到该百分比就提醒管理员，0-100 |
 | deposit_bounus | array | [] | 充值赠送阶梯，每项格式「充值金额:奖励金额」 |
 | reseller_enable | 0/1 | 0 | 启用分销/倒卖商模块 |
 | reseller_allowed_payment_drivers | array | [] | 倒卖商可用支付驱动白名单 |
@@ -452,7 +453,7 @@ IP 归属字段：
 | 知识库 | /knowledge/fetch、getCategory、save、show、drop、sort |
 | 系统 | /system/getSystemStatus、getQueueStats、getQueueWorkload、getQueueMasters、getSystemLog |
 | 主题 | /theme/getThemes、saveThemeConfig、getThemeConfig |
-| 订阅清洗网关 | /risk/gateway/fetch、options、export、config、config/save、rules、history、block、release |
+| 订阅清洗网关 | /risk/gateway/fetch、options、export、config、config/save、rules、history、risk、risk/handle、block、release |
 | 订阅溯源 | /risk/trace/fetch、history、token/lookup、token/reveal |
 | 多账号同 IP | /risk/shared-ip/fetch、detail |
 | 倒卖商审批 | /reseller/summary、accounts、stores、review-logs、accounts/review、stores/review、accounts/reset-password |
@@ -627,9 +628,28 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 
 页面右上「导出 CSV」按**当前筛选条件**导出，与用户列表的导出同一条链路（响应不是 JSON，前端收 ArrayBuffer 后生成 Blob 下载）。格式：UTF-8 带 BOM（Excel 直接打开不乱码）、CRLF 行尾、字段按 RFC 4180 转义。单次上限 200000 行，触顶时最后一行写明被截断。
 
-导出的列：账号、账号ID、订阅ID、订阅、IP 地址、运营商、ASN、归属机构、国家/地区、User-Agent、拉取次数、首次拉取（UTC+8）、最近拉取（UTC+8）、阻断状态、阻断原因。
+导出的列：账号、账号ID、风险程度（%）、订阅ID、订阅、IP 地址、运营商、ASN、归属机构、国家/地区、User-Agent、拉取次数、阻断次数、首次拉取（UTC+8）、最近拉取（UTC+8）、阻断状态、阻断原因。
 
 列表页那一格是「运营商优先、地理兜底」的单行显示，CSV 里则拆成各自独立的列（运营商、ASN、归属机构、国家/地区）—— 屏幕上一格能省则省，导出是为了能拿去筛，两种取舍不同。
+
+### 10.7 风险程度与超阈值提醒
+
+**口径**：账号的**阻断次数 ÷ 订阅拉取总次数 × 100%**，范围是留存期内的全部记录 —— 页面上能看到多久，就算多久。
+
+- 分子分母都来自 `v2_subscribe_access_summary`：每次拉取在**同一个 UPSERT** 里给 `hit_count` 加一、被阻断时再给 `blocked_count` 加一。分两次写会在并发下对不齐。
+- 落到按账号去重的台账表 `v2_subscribe_account_risk`，由 `risk:notify` 每条 15 分钟重算一次。页面上的百分比因此最多滞后一个周期 —— 它是 180 天窗口上的比值，这点滞后没有意义。
+- 为什么单独落表：列表要按它排序 / 按数值筛选，现算就得在 `ORDER BY` / `WHERE` 里塞 `GROUP BY` 子查询；而定时提醒本来就要扫一遍全站账号。
+
+**提醒**：风险程度 ≥ `subscribe_risk_notify_threshold`（默认 60）**且未被标记已处理**的账号，每 15 分钟通过 `TelegramService::sendMessageWithAdmin()` 私聊提醒**所有绑定了 Telegram 的管理员**（`is_admin = 1`）。节奏是需求定的：**未处理就一直发**，唯一的终止动作是管理员在页面的「待处理风险账号」区块点「标记已处理」。
+
+- 发不出去时（`telegram_bot_enable` 关闭、或没有任何管理员绑定 Telegram）**不写提醒记录**，下一轮照常算数 —— 否则修好配置后就再也不会提醒了。
+- 台账里的 `notified_at` / `notify_count` 只用于展示与排查，**不参与「发不发」的判断**，判断只看 `handled_at` 是否为空。
+- 摘要里最多列 20 个账号（`SubscribeAccountRiskService::NOTIFY_DETAIL_LIMIT`），超出只报数量。
+- 注意副作用：一个账号长期超标且没人处理，就是 **96 条/天 × 管理员数**。「标记已处理」不是可选项，是这套节奏的刹车。
+
+**接口**：`GET /risk/gateway/risk`（未处理且达阈值的账号，按风险程度倒序）、`POST /risk/gateway/risk/handle`（`user_id`、可选 `note`）。
+
+**排障**：`php artisan risk:notify --dry-run` 只重算并打印待发内容；`--refresh-only` 只重算台账不发消息（`update.sh` 用的是这个，避免部署时给管理员发提醒）。
 
 ## 十一、运维命令
 
@@ -641,6 +661,7 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 | php artisan ip:clear-location-cache | 清理 IP 归属缓存 |
 | php artisan ip:backfill-subscribe-locations | 回填历史 IP 归属 |
 | php artisan access:locations | 补齐清洗网关拉取记录的运营商 / 归属机构 / ASN（选项 --chunk/--limit/--refresh/--dry-run），每 10 分钟由调度兜底 |
+| php artisan risk:notify | 重算账号风险程度并提醒未处理的超阈值账号（选项 --dry-run/--refresh-only/--limit），每 15 分钟由调度执行 |
 | php artisan reward:prune-rooms | 关闭超时的 Telegram 娱乐房间 |
 | php artisan audit:ip-link | 手动聚合「IP + 账号 + UA」累积记录（选项 --full/--force/--prune-days/--dry-run） |
 | php artisan audit:clean | 手动按保留期清理订阅审计日志与清洗网关聚合（选项 --days/--dry-run） |
@@ -678,7 +699,7 @@ AcePanel 使用对应的 `/opt/ace` 路径：
     PHP_INI=/opt/ace/server/php/81/etc/php.ini \
     DEPLOY_BRANCH=debug bash update.sh
 
-update.sh 会执行 Git 拉取、Composer 安装、数据库升级、缓存清理、IP 缓存清理与清洗网关归属地回填，然后重启 Webman；不会每次自动执行历史 IP 回填。
+update.sh 会执行 Git 拉取、Composer 安装、数据库升级、缓存清理、IP 缓存清理、清洗网关归属地回填与风险台账重算，然后重启 Webman；不会每次自动执行历史 IP 回填。
 
 PHP 配置只使用面板管理的同一套，不再存在项目内 php.ini：
 
@@ -765,6 +786,7 @@ init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），�
 | traffic:update | 每分钟 | 节点上报的流量不入账，用户用量与统计长期为 0 |
 | v2board:statistics | 0:10 | 每日统计（收入、流量排行、节点统计）停更 |
 | access:locations | 每 10 分钟 | 清洗网关列表的运营商 / ASN 停在「解析中」，按这两项筛选筛不出新记录（打开列表页仍会补当前页） |
+| risk:notify | 每 15 分钟 | 风险台账不刷新（页面「风险程度」停在上次的值），超阈值账号也不再收到提醒 |
 | check:order | 每分钟 | 订单不结算，用户付款后套餐不开通 |
 | check:commission | 每 15 分钟 | 佣金不确认，推广结算停摆 |
 | check:ticket | 每分钟 | 工单提醒不发送 |
@@ -920,7 +942,7 @@ Cloudflare Turnstile 本身可免费使用，但**不能**直接填入本项目�
 | 倒卖商与店铺中间件 | app/Http/Middleware/Reseller.php、Storefront.php |
 | 多订阅服务 | app/Services/SubscriptionService.php |
 | IP 归属服务 | app/Services/IpLocationService.php |
-| 订阅清洗网关 | app/Services/SubscribeCleanGatewayService.php、app/Http/Controllers/V1/Admin/SubscribeCleanGatewayController.php |
+| 订阅清洗网关 | app/Services/SubscribeCleanGatewayService.php、app/Services/SubscribeAccountRiskService.php、app/Http/Controllers/V1/Admin/SubscribeCleanGatewayController.php |
 | 订单与退款服务 | app/Services/OrderService.php |
 | 支付驱动与回调 | app/Services/PaymentService.php |
 | 余额原语与资金流水 | app/Services/UserService.php、app/Models/BalanceLog.php |

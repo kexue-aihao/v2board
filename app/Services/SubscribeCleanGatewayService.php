@@ -217,6 +217,7 @@ class SubscribeCleanGatewayService
         $this->applyHitCountFilter($query, $request);
         $this->applyTimeFilter($query, $request);
         $this->applyBlockedFilter($query, $request);
+        $this->applyRiskFilter($query, $request);
 
         return $query;
     }
@@ -271,6 +272,35 @@ class SubscribeCleanGatewayService
                 })
                 ->whereRaw($this->blockMatchExpression());
         });
+    }
+
+    /**
+     * 「风险程度」筛选：账号的阻断次数 ÷ 拉取总次数。
+     *
+     * 风险是**账号级**的，所以命中的是该账号的全部拉取记录 —— 这与列表里那一列的口径
+     * 一致：同一个账号的每一行显示的都是同一个百分比，筛出来的是同样的整组行。
+     *
+     * 走的是一张按账号去重的台账（v2_subscribe_account_risk），先取 user_id 再
+     * whereIn 收口，不在列表查询里现算聚合。
+     */
+    private function applyRiskFilter($query, Request $request): void
+    {
+        $raw = $this->text($request, 'risk_percent');
+        if ($raw === '' || !is_numeric($raw)) {
+            return;
+        }
+
+        $condition = $this->text($request, 'risk_condition');
+        $sub = (new SubscribeAccountRiskService())->userIdsMatchingRisk(
+            in_array($condition, ['=', '>', '>=', '<', '<='], true) ? $condition : '>=',
+            $raw
+        );
+        if ($sub === null) {
+            // 台账表还没建（未升级的库）：忽略这条筛选，而不是让整个列表 500。
+            return;
+        }
+
+        $query->whereIn('user_id', $sub);
     }
 
     /**
@@ -384,6 +414,8 @@ class SubscribeCleanGatewayService
 
         $locations = $this->resolveLocations($rows, $ips);
         $blocks = $this->blocksByTarget($rows);
+        // 账号级风险台账，一条 whereIn 取回本页所有账号，逐行查会是一屏 100 次。
+        $risksByUser = (new SubscribeAccountRiskService())->summaryForUsers($userIds);
 
         $data = [];
         foreach ($rows as $row) {
@@ -391,6 +423,7 @@ class SubscribeCleanGatewayService
             $subscriptionId = (int)$row->subscription_id;
             $ip = (string)$row->request_ip;
             $location = $locations[$ip] ?? null;
+            $risk = $risksByUser[$userId] ?? null;
 
             $data[] = [
                 'id' => (int)$row->id,
@@ -413,6 +446,17 @@ class SubscribeCleanGatewayService
                 'first_seen_text' => $this->beijingText($row->first_seen_at),
                 'last_seen_at' => $this->stamp($row->last_seen_at),
                 'last_seen_text' => $this->beijingText($row->last_seen_at),
+                // 账号级风险程度：阻断次数 ÷ 拉取总次数。同一个账号的每一行都是同一个值
+                // （需求就是按账号算的）。台账里没有这个账号时为 null —— 界面上「—」与
+                // 「0%」是两件事：没算过 vs 算过且一次没被阻断。
+                'risk_percent' => $risk === null ? null : (float)$risk->risk_percent,
+                'risk_blocked_count' => $risk === null ? 0 : (int)$risk->blocked_count,
+                'risk_total_count' => $risk === null ? 0 : (int)$risk->total_count,
+                'risk_computed_text' => $risk === null ? '' : $this->beijingText($risk->computed_at),
+                'risk_handled_at' => $risk === null || $risk->handled_at === null
+                    ? null : (int)$risk->handled_at,
+                'risk_handled_text' => $risk === null || $risk->handled_at === null
+                    ? '' : $this->beijingText($risk->handled_at),
                 'block' => $this->matchBlock($blocks, $userId, $subscriptionId, $ip, (string)$row->ua_hash)
             ];
         }

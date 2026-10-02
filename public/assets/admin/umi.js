@@ -118956,6 +118956,16 @@
         function gatewayTimeText(value) {
             return value ? String(value) : "-"
         }
+        // 百分比去掉无意义的尾零：87.50% 读起来像精确值，87.5% 才是人写的。
+        // 后端给的是 decimal(5,2)，JSON 里就是 87.5 / 100 这样的数。
+        function gatewayPercentText(value) {
+            if (null === value || void 0 === value || "" === value)
+                return "";
+            var number = Number(value);
+            if (isNaN(number))
+                return String(value);
+            return String(Math.round(number * 100) / 100)
+        }
         // g["a"]（产物里的 v32e）**不是 Card**，而是一个把 antd Spin 包了一层的容器：
         //     spinning: this.props.loading
         // 而 antd 的 Spin 在 `spinning` 为 undefined 时是**默认转圈**的。所以这个容器
@@ -118966,7 +118976,7 @@
         var SPIN_OFF = {
             loading: !1
         };
-        var CLEAN_FILTER_KEYS = ["email", "user_id", "plan_id", "subscription_id", "ip", "carrier", "asn", "user_agent", "hit_condition", "hit_count", "blocked", "start_time", "end_time"];
+        var CLEAN_FILTER_KEYS = ["email", "user_id", "plan_id", "subscription_id", "ip", "carrier", "asn", "user_agent", "hit_condition", "hit_count", "risk_condition", "risk_percent", "blocked", "start_time", "end_time"];
         var CLEAN_EMPTY_FILTERS = {
             email: "",
             user_id: "",
@@ -118978,6 +118988,8 @@
             user_agent: "",
             hit_condition: ">=",
             hit_count: "",
+            risk_condition: ">=",
+            risk_percent: "",
             blocked: void 0,
             start_time: "",
             end_time: ""
@@ -119046,6 +119058,17 @@
                         current: 1,
                         pageSize: 10,
                         total: 0
+                    },
+                    // 待处理风险账号：未处理且风险达到阈值的账号。与列表的「风险程度」
+                    // 同源，但这里是待办视角，也是每 15 分钟那封提醒的收件名单。
+                    risk: [],
+                    riskTotal: 0,
+                    riskLoading: !0,
+                    riskThreshold: 60,
+                    riskPagination: {
+                        current: 1,
+                        pageSize: 10,
+                        total: 0
                     }
                 }
             }
@@ -119054,7 +119077,8 @@
                 this.fetchConfig(),
                 this.fetch(),
                 this.fetchRules(),
-                this.fetchHistory()
+                this.fetchHistory(),
+                this.fetchRisk()
             }
             setFilter(key, value) {
                 var patch = {};
@@ -119100,6 +119124,8 @@
                     user_agent: params.user_agent,
                     hit_condition: params.hit_condition,
                     hit_count: params.hit_count,
+                    risk_condition: params.risk_condition,
+                    risk_percent: params.risk_percent,
                     blocked: params.blocked,
                     start_time: params.start_time,
                     end_time: params.end_time
@@ -119117,9 +119143,11 @@
                             scopes: data.scopes || [],
                             retention_days: Number(data.retention_days || 0),
                             retention_min: Number(data.retention_min || 1),
-                            retention_default: Number(data.retention_default || 180)
+                            retention_default: Number(data.retention_default || 180),
+                            risk_threshold: Number(null === data.risk_threshold || void 0 === data.risk_threshold ? 60 : data.risk_threshold)
                         },
-                        retentionInput: String(Number(data.retention_days || 0))
+                        retentionInput: String(Number(data.retention_days || 0)),
+                        riskThreshold: Number(null === data.risk_threshold || void 0 === data.risk_threshold ? 60 : data.risk_threshold)
                     })
                 }).catch(function() {
                     // 没有 loading 要清，但也不能让 rejection 悬着：控制台会多一条
@@ -119459,6 +119487,69 @@
                     })
                 })
             }
+            fetchRisk(page) {
+                var self = this
+                  , pagination = gatewayPage(this.state.riskPagination)
+                  , target = page || pagination.current;
+                this.setState({
+                    riskLoading: !0
+                });
+                gatewayGet("/risk/gateway/risk", {
+                    current: target,
+                    pageSize: pagination.pageSize
+                }).then(function(res) {
+                    if (200 !== res.code) {
+                        self.setState({
+                            riskLoading: !1
+                        });
+                        return
+                    }
+                    var threshold = Number(null === res.threshold || void 0 === res.threshold ? self.state.riskThreshold : res.threshold);
+                    self.setState({
+                        risk: res.data || [],
+                        riskTotal: Number(res.total || 0),
+                        riskThreshold: threshold,
+                        riskLoading: !1,
+                        riskPagination: i()({}, self.state.riskPagination, {
+                            current: target,
+                            total: Number(res.total || 0)
+                        })
+                    })
+                }).catch(function() {
+                    self.setState({
+                        riskLoading: !1
+                    }),
+                    c["a"].error({
+                        title: "请求失败",
+                        content: "读取待处理风险账号失败，请稍后重试"
+                    })
+                })
+            }
+            // 「未处理就一直提醒」的终止动作。标记之后这个账号不再出现在待办里，
+            // 也不再产生提醒 —— 所以确认文案要把这件事说清楚。
+            handleRisk(row) {
+                var self = this;
+                c["a"].confirm({
+                    title: "标记已处理",
+                    content: "标记后该账号不再出现在待处理列表，也不会再收到风险提醒。风险程度本身继续照常统计。",
+                    okText: "确认标记",
+                    cancelText: "取消",
+                    onOk() {
+                        return gatewayPost("/risk/gateway/risk/handle", {
+                            user_id: row.user_id
+                        }).then(function(res) {
+                            if (200 !== res.code)
+                                return;
+                            c["a"].success({
+                                title: "已标记",
+                                content: row.user_email || ("#" + row.user_id)
+                            }),
+                            self.fetchRisk(),
+                            self.fetch()
+                        })
+                    }
+                })
+            }
             renderFilterBar() {
                 var self = this
                   , filters = this.state.filters
@@ -119563,6 +119654,32 @@
                         onChange: e=>this.setFilter("hit_count", e.target.value),
                         onPressEnter: ()=>this.fetch(1)
                     }))),
+                    field("风险程度（%）", p.a.createElement(s["a"].Group, {
+                        compact: !0,
+                        style: {
+                            width: "100%"
+                        }
+                    }, p.a.createElement(u["a"], {
+                        style: {
+                            width: "30%"
+                        },
+                        value: filters.risk_condition,
+                        onChange: e=>this.setFilter("risk_condition", e)
+                    }, CLEAN_HIT_CONDITIONS.map(function(condition) {
+                        return p.a.createElement(u["a"].Option, {
+                            key: condition,
+                            value: condition
+                        }, condition)
+                    })), p.a.createElement(s["a"], {
+                        style: {
+                            width: "70%"
+                        },
+                        allowClear: !0,
+                        placeholder: "如 60",
+                        value: filters.risk_percent,
+                        onChange: e=>this.setFilter("risk_percent", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    }))),
                     field("阻断状态", p.a.createElement(u["a"], {
                         allowClear: !0,
                         placeholder: "全部",
@@ -119661,6 +119778,31 @@
                     }, value || "-"), p.a.createElement("div", {
                         className: "text-muted small"
                     }, "#" + record.user_id))
+                }, {
+                    // 账号级指标：阻断次数 ÷ 拉取总次数。同一个账号的每一行都是同一个值
+                    // （需求就是按账号算的）。超过阈值标红，与待处理区块同一个判据。
+                    title: "风险程度",
+                    dataIndex: "risk_percent",
+                    key: "risk_percent",
+                    width: 150,
+                    render: (value, record)=>{
+                        if (null === value || void 0 === value)
+                            return p.a.createElement("span", {
+                                className: "text-muted"
+                            }, "—");
+                        var percent = Number(value);
+                        var over = !isNaN(percent) && percent >= Number(self.state.riskThreshold);
+                        return p.a.createElement("div", null, p.a.createElement("div", {
+                            className: "font-w600",
+                            style: over ? {
+                                color: "#f86c6b"
+                            } : null
+                        }, gatewayPercentText(value) + "%"), p.a.createElement("div", {
+                            className: "text-muted small"
+                        }, Number(record.risk_blocked_count || 0), " / ", Number(record.risk_total_count || 0)), record.risk_handled_at ? p.a.createElement("div", {
+                            className: "text-muted small"
+                        }, "已处理") : null)
+                    }
                 }, {
                     title: "订阅",
                     dataIndex: "subscriptions",
@@ -119779,6 +119921,73 @@
                     scroll: {
                         x: 1500
                     }
+                })
+            }
+            // 待处理风险账号。列的就是每 15 分钟那封提醒的收件名单 —— 处理完（点右边
+            // 的按钮）才会从这张表里消失，这是「未处理就一直提醒」唯一的终止动作。
+            renderRiskPending() {
+                var self = this
+                  , columns = [{
+                    title: "账号",
+                    dataIndex: "user_email",
+                    key: "user_email",
+                    width: 240,
+                    render: (value, record)=>p.a.createElement("div", null, p.a.createElement("div", {
+                        className: "font-w600"
+                    }, value || "-"), p.a.createElement("div", {
+                        className: "text-muted small"
+                    }, "#" + record.user_id))
+                }, {
+                    title: "风险程度",
+                    dataIndex: "risk_percent",
+                    key: "risk_percent",
+                    width: 130,
+                    render: value=>p.a.createElement("span", {
+                        className: "font-w600",
+                        style: {
+                            color: "#f86c6b"
+                        }
+                    }, gatewayPercentText(value) + "%")
+                }, {
+                    title: "阻断 / 总次数",
+                    key: "ratio",
+                    width: 140,
+                    render: (value, record)=>p.a.createElement("span", null, Number(record.blocked_count || 0), " / ", Number(record.total_count || 0))
+                }, {
+                    title: "最近拉取（UTC+8）",
+                    dataIndex: "last_seen_text",
+                    key: "last_seen_text",
+                    width: 180,
+                    render: value=>gatewayTimeText(value)
+                }, {
+                    title: "已提醒",
+                    key: "notify",
+                    width: 200,
+                    render: (value, record)=>p.a.createElement("div", null, p.a.createElement("div", null, Number(record.notify_count || 0) + " 次"), p.a.createElement("div", {
+                        className: "text-muted small"
+                    }, record.notified_at_text ? ["最近 ", record.notified_at_text] : "尚未发送"))
+                }, {
+                    title: "操作",
+                    key: "action",
+                    width: 130,
+                    render: (value, record)=>p.a.createElement(a["a"], {
+                        size: "small",
+                        type: "primary",
+                        onClick: ()=>this.handleRisk(record)
+                    }, "标记已处理")
+                }];
+                return p.a.createElement(o["a"], {
+                    rowKey: row=>"risk-" + String(row.user_id),
+                    size: "small",
+                    loading: this.state.riskLoading,
+                    columns: columns,
+                    dataSource: this.state.risk,
+                    pagination: {
+                        current: this.state.riskPagination.current,
+                        pageSize: this.state.riskPagination.pageSize,
+                        total: this.state.riskTotal
+                    },
+                    onChange: pagination=>this.fetchRisk(pagination.current)
                 })
             }
             renderRules() {
@@ -119982,7 +120191,9 @@
                     type: "reload"
                 }), " 刷新"), this.renderRetention()), this.section("筛选", null, this.renderFilterBar()), this.section("拉取记录", p.a.createElement("span", {
                     className: "text-muted small"
-                }, "共 " + Number(this.state.total || 0) + " 条"), this.renderTable()), this.section("生效中的阻断名单", null, this.renderRules()), this.section("阻断操作留痕", null, this.renderHistory()), this.renderBlockModal()))
+                }, "共 " + Number(this.state.total || 0) + " 条"), this.renderTable()), this.section("待处理风险账号", p.a.createElement("span", {
+                    className: "text-muted small"
+                }, "未处理的会持续提醒管理员（每 15 分钟一次），直到在这里标记已处理"), this.renderRiskPending()), this.section("生效中的阻断名单", null, this.renderRules()), this.section("阻断操作留痕", null, this.renderHistory()), this.renderBlockModal()))
             }
         }
         t["default"] = SubscribeCleanGatewayPage

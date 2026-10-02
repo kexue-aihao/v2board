@@ -31,6 +31,10 @@ class Kernel extends ConsoleKernel
         $schedule->command('traffic:update')->everyMinute()->withoutOverlapping();
         // v2board
         $schedule->command('v2board:statistics')->dailyAt('0:10');
+        // 账号风险台账 + 超阈值提醒。节奏是需求定的：风险未处理就每 15 分钟重复一次，
+        // 唯一的终止动作是管理员在页面上点「标记已处理」。这个命令同时负责刷新台账，
+        // 所以页面上的「风险程度」最多滞后一个周期。
+        $schedule->command('risk:notify')->everyFifteenMinutes()->withoutOverlapping();
         // check
         $schedule->command('check:order')->everyMinute()->withoutOverlapping();
         $schedule->command('check:commission')->everyFifteenMinutes();

@@ -24,12 +24,26 @@ const ROOT = path.join(__dirname, '..');
 const BASE_COMMIT = '84082850';
 const BS = String.fromCharCode(92);
 
-const php = fs.readFileSync(path.join(ROOT, 'scripts/patch-admin-clean-gateway.php'), 'utf8');
-const moduleSource = fs.readFileSync(path.join(ROOT, 'scripts/admin-clean-gateway-module.js'), 'utf8');
-
-if (moduleSource.includes('\r\n')) {
-    throw new Error('模块源码是 CRLF；先归一化成 LF（补丁脚本会拒绝混排行尾）');
+let php = fs.readFileSync(path.join(ROOT, 'scripts/patch-admin-clean-gateway.php'), 'utf8');
+// 补丁脚本里的锚点是 PHP 单引号串里**真实的换行**：文件本身变成 CRLF，锚点也跟着变，
+// 于是每一处都匹配不到。同样就地归一化（仓库里存的就是 LF）。
+if (php.includes('\r\n')) {
+    php = php.split('\r\n').join('\n');
+    fs.writeFileSync(path.join(ROOT, 'scripts/patch-admin-clean-gateway.php'), php);
+    console.log('补丁脚本原本是 CRLF，已就地归一化成 LF');
 }
+const modulePath = path.join(ROOT, 'scripts/admin-clean-gateway-module.js');
+let moduleSource = fs.readFileSync(modulePath, 'utf8');
+
+// core.autocrlf=true 的 Windows 工作副本会被检出成 CRLF，而产物是 LF。这里直接就地
+// 归一化而不是报错：本工具存在的意义就是「改完模块源码重新生成产物」，在这台机器上
+// 拒绝运行等于每次都得多跑一条 sed。补丁脚本那边仍然保留硬拒绝（它跑在服务器上）。
+if (moduleSource.includes('\r\n')) {
+    moduleSource = moduleSource.split('\r\n').join('\n');
+    fs.writeFileSync(modulePath, moduleSource);
+    console.log('模块源码原本是 CRLF，已就地归一化成 LF');
+}
+
 if (!/^    riskgatewaypage: function\(e, t, n\) \{/.test(moduleSource)) {
     throw new Error('模块源码开头不对');
 }
