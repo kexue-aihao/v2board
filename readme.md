@@ -749,7 +749,27 @@ Webman 由 supervisor 托管时，update.sh 会自动识别并改用 supervisorc
 
 另需注意 supervisor 配置里的 `command=` 应使用 Webman 包装脚本，并通过 `environment=` 传入 PHP 路径。例如 aaPanel 使用 `command=/bin/bash /www/wwwroot/v2board/scripts/webman.sh start` 与 `environment=PHP_BIN=/www/server/php/81/bin/php,PHP_INI=/www/server/php/81/etc/php.ini`；AcePanel 将两处路径替换为 `/opt/ace/server/php/81/...`。不要把 `PHP_BIN=...` 直接写在 `command=` 前面，也不要写裸 `php`、`-n` 或项目 ini。包装脚本固定读取同版本面板 `etc/php.ini`，仅为 Webman 注入 AdapterMan 所需覆盖。
 
-### 11.1 计划任务（部署必需）
+### 11.1 部署失败与验收
+
+**update.sh 任何一步失败都会中断，且不会自动回滚。** 失败时 ERR trap 会打印失败的行号、命令，以及「本次部署是半成品」的说明和恢复步骤 —— 因为 拉代码 / 装依赖 / 数据库迁移 / 缓存清理 / 计划任务 / 文件属主 里至少有一项没做。
+
+**前置检查失败（PHP 版本、扩展、面板 vhost、Supervisor 配置、禁用函数）时脚本在动任何东西之前就退出**，不留下半成品，按报错改环境即可。
+
+**验收动作**：部署完再跑一次 `v2board:update`，看它说什么。它是幂等的，跑多少遍都安全：
+
+    cd /站点目录 && /opt/ace/server/php/81/bin/php -c /opt/ace/server/php/81/etc/php.ini artisan v2board:update
+
+- 输出全是 `already applied` → 代码与库同步，这次部署完整；
+- **只要出现一个 `applied` → 上一次部署没跑到底**，代码已经比库新了。
+
+这一步能防住一类很难查的故障：代码更新了、迁移没跑，站点表面正常，直到某条查询撞上不存在的表或列。典型是登录 —— `AuthController::performLogin()` → `TwoFactorService` 每次登录都要读 `v2_user_two_factor`，表不存在就是 1146，`APP_DEBUG=false` 时前端只有一句裸 500。**真有站点因此在自检处中断了几个月：代码靠手工 `git checkout` 更新、数据库从未迁移过**，直到某次切分支后登录全线 500 才暴露。
+
+**裸 500 要看两个地方** —— 异常不一定落进 Laravel 日志，被 Webman 的 stderr 接走很常见：
+
+    tail -50 /站点目录/storage/logs/laravel-$(date +%F).log
+    tail -50 /var/log/supervisor/webman.log
+
+### 11.2 计划任务（部署必需）
 
 计划任务没有常驻载体：`config/` 下没有 process.php，webman.php 里也没有 Timer，`app/Console/Kernel.php` 里的全部定时任务都依赖系统 cron 每分钟调用一次 `artisan schedule:run`。**缺这条 cron 时站点表面完全正常**，前台能开、能下单、能订阅，但下面那张表里的任务一个都不会跑。
 
@@ -843,7 +863,7 @@ init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），�
 
 最直接的信号是管理员接口 `GET /api/v1/{secure_path}/system/getSystemStatus`（`secure_path` 读取 `config('v2board.secure_path')`，全部管理员路由都挂在这个前缀下，写成 `/api/v1/admin/...` 会 404）：`Kernel::schedule()` 每次被调用都会写入缓存里的「计划任务最后检查时间」，所以返回里 `schedule` 为 true、`schedule_last_runtime` 是 120 秒内的时间戳，就说明 cron 确实每分钟在调用 schedule:run；后台「系统状态」面板读的就是这个接口。刚配好 cron 后请等满一分钟再看。
 
-### 11.2 全新安装后的必做手工步骤
+### 11.3 全新安装后的必做手工步骤
 
 init.sh 负责的是「代码依赖 + 数据库 + 管理员 + 计划任务」，它刻意不启动任何常驻进程：全新安装时进程托管方式还没定，若脚本先 `webman.php start -d` 起一个裸守护进程，运维随后配好 supervisor 再 start 就会撞上 `Address already in use`，并留下一套 supervisord 不认、属主也不对的实例。脚本结束时会把下面这几步原样打印出来。
 
@@ -852,7 +872,7 @@ init.sh 负责的是「代码依赖 + 数据库 + 管理员 + 计划任务」，
 | Web 服务器 | 站点根目录指向 `public/`，保留上游 PHP-FPM/Webman 伪静态规则；Webman 监听 `127.0.0.1:6600`（端口取自 webman.php） |
 | 启动 Webman | supervisor 托管（推荐）或 `PHP_BIN=/www/server/php/81/bin/php /bin/bash /www/wwwroot/v2board/scripts/webman.sh start -d`；AcePanel 将 PHP 路径替换为 `/opt/ace/server/php/81/bin/php`；supervisor 的 `command=` 也必须调用该包装脚本 |
 | 启动队列 | `PHP_BIN -c PHP_INI artisan horizon`，同样建议交给 supervisor。缺它则邮件、支付回调等队列任务堆积不消费 |
-| 计划任务 | init.sh 已写入，按 11.1 验证一遍 |
+| 计划任务 | init.sh 已写入，按 11.2 验证一遍 |
 | Redis | `.env.example` 里 CACHE_DRIVER、QUEUE_CONNECTION、SESSION_DRIVER 全是 redis，且安装器不会询问 Redis 参数。Redis 未装或不在 127.0.0.1:6379 时，装完就是 500 —— 需手工改 .env 的 REDIS_* 后 `artisan config:clear` |
 
 init.sh 生成的 `.env` 来自 `.env.example`，只会写入 APP_KEY 与 DB_HOST/DB_DATABASE/DB_USERNAME/DB_PASSWORD 四项；DB_PORT、Redis、邮件、APP_URL 都保持模板默认值，需要按站点情况自行修改。`public/theme/` 下 default、ez、signature 三套主题产物随仓库发布，无需构建；`config/theme/*.php` 由前台或后台首次访问主题时自动生成（仓库里只有一个 .gitignore），因此该目录必须对运行用户可写。

@@ -13,6 +13,47 @@ WEBMAN_RESTARTED=0
 WEBMAN_START_ATTEMPTED=0
 trap 'if [ "$WEBMAN_STOPPED" = 1 ] && [ "$WEBMAN_RESTARTED" = 0 ] && [ "$WEBMAN_START_ATTEMPTED" = 0 ]; then deploy_start_webman || true; fi' EXIT
 
+# 失败时要讲清楚三件事：死在哪一步、留下了什么半成品状态、怎么恢复。
+#
+# 没有 ERR trap 的话，set -e 只是静默掐断脚本 —— 运维要么自己往上翻几十行找报错，
+# 要么（更糟）以为部署成功了。有站点真实发生过：update.sh 在自检处中断了几个月，
+# 代码靠手工 git checkout 更新、数据库从来没迁移过，直到登录路径读 v2_user_two_factor
+# 报 1146 才暴露（AuthController → TwoFactorService 每次登录都查这张表，
+# APP_DEBUG=false 时前端只有一句裸 500，日志里也未必有）。
+#
+# 处理函数只摘掉自己的 trap：万一输出过程中哪条命令也失败，直接让 shell 退出，
+# 不会递归刷屏。**刻意不写 `set +e`** —— trap 里的 set 是会留下来的，那会让
+# `set -e` 在后面全程失效：失败一次之后脚本继续往下跑，最后还以退出码 0 结束，
+# 比现在这种静默掐断更糟（这个坑是实测出来的，不是想出来的）。
+deploy_report_failure() {
+    trap - ERR
+    local line="$1" command="$2"
+    {
+        echo
+        echo "=============================================================="
+        echo "部署失败：脚本在第 ${line} 行中断，后面的步骤都没有执行。"
+        if [ -n "${FUNCNAME[1]:-}" ]; then
+            echo "失败位置：update.sh:${line}（${FUNCNAME[1]}() 内）"
+            echo "失败的命令：${command}"
+        else
+            echo "失败的命令：${command}"
+        fi
+        echo
+        echo "本次部署是半成品 —— 拉代码 / 装依赖 / 数据库迁移 / 缓存清理 /"
+        echo "计划任务 / 文件属主 里至少有一项没做。"
+        echo
+        echo "恢复步骤："
+        echo "  1. 先读上面那条命令自己的报错。自检类错误在动任何东西之前就退出了，"
+        echo "     没有留下半成品，按它说的改环境即可。"
+        echo "  2. 确认代码与数据库是否同步（幂等，可反复跑）："
+        echo "       ${PHP_CMD[*]:-php} artisan v2board:update"
+        echo "     全部 already applied 才算同步；出现 applied 就是没跑完。"
+        echo "  3. 修掉根因后重跑：bash ./update.sh"
+        echo "=============================================================="
+    } >&2
+}
+trap 'deploy_report_failure "$LINENO" "$BASH_COMMAND"' ERR
+
 [ -d .git ] || {
     echo "ERROR: Please deploy using Git." >&2
     exit 1
