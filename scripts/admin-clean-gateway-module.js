@@ -280,6 +280,9 @@
                         },
                         retentionInput: String(Number(data.retention_days || 0))
                     })
+                }).catch(function() {
+                    // 没有 loading 要清，但也不能让 rejection 悬着：控制台会多一条
+                    // unhandled rejection，排查真问题时是噪声。下拉空了不影响主流程。
                 })
             }
             fetchConfig() {
@@ -291,22 +294,28 @@
                         stats: res.data,
                         retentionInput: String(Number(res.data.retention_days || 0))
                     })
+                }).catch(function() {
+                    // 同上：留存统计读不到就显示默认值，不弹错、不阻塞。
                 })
             }
             fetch(page) {
                 var self = this
                   , pagination = gatewayPage(this.state.pagination)
                   , target = page || pagination.current;
+                // 参数先拼好，再置 loading。反过来的话，requestParams() 一旦抛异常
+                // （状态被外部改坏、字典表缺失等），loading 会永远停在 true，
+                // 表格就一直盖着那层吞点击的 ant-spin-blur。
+                var params = i()({}, this.requestParams(), {
+                    current: target,
+                    pageSize: pagination.pageSize
+                });
                 this.setState({
                     loading: !0,
                     pagination: i()({}, this.state.pagination, {
                         current: target
                     })
                 });
-                gatewayGet("/risk/gateway/fetch", i()({}, this.requestParams(), {
-                    current: target,
-                    pageSize: pagination.pageSize
-                })).then(function(res) {
+                gatewayGet("/risk/gateway/fetch", params).then(function(res) {
                     if (200 !== res.code) {
                         self.setState({
                             loading: !1
@@ -558,6 +567,18 @@
                             total: Number(res.total || 0)
                         })
                     })
+                }).catch(function() {
+                    // 必须清 loading：antd 的 Table 在 loading 时会给自己那层容器加
+                    // ant-spin-blur，那是 opacity: 0.5 + pointer-events: none —— 表还在
+                    // 屏幕上，但整块点不动、也输入不了。请求被拒（网络抖动、网关掐连接、
+                    // 响应不是合法 JSON）时若不清，这张表就永远卡在「转圈且不可操作」。
+                    self.setState({
+                        rulesLoading: !1
+                    }),
+                    c["a"].error({
+                        title: "请求失败",
+                        content: "读取阻断名单失败，请稍后重试"
+                    })
                 })
             }
             fetchHistory(page) {
@@ -585,6 +606,15 @@
                             current: target,
                             total: Number(res.total || 0)
                         })
+                    })
+                }).catch(function() {
+                    // 同 fetchRules：不清 loading 的话这张表会一直覆盖着不可点的模糊层。
+                    self.setState({
+                        historyLoading: !1
+                    }),
+                    c["a"].error({
+                        title: "请求失败",
+                        content: "读取阻断操作留痕失败，请稍后重试"
                     })
                 })
             }

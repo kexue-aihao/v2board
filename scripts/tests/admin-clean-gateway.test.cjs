@@ -331,6 +331,22 @@ test('行数触顶时补「+」，没触顶就显示精确值', () => {
     assert.ok(text.includes('20000+'), 'capped counts must carry a + suffix');
 });
 
+test('请求被拒时表格的 loading 必须清掉，否则整块会盖上不可点的模糊层', async () => {
+    // antd 的 Table 在 loading 时会给容器加 ant-spin-blur（opacity .5 + pointer-events:none），
+    // 请求被拒却不清 loading 的话，那张表就永远「看得见、点不动」。
+    const boom = () => { throw new Error('network down'); };
+    const { Page } = harness(boom);
+    const page = new Page({});
+    assert.equal(page.state.loading, true, 'starts spinning');
+    assert.equal(page.state.rulesLoading, true, 'starts spinning');
+    assert.equal(page.state.historyLoading, true, 'starts spinning');
+    page.componentDidMount();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(page.state.loading, false, 'main table must stop spinning');
+    assert.equal(page.state.rulesLoading, false, 'rules table must stop spinning');
+    assert.equal(page.state.historyLoading, false, 'history table must stop spinning');
+});
+
 test('留存设置保存到 /risk/gateway/config/save', async () => {
     const { Page, requests } = harness(respondFor([]));
     const page = new Page({});
