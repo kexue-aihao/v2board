@@ -6913,7 +6913,9 @@
                     className: ""
                 }, f.a.createElement(m, {
                     title: "\u673a\u5668\u4ebaToken",
-                    description: "\u8bf7\u8f93\u5165\u7531Botfather\u63d0\u4f9b\u7684token\u3002"
+                    description: y.telegram_bot_token_preview
+                        ? "已配置：" + y.telegram_bot_token_preview + "（掩码）。留空保存不会清除已配置的 token；要更换就直接填入新的。"
+                        : "请输入由Botfather提供的token。留空保存不会清除已配置的 token。"
                 }, f.a.createElement("input", {
                     type: "text",
                     className: "form-control",
