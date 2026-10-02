@@ -38,7 +38,12 @@ class Start extends Telegram
         if ((new TelegramRegistrationService())->enabled()) {
             $lines[] = "注册新账号：发送 /regedit";
         }
-        $lines[] = "已有账号登录：发送 /login";
+        // 已有账号必须走 /bind：/login 只给「已经绑定过」的人发免密登录链接，它第一件事
+        // 就是拿 chat_id 查绑定，查不到就回「请先绑定可用的网站账号」。原来这里只写了
+        // /regedit 与 /login，未绑定的老用户于是卡在「用 /login → 请先绑定 → 用 /login」
+        // 的死循环里 —— 唯一出路 /bind 从来没被告诉过他们。
+        $lines[] = "已有账号绑定：发送 /bind 你的订阅地址（在网站「订阅」页复制完整链接）";
+        $lines[] = "/login 只对已绑定的账号有效；还没绑定请先用上面的 /bind。";
         $lines[] = "绑定后可用 /get_traffic 查流量、/get_subscription 购买套餐、/resetpassword 找回密码。";
         $this->telegramService->sendMessage($chatId, implode("\n", $lines));
         return true;
