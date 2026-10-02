@@ -306,10 +306,31 @@ class ExternalSubscriptionService
                 if ($rawUri === '') {
                     continue;
                 }
-                $rows[] = [
+
+                $protocol = (string) $node->protocol;
+                $cipher = (string) ($payload['cipher'] ?? '');
+                $sni = (string) ($payload['sni'] ?? '');
+                $hostHeader = (string) ($payload['host_header'] ?? '');
+                $extra = is_array($payload['extra'] ?? null) ? $payload['extra'] : [];
+
+                // Clash 系 / sing-box 的 builder 从节点行上读这些字段，缺一个就可能渲染出
+                // 一个「看着正常、连不上」的节点，所以按它们的实际读取点逐个补齐
+                // （清单来自 ClashMeta.php 与 Singbox.php 里的 $server[...] 读取处）。
+                $networkSettings = [];
+                if ((string) ($payload['path'] ?? '') !== '') {
+                    $networkSettings['path'] = (string) $payload['path'];
+                }
+                if ((string) ($payload['service_name'] ?? '') !== '') {
+                    $networkSettings['serviceName'] = (string) $payload['service_name'];
+                }
+                if ($hostHeader !== '') {
+                    $networkSettings['headers'] = ['Host' => $hostHeader];
+                }
+
+                $row = [
                     'id' => -1 * (int) $node->id,
                     'type' => self::EXTERNAL_TYPE,
-                    'protocol' => (string) $node->protocol,
+                    'protocol' => $protocol,
                     'name' => self::NAME_PREFIX . (string) $node->name,
                     'host' => (string) $node->host,
                     'port' => (int) $node->port,
@@ -325,8 +346,43 @@ class ExternalSubscriptionService
                     'source_id' => (int) $source->id,
                     'source_name' => (string) $source->name,
                     // Helper::buildUri() 见到它就原样返回，不再走「按协议拼 URI」那条路
-                    '_external_uri' => $rawUri
+                    '_external_uri' => $rawUri,
+
+                    // ↓ 以下都是渲染器会读的节点行字段
+                    'tls' => (int) ($payload['tls'] ?? 0),
+                    'server_name' => $sni,
+                    'tls_settings' => $sni !== '' ? ['server_name' => $sni] : [],
+                    'network' => (string) ($payload['network'] ?? 'tcp'),
+                    'network_settings' => $networkSettings,
+                    // vmess 那条分支读的是驼峰列名
+                    'networkSettings' => $networkSettings,
+                    'cipher' => $cipher,
+                    'encryption' => (string) ($extra['encryption'] ?? ''),
+                    'encryption_settings' => [],
+                    'flow' => (string) ($extra['flow'] ?? ''),
+                    'obfs' => (string) ($extra['obfs'] ?? ''),
+                    'obfs_password' => (string) ($extra['obfs-password'] ?? ($extra['obfs_password'] ?? '')),
+                    'congestion_control' => (string) ($extra['congestion_control'] ?? ''),
+                    'udp_relay_mode' => (string) ($extra['udp_relay_mode'] ?? ''),
+                    'disable_sni' => (int) ($extra['disable_sni'] ?? 0) === 1 ? 1 : 0,
+                    'zero_rtt_handshake' => (int) ($extra['zero_rtt_handshake'] ?? 0) === 1 ? 1 : 0,
+                    'up_mbps' => (int) ($extra['up_mbps'] ?? 0),
+                    'down_mbps' => (int) ($extra['down_mbps'] ?? 0),
+                    'version' => $protocol === 'hysteria2' ? 2 : 1,
+                    'created_at' => (int) $node->fetched_at
                 ];
+
+                // ss 的 2022 系列密码是「服务端密钥:用户密钥」，而 builder 会用 created_at 现算
+                // 用户密钥 —— 外部节点没有那套上下文，拼出来必然是错的。这类节点只走原始 URI，
+                // 不给凭据，于是 Clash 系会照旧跳过它，而不是渲染出一个连不上的节点。
+                if ($protocol !== 'shadowsocks' || stripos($cipher, '2022-') !== 0) {
+                    $row['_external_creds'] = [
+                        'uuid' => (string) ($payload['uuid'] ?? ''),
+                        'password' => (string) ($payload['password'] ?? '')
+                    ];
+                }
+
+                $rows[] = $row;
             }
         }
 

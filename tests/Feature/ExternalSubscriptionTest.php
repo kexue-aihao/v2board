@@ -231,9 +231,41 @@ class ExternalSubscriptionTest extends TestCase
         // getAvailableServers() 之后要靠这两个字段算 is_online 与 cache_key
         $this->assertArrayHasKey('last_check_at', $row);
         $this->assertArrayHasKey('updated_at', $row);
+        // 凭据交给渲染器：Clash 系与 sing-box 靠它用对方机场的 uuid/密码渲染
+        $this->assertSame('p', $row['_external_creds']['password']);
+        // 字段映射：builder 会读的这些键要在
+        $this->assertArrayHasKey('tls', $row);
+        $this->assertArrayHasKey('tls_settings', $row);
+        $this->assertArrayHasKey('network', $row);
+        $this->assertArrayHasKey('networkSettings', $row);
+        $this->assertArrayHasKey('server_name', $row);
 
         $this->assertSame([], $service->serverRowsForGroups([]));
         $this->assertSame([], $service->serverRowsForGroups([999]));
+    }
+
+    public function testShadowsocks2022NodesAreNotHandedToTheClashFamily(): void
+    {
+        $service = new ExternalSubscriptionService();
+        $id = $service->saveSource(['name' => 'ss', 'url' => 'https://sub.example/s', 'group_id' => 1]);
+        $body = base64_encode(
+            "ss://" . base64_encode('2022-blake3-aes-128-gcm:pw') . "@a.example:8388#legacy-2022\n"
+            . "ss://" . base64_encode('aes-256-gcm:pw2') . "@b.example:8388#plain-ss"
+        );
+        $this->service($body)->refresh($id);
+
+        $rows = $service->serverRowsForGroups([1]);
+        $byName = [];
+        foreach ($rows as $row) {
+            $byName[$row['name']] = $row;
+        }
+
+        // 2022 系列的密码是「服务端密钥:用户密钥」，builder 会拿 created_at 现算用户密钥 ——
+        // 外部节点没有那套上下文，交出去只会渲染出一个连不上的节点，所以不给凭据。
+        $this->assertArrayNotHasKey('_external_creds', $byName['【过渡】legacy-2022']);
+        $this->assertArrayHasKey('_external_creds', $byName['【过渡】plain-ss']);
+        // 两者都仍然带原始 URI：v2ray 系客户端照常能看到它们
+        $this->assertStringStartsWith('ss://', $byName['【过渡】legacy-2022']['_external_uri']);
     }
 
     public function testDeletingASourceRemovesItsNodes(): void
