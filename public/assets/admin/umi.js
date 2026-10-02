@@ -71842,6 +71842,46 @@
                     cancelText: "\u53d6\u6d88"
                 })
             }
+            // 解绑 Telegram：只清用户身上的绑定，不动订阅链接、不动密码、也不动售后群里的成员身份。
+            // 解绑会立刻生效（免密登录、机器人通知都随之失效），所以照旧走 confirm 二次确认。
+            unbindTelegram(user) {
+                if (!user) return;
+                var t = this;
+                p["a"].confirm({
+                    title: "解绑 Telegram",
+                    width: 520,
+                    content: g.a.createElement("div", null,
+                        g.a.createElement("p", {className: "mb-2"}, "将解除 " + (user.email || ("#" + user.id)) + " 与当前 Telegram 账号的绑定。"),
+                        g.a.createElement("p", {className: "mb-0"}, "解绑后该账号不能再通过 Telegram 免密登录、也收不到机器人通知；用户可自行在 Telegram 里重新绑定。订阅链接、密码与售后群成员身份都不受影响。")),
+                    okText: "解绑",
+                    okType: "danger",
+                    cancelText: "取消",
+                    onOk() {
+                        // 返回 Promise，让确定按钮保持 loading 直到请求结束。
+                        return Object(n("t3Un")["b"])("/" + window.settings.secure_path + "/user/telegramUnbind", {
+                            id: user.id,
+                            confirm: 1
+                        }).then(function(res) {
+                            if (200 !== res.code) return;
+                            p["a"].success({
+                                title: "已解绑",
+                                content: "该用户的 Telegram 绑定已解除。"
+                            });
+                            // 弹窗里当场改状态，省得管理员再点一次「重新查询」
+                            if (t.telegramInfoModal) {
+                                t.telegramInfoModal.update({
+                                    content: t.renderTelegramInfo(user, {bound: !1, telegram_id: null, message: "该用户尚未绑定 Telegram 账号"}, null)
+                                });
+                            }
+                        }).catch(function() {
+                            p["a"].error({
+                                title: "请求失败",
+                                content: "解绑失败，请稍后重试"
+                            });
+                        })
+                    }
+                })
+            }
             renderTelegramInfo(user, data, error) {
                 var el = g.a.createElement;
                 var copyValue = (label, value)=>el("p", null, el("strong", null, label + "："),
@@ -71857,7 +71897,9 @@
                             : el("p", null, "Telegram 用户名：" + (data.username_status === "not_set" ? "未设置用户名" : "暂时无法获取"))),
                         data.message && el("p", {role: "status"}, data.message)
                     ) : el("p", {role: "status"}, "正在查询 Telegram 绑定信息…"),
-                    (data || error) && el(s["a"], {size: "small", onClick: ()=>this.showTelegramInfo(user)}, "重新查询")
+                    (data || error) && el(s["a"], {size: "small", onClick: ()=>this.showTelegramInfo(user)}, "重新查询"),
+                    // 只有确实绑定时才给解绑入口：未绑定的用户点了只会拿到一句「尚未绑定」
+                    data && data.bound && el(s["a"], {size: "small", type: "danger", style: {marginLeft: 8}, onClick: ()=>this.unbindTelegram(user)}, "解绑")
                 );
             }
             async showTelegramInfo(user) {

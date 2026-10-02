@@ -63,6 +63,39 @@ class UserController extends Controller
      * 意味着任何一次「重置UUID及订阅URL」都会让用户无法登录，直到管理员想起来通知他。
      * 明文不进日志、不发邮件，只在这一个响应里出现一次。
      */
+    /**
+     * 解绑用户的 Telegram 账号。
+     *
+     * 「绑定」在这套系统里就是 v2_user.telegram_id 一个字段（绑定关系存在用户表上），
+     * 所以解绑只清它：订阅链接、密码、售后群成员身份都不动。解绑后 Telegram 免密登录与
+     * 机器人通知立即失效，用户可以自行重新绑定，因此要求 confirm 二次确认。
+     */
+    public function telegramUnbind(Request $request)
+    {
+        $params = $request->validate([
+            'id' => 'required|integer|min:1',
+            'confirm' => 'required|accepted'
+        ]);
+        $user = User::find($params['id']);
+        if (!$user) abort(500, __('用户不存在'));
+
+        $telegramId = trim((string)($user->telegram_id ?? ''));
+        if (!ctype_digit($telegramId) || (int)$telegramId <= 0) {
+            abort(422, __('该用户尚未绑定 Telegram 账号'));
+        }
+
+        // 迁移把 0 与空串都归一成 NULL，所以「未绑定」就是 NULL
+        $user->telegram_id = null;
+        if (!$user->save()) abort(500, __('解绑失败'));
+
+        \Log::info('Admin unbound a Telegram account from a user.', [
+            'user_id' => (int)$user->id,
+            'telegram_id' => $telegramId
+        ]);
+
+        return response(['data' => ['bound' => false, 'telegram_id' => null]]);
+    }
+
     public function resetPassword(Request $request)
     {
         $user = User::find($request->input('id'));
