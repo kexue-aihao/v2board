@@ -6325,7 +6325,7 @@
                  }, f.a.createElement(l["a"], {
                      checked: parseInt(y.telegram_subscription_binding_enable),
                      onChange: e=>this.set("telegram", "telegram_subscription_binding_enable", e ? 1 : 0)
-                 })), (y.telegram_subscription_binding_enable || y.telegram_admin_operation_enable) ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
+                 })), (!0) ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                      isChildren: !0,
                      title: "售后群 Chat ID",
                      description: "数字群组 ID，是负数，形如 -100xxxxxxxxxx（超级群一律 -100 开头）。不要填 @用户名 或 t.me 链接。绑定与后台操作通知共用此群，机器人需是该群管理员。"
