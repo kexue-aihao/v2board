@@ -1241,10 +1241,17 @@ Redis 计数），所以这套东西默认关着也不改变任何现状。
 
 **当前哪些客户端能看到**：走 `Helper::buildUri()` 的 v2ray 系渲染器（General、v2rayN、v2rayNG、
 SagerNet、PassWall、SSRPlus、Shadowrocket、v2RayTun）会原样拿到那条链接 —— 这一条改动覆盖 8 个
-客户端。Clash / ClashMeta / ClashVerge / ClashNyanpasu / Stash / sing-box / Surge / Loon /
-QuantumultX / Surfboard **暂时看不到**：这些渲染器从 `$user` 取凭据，需要逐个加「节点自带凭据」
-的覆盖点（B3-2，见技术设计）。它们遇到不认识的 `type` 会静默跳过，所以 Clash 用户不会拿到
-一批用自己 uuid 去连别人服务器的坏节点。
+客户端。Clash / ClashMeta / ClashVerge / ClashNyanpasu / Stash / sing-box（新旧两版）**暂时看不到** ——
+这几个渲染器从 `$user` 取凭据，它们的**凭据通道已经打通**（循环里认 `_external_creds`，认到就用
+对方机场的 uuid/密码，否则照旧用本用户的），但**注入的行目前不带这个字段**，所以通道是关着的：
+
+- 只交凭据还不够：还得把解析出来的载荷映射成各 builder 读取的节点行字段（`tls`、
+  `tls_settings`、`network`、`network_settings`、`flow` 等），漏一个就可能渲染出一个「看着正常、
+  连不上」的节点 —— 那比看不到更糟，所以宁可不发。
+- Surge / Loon / QuantumultX / Surfboard 四个行式渲染器同理，尚未处理。
+
+这些渲染器遇到不认识的 `type` 会静默跳过，所以这些客户端不会拿到一批用自己 uuid 去连别人服务器的
+坏节点。
 
 ### 16.3 表
 

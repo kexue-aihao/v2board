@@ -37,39 +37,50 @@ class Stash
         $proxies = [];
 
         foreach ($servers as $item) {
+            // 外部过渡节点：用对方机场的凭据渲染，而不是本用户的 uuid。
+            // 循环体里凭据只有下面这一个来源，换掉它就不必改任何 builder。
+            $nodeUuid = $user['uuid'];
+            if (!empty($item['_external_creds'])) {
+                $item['type'] = $item['protocol'];
+                $creds = $item['_external_creds'];
+                // 这个参数在不同协议里分别当 uuid 或密码用
+                $nodeUuid = in_array($item['type'], ['vmess', 'vless', 'tuic'], true)
+                    ? ($creds['uuid'] ?: $creds['password'])
+                    : ($creds['password'] ?: $creds['uuid']);
+            }
             if (($item['type'] ?? null) === 'v2node' && isset($item['protocol'])) {
                 $item['type'] = $item['protocol'];
             }
             if ($item['type'] === 'shadowsocks') {
-                array_push($proxy, self::buildShadowsocks($user['uuid'], $item));
+                array_push($proxy, self::buildShadowsocks($nodeUuid, $item));
                 array_push($proxies, $item['name']);
             }
             if ($item['type'] === 'vmess') {
-                array_push($proxy, self::buildVmess($user['uuid'], $item));
+                array_push($proxy, self::buildVmess($nodeUuid, $item));
                 array_push($proxies, $item['name']);
             }
             if ($item['type'] === 'vless') {
-                array_push($proxy, self::buildVless($user['uuid'], $item));
+                array_push($proxy, self::buildVless($nodeUuid, $item));
                 array_push($proxies, $item['name']);
             }
             if ($item['type'] === 'trojan') {
-                array_push($proxy, self::buildTrojan($user['uuid'], $item));
+                array_push($proxy, self::buildTrojan($nodeUuid, $item));
                 array_push($proxies, $item['name']);
             }
             if ($item['type'] === 'tuic') {
-                array_push($proxy, self::buildTuic($user['uuid'], $item));
+                array_push($proxy, self::buildTuic($nodeUuid, $item));
                 array_push($proxies, $item['name']);
             }
             if ($item['type'] === 'hysteria') {
-                array_push($proxy, self::buildHysteria($user['uuid'], $item));
+                array_push($proxy, self::buildHysteria($nodeUuid, $item));
                 array_push($proxies, $item['name']);
             }
             if ($item['type'] === 'hysteria2') {
-                array_push($proxy, self::buildHysteria2($user['uuid'], $item));
+                array_push($proxy, self::buildHysteria2($nodeUuid, $item));
                 array_push($proxies, $item['name']);
             }
             if ($item['type'] === 'anytls') {
-                array_push($proxy, self::buildAnyTLS($user['uuid'], $item));
+                array_push($proxy, self::buildAnyTLS($nodeUuid, $item));
                 array_push($proxies, $item['name']);
             }
         }

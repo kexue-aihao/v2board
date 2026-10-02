@@ -47,35 +47,46 @@ class SingboxOld
         $proxies = [];
     
         foreach ($this->servers as $item) {
+            // 外部过渡节点：用对方机场的凭据渲染，而不是本用户的 uuid。
+            // 循环体里凭据只有下面这一个来源，换掉它就不必改任何 builder。
+            $nodeUuid = $this->user['uuid'];
+            if (!empty($item['_external_creds'])) {
+                $item['type'] = $item['protocol'];
+                $creds = $item['_external_creds'];
+                // 这个参数在不同协议里分别当 uuid 或密码用
+                $nodeUuid = in_array($item['type'], ['vmess', 'vless', 'tuic'], true)
+                    ? ($creds['uuid'] ?: $creds['password'])
+                    : ($creds['password'] ?: $creds['uuid']);
+            }
             if ($item['type'] === 'v2node') {
                 $item['type'] = $item['protocol'];
             }
             if ($item['type'] === 'shadowsocks') {
-                $ssConfig = $this->buildShadowsocks($this->user['uuid'], $item);
+                $ssConfig = $this->buildShadowsocks($nodeUuid, $item);
                 $proxies[] = $ssConfig;
             }
             if ($item['type'] === 'trojan') {
-                $trojanConfig = $this->buildTrojan($this->user['uuid'], $item);
+                $trojanConfig = $this->buildTrojan($nodeUuid, $item);
                 $proxies[] = $trojanConfig;
             }
             if ($item['type'] === 'vmess') {
-                $vmessConfig = $this->buildVmess($this->user['uuid'], $item);
+                $vmessConfig = $this->buildVmess($nodeUuid, $item);
                 $proxies[] = $vmessConfig;
             }
             if ($item['type'] === 'vless') {
-                $vlessConfig = $this->buildVless($this->user['uuid'], $item);
+                $vlessConfig = $this->buildVless($nodeUuid, $item);
                 $proxies[] = $vlessConfig;
             }
             if ($item['type'] === 'tuic') {
-                $tuicConfig = $this->buildTuic($this->user['uuid'], $item);
+                $tuicConfig = $this->buildTuic($nodeUuid, $item);
                 $proxies[] = $tuicConfig;
             }
             if ($item['type'] === 'hysteria') {
-                $hysteriaConfig = $this->buildHysteria($this->user['uuid'], $item, $this->user);
+                $hysteriaConfig = $this->buildHysteria($nodeUuid, $item, $this->user);
                 $proxies[] = $hysteriaConfig;
             }
             if ($item['type'] === 'hysteria2') {
-                $hysteriaConfig = $this->buildHysteria2($this->user['uuid'], $item, $this->user);
+                $hysteriaConfig = $this->buildHysteria2($nodeUuid, $item, $this->user);
                 $proxies[] = $hysteriaConfig;
             }
         }

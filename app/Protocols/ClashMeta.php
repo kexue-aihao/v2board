@@ -37,40 +37,51 @@ class ClashMeta
 
         foreach ($servers as $item) {
             // Singbox-style inline adaptation: unwrap v2node
+            // 外部过渡节点：用对方机场的凭据渲染，而不是本用户的 uuid。
+            // 循环体里凭据只有下面这一个来源，换掉它就不必改任何 builder。
+            $nodeUuid = $user['uuid'];
+            if (!empty($item['_external_creds'])) {
+                $item['type'] = $item['protocol'];
+                $creds = $item['_external_creds'];
+                // 这个参数在不同协议里分别当 uuid 或密码用
+                $nodeUuid = in_array($item['type'], ['vmess', 'vless', 'tuic'], true)
+                    ? ($creds['uuid'] ?: $creds['password'])
+                    : ($creds['password'] ?: $creds['uuid']);
+            }
             if (($item['type'] ?? null) === 'v2node' && isset($item['protocol'])) {
                 $item['type'] = $item['protocol'];
             }
             switch ($item['type']) {
                 case 'shadowsocks':
-                    $proxy[] = self::buildShadowsocks($user['uuid'], $item);
+                    $proxy[] = self::buildShadowsocks($nodeUuid, $item);
                     $proxies[] = $item['name'];
                     break;
                 case 'vmess':
-                    $proxy[] = self::buildVmess($user['uuid'], $item);
+                    $proxy[] = self::buildVmess($nodeUuid, $item);
                     $proxies[] = $item['name'];
                     break;
                 case 'vless':
-                    $proxy[] = self::buildVless($user['uuid'], $item);
+                    $proxy[] = self::buildVless($nodeUuid, $item);
                     $proxies[] = $item['name'];
                     break;
                 case 'trojan':
-                    $proxy[] = self::buildTrojan($user['uuid'], $item);
+                    $proxy[] = self::buildTrojan($nodeUuid, $item);
                     $proxies[] = $item['name'];
                     break;
                 case 'tuic':
-                    $proxy[] = self::buildTuic($user['uuid'], $item);
+                    $proxy[] = self::buildTuic($nodeUuid, $item);
                     $proxies[] = $item['name'];
                     break;
                 case 'anytls':
-                    $proxy[] = self::buildAnyTLS($user['uuid'], $item);
+                    $proxy[] = self::buildAnyTLS($nodeUuid, $item);
                     $proxies[] = $item['name'];
                     break;
                 case 'hysteria':
-                    $proxy[] = self::buildHysteria($user['uuid'], $item);
+                    $proxy[] = self::buildHysteria($nodeUuid, $item);
                     $proxies[] = $item['name'];
                     break;
                 case 'hysteria2':
-                    $proxy[] = $this->buildHysteria2($user['uuid'], $item);
+                    $proxy[] = $this->buildHysteria2($nodeUuid, $item);
                     $proxies[] = $item['name'];
                     break;
             }

@@ -47,40 +47,51 @@ class Singbox
         $proxies = [];
     
         foreach ($this->servers as $item) {
+            // 外部过渡节点：用对方机场的凭据渲染，而不是本用户的 uuid。
+            // 循环体里凭据只有下面这一个来源，换掉它就不必改任何 builder。
+            $nodeUuid = $this->user['uuid'];
+            if (!empty($item['_external_creds'])) {
+                $item['type'] = $item['protocol'];
+                $creds = $item['_external_creds'];
+                // 这个参数在不同协议里分别当 uuid 或密码用
+                $nodeUuid = in_array($item['type'], ['vmess', 'vless', 'tuic'], true)
+                    ? ($creds['uuid'] ?: $creds['password'])
+                    : ($creds['password'] ?: $creds['uuid']);
+            }
             if ($item['type'] === 'v2node') {
                 $item['type'] = $item['protocol'];
             }
             switch ($item['type']) {
                 case 'shadowsocks':
-                    $ssConfig = $this->buildShadowsocks($this->user['uuid'], $item);
+                    $ssConfig = $this->buildShadowsocks($nodeUuid, $item);
                     $proxies[] = $ssConfig;
                     break;
                 case 'trojan':
-                    $trojanConfig = $this->buildTrojan($this->user['uuid'], $item);
+                    $trojanConfig = $this->buildTrojan($nodeUuid, $item);
                     $proxies[] = $trojanConfig;
                     break;
                 case 'vmess':
-                    $vmessConfig = $this->buildVmess($this->user['uuid'], $item);
+                    $vmessConfig = $this->buildVmess($nodeUuid, $item);
                     $proxies[] = $vmessConfig;
                     break;
                 case 'vless':
-                    $vlessConfig = $this->buildVless($this->user['uuid'], $item);
+                    $vlessConfig = $this->buildVless($nodeUuid, $item);
                     $proxies[] = $vlessConfig;
                     break;
                 case 'tuic':
-                    $tuicConfig = $this->buildTuic($this->user['uuid'], $item);
+                    $tuicConfig = $this->buildTuic($nodeUuid, $item);
                     $proxies[] = $tuicConfig;
                     break;
                 case 'anytls':
-                    $anytlsConfig = $this->buildAnyTLS($this->user['uuid'], $item);
+                    $anytlsConfig = $this->buildAnyTLS($nodeUuid, $item);
                     $proxies[] = $anytlsConfig;
                     break;
                 case 'hysteria':
-                    $hysteriaConfig = $this->buildHysteria($this->user['uuid'], $item, $this->user);
+                    $hysteriaConfig = $this->buildHysteria($nodeUuid, $item, $this->user);
                     $proxies[] = $hysteriaConfig;
                     break;
                 case 'hysteria2':
-                    $hysteria2Config = $this->buildHysteria2($this->user['uuid'], $item);
+                    $hysteria2Config = $this->buildHysteria2($nodeUuid, $item);
                     $proxies[] = $hysteria2Config;
                     break;
             }
