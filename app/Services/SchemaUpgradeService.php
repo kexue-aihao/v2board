@@ -35,7 +35,8 @@ class SchemaUpgradeService
         'telegram_registration_schema' => 'telegram_registration_schema_v1',
         'telegram_registration_invite_schema' => 'telegram_registration_invite_schema_v1',
         'two_factor_schema' => 'two_factor_schema_v1',
-        'server_tls_pin_schema' => 'server_tls_pin_schema_v1'
+        'server_tls_pin_schema' => 'server_tls_pin_schema_v1',
+        'dynamic_rate_schema' => 'dynamic_rate_schema_v1'
     ];
 
     public function run(): array
@@ -159,9 +160,102 @@ class SchemaUpgradeService
             case 'risk_score_schema':
                 $this->applyRiskScoreSchema();
                 return;
+            case 'dynamic_rate_schema':
+                $this->applyDynamicRateSchema();
+                return;
         }
 
         throw new RuntimeException("Unknown schema migration: {$version}");
+    }
+
+    /**
+     * 动态倍率：时段/节点规则、峰值判定参数、每用户状态台账。
+     *
+     * 状态表同时承担两件事：判定用的滚动状态（high / burst）与管理页看到的实时台账。
+     * 刻意不把滚动状态另存一份到 Redis —— 重启 Redis 不该让「已经持续跑了 4 分钟」
+     * 这件事归零；Redis 里只放热路径要用的倍率查找表，丢了顶多回落 1.0，下一轮自动重建。
+     */
+    private function applyDynamicRateSchema(): void
+    {
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_rate_rule` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `scope` varchar(16) NOT NULL DEFAULT 'global',
+            `node_type` varchar(24) NOT NULL DEFAULT '',
+            `node_id` int(11) NOT NULL DEFAULT '0',
+            `weekdays` varchar(32) NOT NULL DEFAULT '1,2,3,4,5,6,7',
+            `start_minute` smallint(6) NOT NULL DEFAULT '0',
+            `end_minute` smallint(6) NOT NULL DEFAULT '1440',
+            `multiplier` decimal(6,3) NOT NULL DEFAULT '1.000',
+            `enabled` tinyint(1) NOT NULL DEFAULT '1',
+            `remark` varchar(255) DEFAULT NULL,
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `scope_node` (`scope`,`node_type`,`node_id`),
+            KEY `enabled` (`enabled`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'scope' => "varchar(16) NOT NULL DEFAULT 'global'",
+            'node_type' => "varchar(24) NOT NULL DEFAULT ''",
+            'node_id' => "int(11) NOT NULL DEFAULT '0'",
+            'weekdays' => "varchar(32) NOT NULL DEFAULT '1,2,3,4,5,6,7'",
+            'start_minute' => "smallint(6) NOT NULL DEFAULT '0'",
+            'end_minute' => "smallint(6) NOT NULL DEFAULT '1440'",
+            'multiplier' => "decimal(6,3) NOT NULL DEFAULT '1.000'",
+            'enabled' => "tinyint(1) NOT NULL DEFAULT '1'",
+            'remark' => 'varchar(255) DEFAULT NULL',
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_rate_rule', $column, $definition);
+        }
+        // 取规则时永远是 WHERE enabled = 1，再按作用域挑；这张表很小，索引只是兜底。
+        $this->ensureIndex('v2_rate_rule', 'scope_node', ['scope', 'node_type', 'node_id']);
+
+        // 峰值判定参数。列名不叫 key/value：key 是 MySQL 保留字，裸写一次就得处处加反引号。
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_rate_setting` (
+            `setting_key` varchar(64) NOT NULL,
+            `setting_value` varchar(255) NOT NULL DEFAULT '',
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`setting_key`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'setting_key' => 'varchar(64) NOT NULL',
+            'setting_value' => "varchar(255) NOT NULL DEFAULT ''",
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_rate_setting', $column, $definition);
+        }
+
+        // 每用户当前状态。high / burst 是判定用的滚动计数，multiplier 是这一轮定下来的
+        // 动态倍率，rate_bps 给管理页看实时速率。
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_rate_state` (
+            `user_id` int(11) NOT NULL,
+            `multiplier` decimal(6,3) NOT NULL DEFAULT '1.000',
+            `rate_bps` bigint(20) NOT NULL DEFAULT '0',
+            `high` int(11) NOT NULL DEFAULT '0',
+            `burst` int(11) NOT NULL DEFAULT '0',
+            `state` varchar(16) NOT NULL DEFAULT 'normal',
+            `sampled_at` bigint(20) NOT NULL DEFAULT '0',
+            `computed_at` bigint(20) NOT NULL DEFAULT '0',
+            PRIMARY KEY (`user_id`),
+            KEY `multiplier` (`multiplier`),
+            KEY `computed_at` (`computed_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'multiplier' => "decimal(6,3) NOT NULL DEFAULT '1.000'",
+            'rate_bps' => "bigint(20) NOT NULL DEFAULT '0'",
+            'high' => "int(11) NOT NULL DEFAULT '0'",
+            'burst' => "int(11) NOT NULL DEFAULT '0'",
+            'state' => "varchar(16) NOT NULL DEFAULT 'normal'",
+            'sampled_at' => "bigint(20) NOT NULL DEFAULT '0'",
+            'computed_at' => "bigint(20) NOT NULL DEFAULT '0'"
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_rate_state', $column, $definition);
+        }
+        // 管理页默认按「正在叠加」筛，以及「最近一轮有样本」排序。
+        $this->ensureIndex('v2_rate_state', 'multiplier', ['multiplier']);
+        $this->ensureIndex('v2_rate_state', 'computed_at', ['computed_at']);
     }
 
     private function ensureMigrationTable(): void

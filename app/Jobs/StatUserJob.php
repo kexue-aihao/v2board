@@ -21,6 +21,9 @@ class StatUserJob implements ShouldQueue
     protected $protocol;
     protected $recordType;
 
+    /** @var array<int, float> [node_user_id => 本次实际生效的倍率] */
+    protected $rates;
+
     public $tries = 3;
     public $timeout = 60;
 
@@ -29,13 +32,14 @@ class StatUserJob implements ShouldQueue
      *
      * @return void
      */
-    public function __construct(array $data, array $server, $protocol, $recordType = 'd')
+    public function __construct(array $data, array $server, $protocol, $recordType = 'd', array $rates = [])
     {
         $this->onQueue('stat');
         $this->data =$data;
         $this->server = $server;
         $this->protocol = $protocol;
         $this->recordType = $recordType;
+        $this->rates = $rates;
     }
 
     /**
@@ -59,8 +63,11 @@ class StatUserJob implements ShouldQueue
                         ? Subscription::where('node_user_id', $nodeUserId)->first()
                         : null;
                     $userId = $subscription ? $subscription->user_id : $nodeUserId;
+                    // server_rate 记「这批流量实际按多少倍计费」：开了动态倍率就是算出来的
+                    // 有效倍率，读取端统一 u * server_rate 还原，所以必须与计费用的是同一个数。
+                    $rate = $this->rates[$nodeUserId] ?? $this->server['rate'];
                     $query = StatUser::where('record_at', $recordAt)
-                        ->where('server_rate', $this->server['rate'])
+                        ->where('server_rate', $rate)
                         ->where('user_id', $userId);
                     if (Schema::hasColumn('v2_stat_user', 'subscription_id')) {
                         $query->where('subscription_id', $subscription ? $subscription->id : null);
@@ -74,7 +81,7 @@ class StatUserJob implements ShouldQueue
                     }
                     $payload = [
                         'user_id' => $userId,
-                        'server_rate' => $this->server['rate'],
+                        'server_rate' => $rate,
                         'u' => $trafficData[0],
                         'd' => $trafficData[1],
                         'record_type' => $this->recordType,

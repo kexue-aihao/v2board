@@ -442,6 +442,7 @@ IP 归属字段：
 | 节点分组 | /server/group/fetch、save、drop |
 | 节点路由 | /server/route/fetch、save、drop |
 | 节点管理 | /server/manage/getNodes、sort |
+| 节点批量操作 | /server/manage/nodes/copy、nodes/delete、tls-fields/preview、tls-fields/apply、protocol/preview、protocol/apply、host/preview、host/replace（全部为 POST，均需 confirm=1） |
 | 协议节点 | 见下方「协议节点接口」表，共 8 种协议 × 4 个动作 |
 | 订单 | /order/fetch、update、assign、paid、cancel、detail |
 | 支付 | /payment/fetch、getPaymentMethods、getPaymentForm、save、drop、show、sort |
@@ -473,6 +474,18 @@ IP 归属字段：
 | V2node | /server/v2node/save、update、drop、copy | Admin\Server\V2nodeController |
 
 协议节点没有各自的列表接口，节点清单统一由 GET /server/manage/getNodes 返回；V2node 对应节点侧的 /api/v2/server/config 配置接口（见第九章）。
+
+节点管理页的批量操作全部为 POST，基础路径 /api/v1/{secure_path}/server/manage，一次最多 200 个节点（超限 422），落库前都要带 `confirm=1`：
+
+| 操作 | 接口 | 说明 |
+| --- | --- | --- |
+| 批量复制 | nodes/copy | 副本一律先置为隐藏（show=0）；可选 `regenerate_reality_keys` 为 v2node + vless + REALITY 的副本换一套 Private/Public Key 与 ShortId |
+| 批量删除 | nodes/delete | **只删勾选的节点，不级联删除子节点**。结果里带每个节点的 `published` 与 `child_count`，管理端据此提示「这些子节点会失去父节点」与「已上架节点会各发一条下架通知」。已上架节点的 Telegram 通知在事务提交之后才派发 —— 放事务里的话一旦回滚，消息已经进了队列 |
+| 批量填写 SNI / Server Address | tls-fields/preview、tls-fields/apply | 留空的一项不动。SNI 的落点按类型不同：vmess 写 tlsSettings、vless/v2node 写 tls_settings、trojan/tuic/hysteria/anytls 写 server_name 列，shadowsocks 没有该字段会被跳过 |
+| 批量下发协议配置 | protocol/preview、protocol/apply | 下发「传输协议 network + 协议配置 network_settings」两项。两项都可以缺省表示「这一项不动」，两项都缺省直接 422。这两列只有 v2node、vmess、vless、trojan 有（vmess 的列名是驼峰 networkSettings），其余类型在预览里标 `applicable=false`、落库时跳过，**不因此回滚整批** —— 一次勾选里混着几种类型是常态。协议配置按 JSON 对象收（也接受 JSON 文本），空对象 `{}` 表示明确清空 |
+| 批量替换节点域名 | host/preview、host/replace | 范围为全部协议节点（含隐藏节点），只改连接地址 host，保留 SNI、端口与传输配置；支持精确匹配与字面包含两种模式 |
+
+批量写操作都在事务内先 `lockForUpdate` 重新读取、写后用 `fresh()` 复核，复核不一致即回滚；管理端一律「先预览、再确认」，并在提交后用 getNodes 重新拉取列表逐条核对，核对不过不报成功。
 
 统计接口明细（全部为 GET，基础路径同为 /api/v1/{secure_path}）：
 
@@ -1123,3 +1136,76 @@ Cloudflare Turnstile 本身可免费使用，但**不能**直接填入本项目�
 倒卖商功能关闭不会删除账号、客户、订单、共享群组或已有订阅。站点维护和停运期间，公共配置接口仍用于展示状态页，管理员接口、节点通信和已有支付回调按当前中间件规则处理。
 
 接口变更时应同步更新本文档，并以当前控制器和 FormRequest 校验规则为最终依据。
+
+## 十五、动态倍率
+
+倍率从「每个节点一个固定值」扩展成三个因子的乘积：
+
+    实际计费倍率 = 节点基础倍率(v2_server_*.rate) × 时段倍率(规则) × 用户动态倍率(带宽峰值)
+
+三个因子各自缺省为 1.0 —— **全部为 1 时，计费结果与改造前逐字节一致**（同一条乘法、同一个
+Redis 计数），所以这套东西默认关着也不改变任何现状。
+
+### 15.1 判定口径（瞬时豁免 + 持续叠加）
+
+每分钟对每个有流量的用户算一次 `bps = 本分钟原始字节 × 8 ÷ 实际采样间隔`，然后推进状态机：
+
+| 条件 | 动作 |
+| --- | --- |
+| `bps > 瞬时阈值`（默认 50 Mbps） | 记一次突发；连续突发不超过「豁免时长」（默认 3 分钟）时**这一分钟完全不进叠加计数** —— 用户偶尔下个大文件不该被加倍收费 |
+| 突发持续超过豁免时长 | 不再算瞬时，开始按持续高带宽计数 —— 连续跑满十分钟和「下完就走」必须区别对待，否则挂机跑量的用户永远豁免 |
+| `bps > 持续阈值`（默认 10 Mbps） | 叠加计数 +1 |
+| `bps < 持续阈值` | 计数按回落步长减少，避免一天里零散高几分钟无限累积 |
+| 计数 ≥ 叠加门槛（默认 5 分钟） | 该用户按叠加倍率（默认 1.5）计费 |
+
+- 采样是分钟粒度（节点上报间隔 `server_push_interval`，默认 60 秒），所以叠加最长有 **1 分钟延迟**：这一分钟的流量按上一轮定下的倍率计费。
+- **判定用的是原始字节，不是账面流量**。账面流量已经被倍率乘过，拿它做判定会自我放大（倍率抬高账面 → 账面抬高判定 → 判定再抬倍率）。
+- 总开关关闭时状态照常推进（管理页能看到「开了会怎样」，方便调参），但倍率一律按 1.0 计费。
+
+参数存在 `v2_rate_setting`（六个参数 + `enabled` 总开关），规则存在 `v2_rate_rule`：
+
+| 规则字段 | 说明 |
+| --- | --- |
+| scope | `global` 或 `node`；**节点规则覆盖全局规则**（不是相乘：给某节点单独定 2 倍就是 2 倍） |
+| node_type / node_id | scope=node 时生效，取值同 `ServerIdService::TYPES`（shadowsocks/vmess/vless/trojan/tuic/hysteria/anytls/v2node） |
+| weekdays | `1,2,3`（1=周一…7=周日），留空 = 每天 |
+| start_minute / end_minute | 一天内的分钟数，左闭右开；`start > end` 表示跨零点（23:00-02:00） |
+| multiplier | 倍率，同一时刻命中多条时取最大的一条 |
+
+时间一律按站点时区（`config('app.timezone')`，本站 Asia/Shanghai）判定 —— 运营说的「晚高峰 20:00」是用户的钟，不是 UTC。
+
+### 15.2 运维命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `php artisan rate:tick [--dry-run]` | 每分钟采样 + 判定 + 发布生效倍率。由调度自动跑（见 11.2），`--dry-run` 只打印不写任何键 |
+| `php artisan rate:explain {user_id} [--at=时间戳]` | 拆解某个用户的倍率：节点倍率 × 时段倍率 × 动态倍率，逐节点列出实际算式 |
+| `php artisan rate:simulate {速率序列} [--param=键=值] [--defaults]` | 把一串 Mbps 喂进状态机，打印逐分钟判定时间线。调阈值时不用等真实流量 |
+
+    php artisan rate:simulate "100,100,20,20,20,20,20,20"
+    php artisan rate:simulate "60,60,60,60,60" --param=instant_mbps=100
+
+### 15.3 接口契约的变化
+
+`v2_stat_user.server_rate` 现在记的是**这批流量实际按多少倍计费**（开了动态倍率就是算出来的有效倍率），
+不再是节点表单里配置的那个值。所有读取端仍然是 `u × server_rate`，所以查询不用改；但同一用户同一天
+可能因为倍率变化拆成多行（唯一键本来就含 `server_rate`，属预期）。
+
+倍率相乘后统一取两位小数：`server_rate` 列是 `decimal(10,2)`，计费乘进去的倍率与统计记下的倍率必须
+逐位一致，否则用户的流量日志对不上扣费。另注意 `Redis::hincrby` 是整数语义，小数倍率在每次计数时
+会截掉不足 1 字节的部分（改造前就如此，每分钟每用户最多 1 字节）。
+
+### 15.4 表与调度
+
+| 表 | 用途 |
+| --- | --- |
+| `v2_rate_rule` | 时段/节点倍率规则 |
+| `v2_rate_setting` | 六个判定参数 + 总开关（列名 `setting_key`/`setting_value`，避开 MySQL 保留字 `key`） |
+| `v2_rate_state` | 每用户当前状态：`high`/`burst` 是判定用的滚动计数，`multiplier`/`rate_bps` 给管理页看 |
+
+状态刻意留在数据库而不是 Redis：重启 Redis 不该让「已经持续跑了 4 分钟」归零。Redis 里只有两份
+热路径查找表（`v2board_rate_rules`、`v2board_rate_user_mult`）和原始字节计数
+（`v2board_raw_upload_traffic`/`v2board_raw_download_traffic`），丢了顶多回落 1.0，下一轮自动重建。
+
+**`rate:tick` 必须每分钟跑**（`traffic:update` 的同频）：原始计数是按分钟 drain 的，间隔再稀就会丢样本。
+它由 `deploy_install_cron` 装的 `schedule:run` 条目驱动，不需要额外 cron。

@@ -724,6 +724,48 @@ CREATE TABLE `v2_subscribe_account_risk` (
     KEY `pending` (`handled_at`,`risk_percent`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+DROP TABLE IF EXISTS `v2_rate_rule`;
+CREATE TABLE `v2_rate_rule` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `scope` varchar(16) NOT NULL DEFAULT 'global',
+    `node_type` varchar(24) NOT NULL DEFAULT '',
+    `node_id` int(11) NOT NULL DEFAULT '0',
+    `weekdays` varchar(32) NOT NULL DEFAULT '1,2,3,4,5,6,7',
+    `start_minute` smallint(6) NOT NULL DEFAULT '0',
+    `end_minute` smallint(6) NOT NULL DEFAULT '1440',
+    `multiplier` decimal(6,3) NOT NULL DEFAULT '1.000',
+    `enabled` tinyint(1) NOT NULL DEFAULT '1',
+    `remark` varchar(255) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `scope_node` (`scope`,`node_type`,`node_id`),
+    KEY `enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_rate_setting`;
+CREATE TABLE `v2_rate_setting` (
+    `setting_key` varchar(64) NOT NULL,
+    `setting_value` varchar(255) NOT NULL DEFAULT '',
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`setting_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_rate_state`;
+CREATE TABLE `v2_rate_state` (
+    `user_id` int(11) NOT NULL,
+    `multiplier` decimal(6,3) NOT NULL DEFAULT '1.000',
+    `rate_bps` bigint(20) NOT NULL DEFAULT '0',
+    `high` int(11) NOT NULL DEFAULT '0',
+    `burst` int(11) NOT NULL DEFAULT '0',
+    `state` varchar(16) NOT NULL DEFAULT 'normal',
+    `sampled_at` bigint(20) NOT NULL DEFAULT '0',
+    `computed_at` bigint(20) NOT NULL DEFAULT '0',
+    PRIMARY KEY (`user_id`),
+    KEY `multiplier` (`multiplier`),
+    KEY `computed_at` (`computed_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 DROP TABLE IF EXISTS `v2_subscribe_block_rule`;
 CREATE TABLE `v2_subscribe_block_rule` (
                                   `id` bigint(20) NOT NULL AUTO_INCREMENT,
