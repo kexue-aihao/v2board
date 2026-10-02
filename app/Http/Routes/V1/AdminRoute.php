@@ -53,6 +53,12 @@ class AdminRoute
             $router->post('/rate/rule/drop', 'V1\\Admin\\RateController@dropRule');
             $router->post('/rate/settings/save', 'V1\\Admin\\RateController@saveSettings');
             $router->post('/rate/explain', 'V1\\Admin\\RateController@explain');
+
+            // 外部订阅源（下发成过渡节点）
+            $router->get ('/external/fetch', 'V1\\Admin\\ExternalSourceController@fetch');
+            $router->post('/external/source/save', 'V1\\Admin\\ExternalSourceController@saveSource');
+            $router->post('/external/source/drop', 'V1\\Admin\\ExternalSourceController@dropSource');
+            $router->post('/external/source/refresh', 'V1\\Admin\\ExternalSourceController@refreshSource');
             $router->group([
                 'prefix' => 'server/trojan'
             ], function ($router) {

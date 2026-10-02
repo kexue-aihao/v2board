@@ -167,6 +167,7 @@ deploy_step deploy_patch_adapterman
 deploy_step deploy_php scripts/patch-admin-reward.php
 deploy_step deploy_php scripts/patch-admin-clean-gateway.php
 deploy_step deploy_php scripts/patch-admin-rate.php
+deploy_step deploy_php scripts/patch-admin-external.php
 deploy_step deploy_check_mmdb
 
 if [ "${LEGACY_DB_UPDATE:-0}" = "1" ]; then
