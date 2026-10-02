@@ -6328,7 +6328,7 @@
                  })), (y.telegram_subscription_binding_enable || y.telegram_admin_operation_enable) ? f.a.createElement(f.a.Fragment, null, f.a.createElement(m, {
                      isChildren: !0,
                      title: "售后群 Chat ID",
-                     description: "数字群组 ID（超级群通常以 -100 开头），不是上方的售后群链接。绑定和后台操作通知共用此群。机器人需为该群管理员。"
+                     description: "数字群组 ID，是负数，形如 -100xxxxxxxxxx（超级群一律 -100 开头）。不要填 @用户名 或 t.me 链接。绑定与后台操作通知共用此群，机器人需是该群管理员。"
                  }, f.a.createElement("input", {
                      className: "form-control",
                      placeholder: "-100xxxxxxxxxx",
@@ -6952,12 +6952,12 @@
                 y.telegram_admin_operation_enable ? f.a.createElement(m, {
                     isChildren: !0,
                     title: "通知 Topic ID",
-                    description: "论坛式群组可填写主题 ID；普通群组留空。"
+                    description: "只有「论坛式/话题群」才需要填，且必须是正整数；普通群组留空。注意：-100 开头那串是群组 ID，填在上面的「售后群 Chat ID」，不要填在这里。"
                 }, f.a.createElement("input", {
                     type: "number",
                     min: 1,
                     className: "form-control",
-                    placeholder: "留空发送到默认话题",
+                    placeholder: "普通群留空；只填正整数",
                     defaultValue: y.telegram_admin_operation_topic_id,
                     onChange: e=>this.set("telegram", "telegram_admin_operation_topic_id", e.target.value)
                 })) : "",
