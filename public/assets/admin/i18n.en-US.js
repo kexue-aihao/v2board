@@ -26,6 +26,7 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "Ticket #$1 · User #$2",
     },
     dict: {
+        "国家/地区": "Country/region",
         "IP 记录": "IP records",
         "拉取记录": "Fetch records",
         "日志留存": "Log retention",

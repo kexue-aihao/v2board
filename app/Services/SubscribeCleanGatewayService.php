@@ -33,6 +33,10 @@ class SubscribeCleanGatewayService
 
     private $availability;
 
+    // 地理列（country_* / region / city）是否就位。静态的：一个请求里可能建多个服务实例
+    // （列表、导出各一个），schema 探测没必要每个实例跑一遍。
+    private static $geoColumns;
+
     public function available(): bool
     {
         if ($this->availability !== null) {
@@ -398,6 +402,9 @@ class SubscribeCleanGatewayService
                 'isp' => $location['isp'] ?? '',
                 'organization' => $location['organization'] ?? '',
                 'asn' => $location['asn'] ?? null,
+                'country_name' => $location['country_name'] ?? '',
+                'region' => $location['region'] ?? '',
+                'city' => $location['city'] ?? '',
                 'location_status' => $location['status'] ?? 'pending',
                 'user_agent' => (string)$row->user_agent,
                 'ua_hash' => (string)$row->ua_hash,
@@ -424,6 +431,7 @@ class SubscribeCleanGatewayService
     {
         $locations = [];
         $pending = [];
+        $hasGeo = $this->geoColumnsAvailable();
         foreach ($rows as $row) {
             $ip = (string)$row->request_ip;
             if ($row->location_resolved_at === null) {
@@ -434,7 +442,10 @@ class SubscribeCleanGatewayService
                 'status' => (string)($row->location_status ?: 'unknown'),
                 'isp' => (string)($row->isp ?? ''),
                 'organization' => (string)($row->organization ?? ''),
-                'asn' => $row->asn === null || $row->asn === '' ? null : (int)$row->asn
+                'asn' => $row->asn === null || $row->asn === '' ? null : (int)$row->asn,
+                'country_name' => $hasGeo ? (string)($row->country_name ?? '') : '',
+                'region' => $hasGeo ? (string)($row->region ?? '') : '',
+                'city' => $hasGeo ? (string)($row->city ?? '') : ''
             ];
         }
         if (!count($pending)) {
@@ -446,7 +457,10 @@ class SubscribeCleanGatewayService
         } catch (\Throwable $e) {
             // IP 库缺失/损坏时页面仍要能看：归属地留空，状态标记为未解析。
             foreach (array_keys($pending) as $ip) {
-                $locations[$ip] = ['status' => 'pending', 'isp' => '', 'organization' => '', 'asn' => null];
+                $locations[$ip] = [
+                    'status' => 'pending', 'isp' => '', 'organization' => '', 'asn' => null,
+                    'country_name' => '', 'region' => '', 'city' => ''
+                ];
             }
             return $locations;
         }
@@ -457,33 +471,70 @@ class SubscribeCleanGatewayService
             $status = (string)($location['status'] ?? 'unknown');
             $asn = isset($location['asn']) && $location['asn'] !== '' && $location['asn'] !== null
                 ? (int)$location['asn'] : null;
+            $countryName = (string)($location['country_name'] ?? '');
+            if ($countryName === '') {
+                // 全球库偶尔只给两字母代码，用它兜底总好过留空。
+                $countryName = (string)($location['country_code'] ?? '');
+            }
             $locations[$ip] = [
                 'status' => $status,
                 'isp' => (string)($location['isp'] ?? ''),
                 'organization' => (string)($location['organization'] ?? ''),
-                'asn' => $asn
+                'asn' => $asn,
+                'country_name' => $countryName,
+                'region' => (string)($location['region'] ?? ''),
+                'city' => (string)($location['city'] ?? '')
             ];
 
             try {
                 // 只回写还没解析过的行：解析过一次就不再重复写，也避免覆盖并发写入的
                 // 新行（WHERE 里的 location_resolved_at IS NULL 就是这层保护）。
+                $update = [
+                    'isp' => $locations[$ip]['isp'] === '' ? null : $locations[$ip]['isp'],
+                    'organization' => $locations[$ip]['organization'] === '' ? null : $locations[$ip]['organization'],
+                    'asn' => $asn,
+                    'location_status' => $status,
+                    'location_resolved_at' => $now,
+                    'updated_at' => $now
+                ];
+                if ($hasGeo) {
+                    $update['country_code'] = ($location['country_code'] ?? '') === ''
+                        ? null : (string)$location['country_code'];
+                    $update['country_name'] = $countryName === '' ? null : $countryName;
+                    $update['region'] = $locations[$ip]['region'] === '' ? null : $locations[$ip]['region'];
+                    $update['city'] = $locations[$ip]['city'] === '' ? null : $locations[$ip]['city'];
+                }
                 DB::table(self::TABLE)
                     ->where('request_ip', $ip)
                     ->whereNull('location_resolved_at')
-                    ->update([
-                        'isp' => $locations[$ip]['isp'] === '' ? null : $locations[$ip]['isp'],
-                        'organization' => $locations[$ip]['organization'] === '' ? null : $locations[$ip]['organization'],
-                        'asn' => $asn,
-                        'location_status' => $status,
-                        'location_resolved_at' => $now,
-                        'updated_at' => $now
-                    ]);
+                    ->update($update);
             } catch (\Throwable $e) {
                 // 回写失败只是下次还要再查一遍，不影响本次展示。
             }
         }
 
         return $locations;
+    }
+
+    /**
+     * 地理列是否就位。老库升级到这一版之前没有 country_* / region / city，任何把
+     * 它们写进 UPDATE 的语句都会直接抛 SQL 错误，所以写入前先问一次。
+     *
+     * 刻意不放进 available()：那会让「库没升级」从「归属地少一档」升级成「整页不可用」，
+     * 而这三列只是兜底显示，缺了不该拖垮页面。
+     */
+    private function geoColumnsAvailable(): bool
+    {
+        if (self::$geoColumns !== null) {
+            return self::$geoColumns;
+        }
+
+        try {
+            return self::$geoColumns = Schema::hasColumn(self::TABLE, 'country_name')
+                && Schema::hasColumn(self::TABLE, 'city');
+        } catch (\Throwable $e) {
+            return self::$geoColumns = false;
+        }
     }
 
     /**

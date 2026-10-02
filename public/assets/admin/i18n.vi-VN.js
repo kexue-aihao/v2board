@@ -26,6 +26,7 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "Phiếu hỗ trợ #$1 · Người dùng #$2",
     },
     dict: {
+        "国家/地区": "Quốc gia/Khu vực",
         "IP 记录": "Bản ghi IP",
         "拉取记录": "Bản ghi tải",
         "日志留存": "Lưu trữ nhật ký",

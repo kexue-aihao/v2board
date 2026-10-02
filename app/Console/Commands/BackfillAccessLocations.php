@@ -91,9 +91,15 @@ class BackfillAccessLocations extends Command
 
             $locations = $service->lookupMany(array_keys($batchIps));
             $now = time();
+            $hasGeo = Schema::hasColumn($table, 'country_name');
             foreach ($idsByIp as $ip => $ids) {
                 $location = $locations[$ip] ?? [];
-                DB::table($table)->whereIn('id', $ids)->update([
+                $countryName = (string)($location['country_name'] ?? '');
+                if ($countryName === '') {
+                    // 全球库偶尔只给两字母代码，拿它兜底总好过留空。
+                    $countryName = (string)($location['country_code'] ?? '');
+                }
+                $update = [
                     'isp' => $this->nullable($location['isp'] ?? ''),
                     'organization' => $this->nullable($location['organization'] ?? ''),
                     'asn' => isset($location['asn']) && $location['asn'] !== '' && $location['asn'] !== null
@@ -101,7 +107,14 @@ class BackfillAccessLocations extends Command
                     'location_status' => (string)($location['status'] ?? 'unknown'),
                     'location_resolved_at' => $now,
                     'updated_at' => $now
-                ]);
+                ];
+                if ($hasGeo) {
+                    $update['country_code'] = $this->nullable($location['country_code'] ?? '');
+                    $update['country_name'] = $this->nullable($countryName);
+                    $update['region'] = $this->nullable($location['region'] ?? '');
+                    $update['city'] = $this->nullable($location['city'] ?? '');
+                }
+                DB::table($table)->whereIn('id', $ids)->update($update);
                 $processed += count($ids);
             }
 

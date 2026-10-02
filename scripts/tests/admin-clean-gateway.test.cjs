@@ -136,6 +136,9 @@ function sampleRow(overrides) {
         isp: '中国电信',
         organization: 'Chinanet',
         asn: 4134,
+        country_name: '中国',
+        region: '广东省',
+        city: '深圳市',
         location_status: 'resolved',
         user_agent: 'Clash/1.0',
         ua_hash: 'f'.repeat(64),
@@ -309,6 +312,25 @@ test('表头排序按 dataIndex 回传，时间列以 last_seen_at 参与排序'
     assert.equal(call.params.sort_dir, 'asc');
 });
 
+test('行数触顶时补「+」，没触顶就显示精确值', () => {
+    const { Page } = harness(respondFor([]));
+    const page = new Page({});
+    page.setState({
+        available: true,
+        stats: { retention_days: 180, records: 3570, raw_logs: 8546, earliest_text: '', last_cleaned_text: '' },
+    });
+    let text = flatten(page.render()).join('|');
+    assert.ok(text.includes('3570'), 'exact count must be rendered as-is');
+    assert.ok(text.includes('8546'), 'exact raw log count must be rendered as-is');
+    assert.equal(text.includes('3570+'), false, 'exact count must not carry a + suffix');
+
+    page.setState({
+        stats: { retention_days: 180, records: 20000, raw_logs: 20000, counts_capped: true },
+    });
+    text = flatten(page.render()).join('|');
+    assert.ok(text.includes('20000+'), 'capped counts must carry a + suffix');
+});
+
 test('留存设置保存到 /risk/gateway/config/save', async () => {
     const { Page, requests } = harness(respondFor([]));
     const page = new Page({});
@@ -345,9 +367,28 @@ test('归属地三种状态分别展示，未解析不冒充未知', () => {
     const page = new Page({});
     const columns = page.renderTable().props.columns;
     const ipColumn = columns.find(column => column.key === 'request_ip');
+    // 有运营商时只写运营商，地理不抢位。
     assert.equal(flatten(ipColumn.render('1.1.1.1', sampleRow())).join('|'), '1.1.1.1|中国电信 · Chinanet · AS4134');
-    assert.ok(flatten(ipColumn.render('1.1.1.1', sampleRow({ isp: '', organization: '', asn: null, location_status: 'pending' }))).join('|').includes('解析中'));
-    assert.ok(flatten(ipColumn.render('1.1.1.1', sampleRow({ isp: '', organization: '', asn: null, location_status: 'unknown' }))).join('|').includes('未知'));
+    // 三档都没有时才落回状态。
+    const bare = { isp: '', organization: '', asn: null, country_name: '', region: '', city: '' };
+    assert.ok(flatten(ipColumn.render('1.1.1.1', sampleRow(Object.assign({ location_status: 'pending' }, bare)))).join('|').includes('解析中'));
+    assert.ok(flatten(ipColumn.render('1.1.1.1', sampleRow(Object.assign({ location_status: 'unknown' }, bare)))).join('|').includes('未知'));
+});
+
+test('运营商查不到时退到国家/省/市，而不是一句「未知」', () => {
+    const { Page } = harness(respondFor([]));
+    const page = new Page({});
+    const ipColumn = page.renderTable().props.columns.find(column => column.key === 'request_ip');
+    const abroad = sampleRow({ isp: '', organization: '', asn: null, country_name: '德国', region: '', city: '法兰克福' });
+    assert.equal(flatten(ipColumn.render('5.34.219.253', abroad)).join('|'), '5.34.219.253|德国 · 法兰克福');
+
+    // 只有国家也不能重复写两遍
+    const onlyCountry = sampleRow({ isp: '', organization: '', asn: null, country_name: '美国', region: '美国', city: '' });
+    assert.equal(flatten(ipColumn.render('1.2.3.4', onlyCountry)).join('|'), '1.2.3.4|美国');
+
+    // 地理也没有，才落回状态
+    const nothing = sampleRow({ isp: '', organization: '', asn: null, country_name: '', region: '', city: '', location_status: 'unknown' });
+    assert.ok(flatten(ipColumn.render('1.2.3.4', nothing)).join('|').includes('未知'));
 });
 
 test('订阅列把该账号的全部订阅都列出来，本行那条排最前', () => {

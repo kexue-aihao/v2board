@@ -81,8 +81,14 @@
             var plan = subscription.plan_name || ("套餐 #" + subscription.plan_id);
             return "#" + subscription.id + " " + plan
         }
-        // 归属地只有三种状态：已解析、查不到、还没查。第三种要跟「查不到」分开显示，
-        // 否则运维会以为这个 IP 真的没有 ASN。
+        // IP 下面那行。优先级：运营商三件套 → 国家/省/市 → 状态。
+        //
+        // 为什么需要地理这一档：全球 IP 库里相当一部分记录只给地理、不给 ISP
+        // （海外 IP 尤其明显），只看运营商的话整格会写成「未知」，对排查毫无帮助 ——
+        // 「这个 IP 在德国」比「未知」有用得多。
+        //
+        // 「解析中」和「未知」要分开：前者是这次还没查、后者是查过且库里没有，
+        // 混成一个词会让运维以为库里真的没有这个 IP。
         function gatewayCarrierText(record) {
             if (!record)
                 return "-";
@@ -93,6 +99,14 @@
                 parts.push(record.organization);
             if (record.asn)
                 parts.push("AS" + record.asn);
+            if (parts.length)
+                return parts.join(" · ");
+            if (record.country_name)
+                parts.push(record.country_name);
+            if (record.region && record.region !== record.country_name)
+                parts.push(record.region);
+            if (record.city && record.city !== record.region)
+                parts.push(record.city);
             if (parts.length)
                 return parts.join(" · ");
             return "pending" === record.location_status ? "解析中" : "未知"
@@ -728,7 +742,10 @@
                 var self = this
                   , options = this.state.options
                   , stats = this.state.stats
-                  , days = Number(stats.retention_days === null || void 0 === stats.retention_days ? options.retention_days : stats.retention_days);
+                  , days = Number(stats.retention_days === null || void 0 === stats.retention_days ? options.retention_days : stats.retention_days)
+                  // 后端给行数设了上界（COUNT 到两万就停）。触顶时补一个「+」，
+                  // 免得把「至少两万」当成精确值念。
+                  , countSuffix = stats.counts_capped ? "+" : "";
                 return p.a.createElement("div", {
                     className: "row align-items-end"
                 }, p.a.createElement("div", {
@@ -759,7 +776,7 @@
                     className: "col-md-8 col-xl-9 mb-2 text-muted small"
                 }, p.a.createElement("div", null, "0 表示永久保留，上限 3650 天。超出留存期的拉取记录与清洗网关列表会一起被清理，页面看到的窗口与这个设置严格一致。"), p.a.createElement("div", {
                     className: "d-flex flex-wrap"
-                }, statItem("当前生效（天）", days), statItem("列表行数", Number(stats.records || 0)), statItem("原始审计", Number(stats.raw_logs || 0)), stats.earliest_text ? statItem("最早一条", stats.earliest_text) : null, stats.last_cleaned_text ? statItem("上次清理", stats.last_cleaned_text) : null)))
+                }, statItem("当前生效（天）", days), statItem("列表行数", Number(stats.records || 0) + countSuffix), statItem("原始审计", Number(stats.raw_logs || 0) + countSuffix), stats.earliest_text ? statItem("最早一条", stats.earliest_text) : null, stats.last_cleaned_text ? statItem("上次清理", stats.last_cleaned_text) : null)))
             }
             renderTable() {
                 var self = this

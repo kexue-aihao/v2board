@@ -28,6 +28,16 @@ if (strpos($bundle, "\r\n") !== false) {
     exit(1);
 }
 
+// 本脚本自己的锚点是 PHP 单引号串里**真实的换行**：文件被检出成 CRLF 时，锚点也跟着
+// 变成 CRLF，于是每一处都 strpos 不到 —— 脚本会一路跳过、打印「already applied」并
+// 以 0 退出，产物一行没改却没人知道。产物守卫拦不住这种情况（产物是 LF、脚本是 CRLF
+// 的混排出在工作副本上），所以这里直接对自己做同样的检查，把它变成响亮的失败。
+$selfSource = file_get_contents(__FILE__);
+if ($selfSource !== false && strpos($selfSource, "\r\n") !== false) {
+    fwrite(STDERR, "This patch script has CRLF line endings; run it from the LF checkout.\n");
+    exit(1);
+}
+
 $changed = 0;
 
 // ---- 1. 逐处文案与结构替换 -------------------------------------------------

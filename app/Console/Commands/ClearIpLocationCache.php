@@ -39,20 +39,27 @@ class ClearIpLocationCache extends Command
             }
             // 分块更新：这张表最大能到保留期内的全部四元组，单条 UPDATE 会在升级脚本里
             // 卡住整次部署，也会长时间持锁。
+            $reset = [
+                'isp' => null,
+                'organization' => null,
+                'asn' => null,
+                'location_status' => null,
+                'location_resolved_at' => null,
+                'updated_at' => time()
+            ];
+            if (Schema::hasColumn($table, 'country_name')) {
+                $reset['country_code'] = null;
+                $reset['country_name'] = null;
+                $reset['region'] = null;
+                $reset['city'] = null;
+            }
             $total = 0;
             do {
                 $updated = DB::table($table)
                     ->whereNotNull('location_resolved_at')
                     ->orderBy('id')
                     ->limit(2000)
-                    ->update([
-                        'isp' => null,
-                        'organization' => null,
-                        'asn' => null,
-                        'location_status' => null,
-                        'location_resolved_at' => null,
-                        'updated_at' => time()
-                    ]);
+                    ->update($reset);
                 $total += $updated;
             } while ($updated > 0);
 

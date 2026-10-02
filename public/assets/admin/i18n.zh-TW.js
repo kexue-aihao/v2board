@@ -26,6 +26,7 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "工單 #$1 · 使用者 #$2",
     },
     dict: {
+        "国家/地区": "國家/地區",
         "IP 记录": "IP 紀錄",
         "拉取记录": "拉取紀錄",
         "日志留存": "日誌留存",

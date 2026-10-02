@@ -462,6 +462,10 @@ class SchemaUpgradeService
             `isp` varchar(255) DEFAULT NULL,
             `organization` varchar(255) DEFAULT NULL,
             `asn` int(10) unsigned DEFAULT NULL,
+            `country_code` varchar(8) DEFAULT NULL,
+            `country_name` varchar(64) DEFAULT NULL,
+            `region` varchar(64) DEFAULT NULL,
+            `city` varchar(64) DEFAULT NULL,
             `location_status` varchar(16) DEFAULT NULL,
             `location_resolved_at` bigint(20) DEFAULT NULL,
             `created_at` int(11) NOT NULL,
@@ -482,6 +486,12 @@ class SchemaUpgradeService
             'isp' => 'varchar(255) DEFAULT NULL',
             'organization' => 'varchar(255) DEFAULT NULL',
             'asn' => 'int(10) unsigned DEFAULT NULL',
+            // 国家/省/市：运营商字段在海外 IP 上经常是空的（全球库很多只给地理不给 ISP），
+            // 列表里那格就会写成「未知」，对排查没有帮助。这四列是兜底显示用的。
+            'country_code' => 'varchar(8) DEFAULT NULL',
+            'country_name' => 'varchar(64) DEFAULT NULL',
+            'region' => 'varchar(64) DEFAULT NULL',
+            'city' => 'varchar(64) DEFAULT NULL',
             'location_status' => 'varchar(16) DEFAULT NULL',
             'location_resolved_at' => 'bigint(20) DEFAULT NULL',
             'created_at' => 'int(11) NOT NULL',

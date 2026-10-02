@@ -33,6 +33,10 @@ class SubscribeCleanGatewayController extends Controller
     private const EVENT_TABLE = 'v2_subscribe_block_rule_event';
     private const PAGE_SIZE_DEFAULT = 20;
     private const PAGE_SIZE_MAX = 100;
+    // 留存统计里行数的上界，见 cappedCount()。两万这个数是这么定的：一般站点
+    // 的规模远在它之下（拿到的是精确值），而真到了几百万行时，精确值对运维也
+    // 没有额外的信息量 —— 「20000+」已经说明该收窄保留期了。
+    private const COUNT_CAP = 20000;
 
     public function fetch(Request $request)
     {
@@ -99,7 +103,7 @@ class SubscribeCleanGatewayController extends Controller
 
         $columns = [
             __('账号'), __('账号ID'), __('订阅ID'), __('订阅'), __('IP 地址'), __('运营商'),
-            __('ASN'), __('归属机构'), __('User-Agent'), __('拉取次数'),
+            __('ASN'), __('归属机构'), __('国家/地区'), __('User-Agent'), __('拉取次数'),
             __('首次拉取（UTC+8）'), __('最近拉取（UTC+8）'), __('阻断状态'), __('阻断原因')
         ];
 
@@ -120,6 +124,11 @@ class SubscribeCleanGatewayController extends Controller
                     $row['isp'],
                     $row['asn'] === null ? '' : (string)$row['asn'],
                     $row['organization'],
+                    implode(' · ', array_values(array_unique(array_filter([
+                        $row['country_name'], $row['region'], $row['city']
+                    ], function ($part) {
+                        return trim((string)$part) !== '';
+                    })))),
                     $row['user_agent'],
                     $row['hit_count'],
                     $row['first_seen_text'],
@@ -374,18 +383,19 @@ class SubscribeCleanGatewayController extends Controller
         $service = new SubscribeCleanGatewayService();
         $lastCleanedAt = (int)Cache::get(CacheKey::get('SUBSCRIBE_AUDIT_LAST_CLEANED_AT', null), 0);
 
+        $records = $this->cappedCount(SubscribeCleanGatewayService::TABLE);
+        $rawLogs = $this->cappedCount('v2_subscribe_request_log');
+
         return response([
             'data' => [
                 'retention_days' => $retention->retentionDays(),
                 'retention_default' => SubscribeAuditRetentionService::DEFAULT_RETENTION_DAYS,
                 'retention_min' => SubscribeAuditRetentionService::MIN_RETENTION_DAYS,
-                // 行数取 information_schema 的估算值。这个接口在每次打开列表时都会和
-                // fetch 并发打出去，而 COUNT(*) 在 InnoDB 上等于把索引扫一遍 ——
-                // 原始审计表装着保留期内的全站拉取记录，几百万行时单个 COUNT(*) 就要
-                // 若干秒，几个并发请求叠起来足以让页面长时间转圈。这里要的是量级
-                // （有没有数据、涨得快不快），估算值够用。
-                'records' => $this->estimatedRows(SubscribeCleanGatewayService::TABLE),
-                'raw_logs' => $this->estimatedRows('v2_subscribe_request_log'),
+                'records' => $records,
+                'raw_logs' => $rawLogs,
+                // 触顶时前端在数字后面补一个「+」。触顶说明表已经很大，这时候
+                // 「20000+」比一个精确但要跑十几秒的数字更有用。
+                'counts_capped' => $records >= self::COUNT_CAP || $rawLogs >= self::COUNT_CAP,
                 'earliest_text' => $this->earliestText($service),
                 'last_cleaned_at' => $lastCleanedAt,
                 'last_cleaned_text' => $service->beijingText($lastCleanedAt)
@@ -394,25 +404,26 @@ class SubscribeCleanGatewayController extends Controller
     }
 
     /**
-     * information_schema 的行数估算，常数级开销。
+     * 有上界的精确行数。
      *
-     * InnoDB 的 TABLE_ROWS 是采样值，误差可达 ±50%，所以调用方把它当「量级」用，
-     * 不要拿它做等值判断。COUNT(*) 才是准的，但它的开销随表线性增长，不能放在
-     * 每次打开页面都要走的路径上。
+     * `SELECT COUNT(*) FROM (SELECT 1 FROM t LIMIT n) x` —— 内层的 LIMIT 让 MySQL
+     * 最多只读 n 行，小表拿到的是**精确值**（页面上「列表行数」和列表的「共 N 条」
+     * 必须对得上），大表则在常数时间内返回 n，由前端显示成「n+」。
+     *
+     * 为什么不用 information_schema.TABLE_ROWS：那是采样值，实测能差 3%（3570 vs
+     * 3696），同一个屏幕上两个数字对不上，比慢一点更难解释。为什么不直接
+     * COUNT(*)：它的开销随表线性增长，而这是每次打开页面都要走的路径。
      */
-    private function estimatedRows(string $table): int
+    private function cappedCount(string $table): int
     {
         try {
             if (!$this->hasTable($table)) {
                 return 0;
             }
-            $row = DB::selectOne(
-                'SELECT TABLE_ROWS AS row_count FROM information_schema.TABLES '
-                . 'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
-                [$table]
-            );
 
-            return $row === null ? 0 : (int)$row->row_count;
+            return (int)DB::query()
+                ->fromSub(DB::table($table)->selectRaw('1')->limit(self::COUNT_CAP), 'capped')
+                ->count();
         } catch (\Throwable $e) {
             return 0;
         }
