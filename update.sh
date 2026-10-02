@@ -101,7 +101,7 @@ deploy_download_composer
 deploy_install_composer
 deploy_patch_adapterman
 deploy_php scripts/patch-admin-reward.php
-deploy_php scripts/patch-admin-risk-clean.php
+deploy_php scripts/patch-admin-clean-gateway.php
 deploy_check_mmdb
 
 if [ "${LEGACY_DB_UPDATE:-0}" = "1" ]; then
@@ -115,6 +115,9 @@ deploy_php artisan optimize:clear
 deploy_php scripts/refresh-telegram-webhook.php
 deploy_php artisan ip:clear-location-cache
 deploy_php artisan ip:backfill-subscribe-locations --chunk=500
+# 上一条会清空 IP 归属缓存，也会把清洗网关那批冗余归属地一并重置；这里立刻补回来，
+# 否则升级后到下一次 access:locations 定时任务之间，列表按运营商/ASN 筛选会筛不出东西。
+deploy_php artisan access:locations --chunk=500
 deploy_php artisan horizon:terminate || true
 deploy_start_webman
 # 升级也要跑：早于本次改动安装的站点从来没被写过这条 cron，而检查是幂等的 —— 运维手写的

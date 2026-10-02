@@ -669,45 +669,33 @@ CREATE TABLE `v2_subscribe_request_log` (
                                   KEY `requested_at` (`requested_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS `v2_subscribe_ip_summary`;
-CREATE TABLE `v2_subscribe_ip_summary` (
-                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
-                                  `user_id` int(11) NOT NULL,
-                                  `request_ip` varchar(45) NOT NULL,
-                                  `hit_count` bigint(20) NOT NULL DEFAULT '0',
-                                  `first_seen_at` bigint(20) NOT NULL,
-                                  `last_seen_at` bigint(20) NOT NULL,
-                                  `recent_audit_id` bigint(20) NOT NULL,
-                                  `recent_subscription_id` bigint(20) DEFAULT NULL,
-                                  `recent_user_agent` varchar(1000) NOT NULL,
-                                  `recent_decision` varchar(16) NOT NULL DEFAULT 'allowed',
-                                  `created_at` int(11) NOT NULL,
-                                  `updated_at` int(11) NOT NULL,
-                                  PRIMARY KEY (`id`),
-                                  UNIQUE KEY `user_request_ip` (`user_id`,`request_ip`),
-                                  KEY `last_seen_at` (`last_seen_at`),
-                                  KEY `recent_audit_id` (`recent_audit_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-DROP TABLE IF EXISTS `v2_subscribe_user_agent_summary`;
-CREATE TABLE `v2_subscribe_user_agent_summary` (
-                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
-                                  `user_id` int(11) NOT NULL,
-                                  `ua_hash` char(64) NOT NULL,
-                                  `user_agent` varchar(1000) NOT NULL,
-                                  `hit_count` bigint(20) NOT NULL DEFAULT '0',
-                                  `first_seen_at` bigint(20) NOT NULL,
-                                  `last_seen_at` bigint(20) NOT NULL,
-                                  `recent_audit_id` bigint(20) NOT NULL,
-                                  `recent_subscription_id` bigint(20) DEFAULT NULL,
-                                  `recent_request_ip` varchar(45) NOT NULL,
-                                  `recent_decision` varchar(16) NOT NULL DEFAULT 'allowed',
-                                  `created_at` int(11) NOT NULL,
-                                  `updated_at` int(11) NOT NULL,
-                                  PRIMARY KEY (`id`),
-                                  UNIQUE KEY `user_ua_hash` (`user_id`,`ua_hash`),
-                                  KEY `last_seen_at` (`last_seen_at`),
-                                  KEY `recent_audit_id` (`recent_audit_id`)
+DROP TABLE IF EXISTS `v2_subscribe_access_summary`;
+CREATE TABLE `v2_subscribe_access_summary` (
+    `id` bigint(20) NOT NULL AUTO_INCREMENT,
+    `user_id` int(11) NOT NULL,
+    `subscription_id` bigint(20) NOT NULL DEFAULT '0',
+    `request_ip` varchar(45) NOT NULL,
+    `ua_hash` char(64) NOT NULL,
+    `user_agent` varchar(1000) NOT NULL,
+    `hit_count` bigint(20) NOT NULL DEFAULT '0',
+    `first_seen_at` bigint(20) NOT NULL,
+    `last_seen_at` bigint(20) NOT NULL,
+    `recent_audit_id` bigint(20) NOT NULL,
+    `recent_decision` varchar(16) NOT NULL DEFAULT 'allowed',
+    `isp` varchar(255) DEFAULT NULL,
+    `organization` varchar(255) DEFAULT NULL,
+    `asn` int(10) unsigned DEFAULT NULL,
+    `location_status` varchar(16) DEFAULT NULL,
+    `location_resolved_at` bigint(20) DEFAULT NULL,
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `user_subscription_ip_ua` (`user_id`,`subscription_id`,`request_ip`,`ua_hash`),
+    KEY `last_seen_at` (`last_seen_at`),
+    KEY `subscription_id` (`subscription_id`),
+    KEY `request_ip` (`request_ip`),
+    KEY `asn` (`asn`),
+    KEY `location_resolved_at` (`location_resolved_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 DROP TABLE IF EXISTS `v2_subscribe_block_rule`;
@@ -794,34 +782,6 @@ CREATE TABLE `v2_balance_log` (
                                   KEY `source` (`source_type`,`source_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS `v2_subscription_risk_cycle`;
-CREATE TABLE `v2_subscription_risk_cycle` (
-                                  `id` bigint(20) NOT NULL AUTO_INCREMENT,
-                                  `user_id` int(11) NOT NULL,
-                                  `subscription_id` bigint(20) NOT NULL,
-                                  `cycle_start` bigint(20) NOT NULL,
-                                  `cycle_end` bigint(20) NOT NULL,
-                                  `transfer_enable` bigint(20) NOT NULL DEFAULT '0',
-                                  `used_traffic` bigint(20) NOT NULL DEFAULT '0',
-                                  `used_ratio` decimal(12,8) DEFAULT NULL,
-                                  `user_agent_count` int(11) NOT NULL DEFAULT '0',
-                                  `distinct_ip_count` int(11) NOT NULL DEFAULT '0',
-                                  `city_count` int(11) NOT NULL DEFAULT '0',
-                                  `region_count` int(11) NOT NULL DEFAULT '0',
-                                  `country_count` int(11) NOT NULL DEFAULT '0',
-                                  `status` varchar(16) NOT NULL DEFAULT 'pending',
-                                  `risk_score` tinyint(3) unsigned DEFAULT NULL,
-                                  `risk_reasons` text DEFAULT NULL,
-                                  `metrics` text DEFAULT NULL,
-                                  `evaluated_at` bigint(20) DEFAULT NULL,
-                                  `created_at` int(11) NOT NULL,
-                                  `updated_at` int(11) NOT NULL,
-                                  PRIMARY KEY (`id`),
-                                  UNIQUE KEY `subscription_cycle_start` (`subscription_id`,`cycle_start`),
-                                  KEY `user_cycle_end` (`user_id`,`cycle_end`),
-                                  KEY `status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 DROP TABLE IF EXISTS `v2_ip_location_cache`;
 CREATE TABLE `v2_ip_location_cache` (
     `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -886,92 +846,6 @@ CREATE TABLE `v2_node_connection_log` (
     KEY `last_seen_at` (`last_seen_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-DROP TABLE IF EXISTS `v2_risk_rule`;
-CREATE TABLE `v2_risk_rule` (
-    `id` int(11) NOT NULL AUTO_INCREMENT,
-    `label` varchar(255) NOT NULL,
-    `dimension` varchar(32) NOT NULL,
-    `operator` varchar(2) NOT NULL,
-    `threshold` decimal(18,8) NOT NULL,
-    `weight` tinyint(3) unsigned NOT NULL DEFAULT '20',
-    `enabled` tinyint(1) NOT NULL DEFAULT '1',
-    `sort` int(11) DEFAULT NULL,
-    `created_at` int(11) NOT NULL,
-    `updated_at` int(11) NOT NULL,
-    PRIMARY KEY (`id`),
-    KEY `enabled_sort` (`enabled`,`sort`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-INSERT INTO `v2_risk_rule` (`label`,`dimension`,`operator`,`threshold`,`weight`,`enabled`,`sort`,`created_at`,`updated_at`) VALUES
-('订阅 UA 种类过多','user_agent_count','>',3,20,1,1,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
-('跨省/州请求过多','region_count','>=',3,20,1,2,UNIX_TIMESTAMP(),UNIX_TIMESTAMP()),
-('跨市请求过多','city_count','>=',3,20,1,3,UNIX_TIMESTAMP(),UNIX_TIMESTAMP());
-
-DROP TABLE IF EXISTS `v2_subscription_risk_manual`;
-CREATE TABLE `v2_subscription_risk_manual` (
-    `id` bigint(20) NOT NULL AUTO_INCREMENT,
-    `run_id` varchar(32) NOT NULL,
-    `user_id` int(11) NOT NULL,
-    `subscription_id` bigint(20) NOT NULL,
-    `status` varchar(16) NOT NULL DEFAULT 'no_data',
-    `risk_score` tinyint(3) unsigned DEFAULT NULL,
-    `window_start` bigint(20) NOT NULL DEFAULT 0,
-    `window_end` bigint(20) NOT NULL DEFAULT 0,
-    `risk_reasons` text DEFAULT NULL,
-    `metrics` text DEFAULT NULL,
-    `created_at` int(11) NOT NULL,
-    `updated_at` int(11) NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `subscription_id` (`subscription_id`),
-    KEY `user_id` (`user_id`),
-    KEY `run_id` (`run_id`),
-    KEY `risk_score` (`risk_score`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-DROP TABLE IF EXISTS `v2_subscription_risk_manual_stage`;
-CREATE TABLE `v2_subscription_risk_manual_stage` (
-    `id` bigint(20) NOT NULL AUTO_INCREMENT,
-    `run_id` varchar(32) NOT NULL,
-    `user_id` int(11) NOT NULL,
-    `subscription_id` bigint(20) NOT NULL,
-    `status` varchar(16) NOT NULL DEFAULT 'no_data',
-    `risk_score` tinyint(3) unsigned DEFAULT NULL,
-    `window_start` bigint(20) NOT NULL DEFAULT 0,
-    `window_end` bigint(20) NOT NULL DEFAULT 0,
-    `risk_reasons` text DEFAULT NULL,
-    `metrics` text DEFAULT NULL,
-    `created_at` int(11) NOT NULL,
-    `updated_at` int(11) NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `run_subscription` (`run_id`,`subscription_id`),
-    KEY `run_id` (`run_id`),
-    KEY `updated_at` (`updated_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-DROP TABLE IF EXISTS `v2_subscription_risk_notify`;
-CREATE TABLE `v2_subscription_risk_notify` (
-    `id` bigint(20) NOT NULL AUTO_INCREMENT,
-    `user_id` int(11) NOT NULL,
-    `subscription_id` bigint(20) NOT NULL,
-    `source` varchar(16) NOT NULL,
-    `window_start` bigint(20) NOT NULL,
-    `window_end` bigint(20) NOT NULL,
-    `risk_score` tinyint(3) unsigned NOT NULL,
-    `reasons` text DEFAULT NULL,
-    `recipients` int(11) NOT NULL DEFAULT '0',
-    `sent_at` bigint(20) DEFAULT NULL,
-    `handled_at` bigint(20) DEFAULT NULL,
-    `handled_by` varchar(255) DEFAULT NULL,
-    `created_at` int(11) NOT NULL,
-    `updated_at` int(11) NOT NULL,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `notify_once` (`subscription_id`,`source`,`window_start`),
-    KEY `pending` (`sent_at`,`risk_score`),
-    KEY `pending_subscription` (`subscription_id`,`handled_at`),
-    KEY `user_id` (`user_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-DROP TABLE IF EXISTS `v2_subscription_token_history`;
 CREATE TABLE `v2_subscription_token_history` (
     `id` bigint(20) NOT NULL AUTO_INCREMENT,
     `token_hash` char(64) NOT NULL,

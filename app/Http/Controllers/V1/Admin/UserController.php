@@ -22,7 +22,6 @@ use App\Services\PasswordPolicyService;
 use App\Services\ServerService;
 use App\Services\SubscribeAuditRetentionService;
 use App\Services\SubscriptionService;
-use App\Services\SubscriptionRiskService;
 use App\Services\IpLocationService;
 use App\Services\OnlineDeviceService;
 use App\Services\TelegramService;
@@ -88,21 +87,11 @@ class UserController extends Controller
         ]);
     }
 
-    private function filter(Request $request, $builder, ?SubscriptionRiskService $riskService = null)
+    private function filter(Request $request, $builder)
     {
         $filters = $request->input('filter');
         if ($filters) {
             foreach ($filters as $k => $filter) {
-                // 风险分支必须先于「模糊」改写：validator 放行什么，这里就原样收什么，
-                // 拒绝时报的才是客户端真正发的 condition，而不是被改写成 like 的产物。
-                if ($filter['key'] === 'risk') {
-                    $this->applyRiskFilter($builder, (string)$filter['condition'], (string)$filter['value'], $riskService);
-                    continue;
-                }
-                if ($filter['key'] === 'risk_score') {
-                    $this->applyRiskScoreFilter($builder, (string)$filter['condition'], (string)$filter['value'], $riskService);
-                    continue;
-                }
                 if ($filter['condition'] === '模糊') {
                     $filter['condition'] = 'like';
                     $filter['value'] = "%{$filter['value']}%";
@@ -126,229 +115,18 @@ class UserController extends Controller
         }
     }
 
-    /**
-     * 「风险」列过滤。徽标语义（SubscriptionRiskService::summaryForUser）逐条对译成 SQL：
-     *   可疑   = 任一订阅的最新周期判定为 suspicious
-     *   待观察 = 非可疑，且（无任何已评估周期 或 有订阅首个 30 天周期未走完 或 最新周期为 pending）
-     *   正常   = 非可疑且以上三个待观察来源全部不成立
-     * 徽标是逐行现算的，这里必须用同一套判据，否则筛出来的行和列上显示的牌子对不上。
-     */
-    private function applyRiskFilter($builder, string $condition, string $value, ?SubscriptionRiskService $riskService = null): void
-    {
-        // 风险是派生徽标，只有相等语义；其余 condition 属 API 面误用，拒绝。
-        if ($condition !== '=') {
-            abort(500, __('参数有误'));
-        }
-        // 词汇表外的值筛空集而不是 500：与兄弟 select 字段一致（banned/is_admin 的
-        // 陈旧值经 SQL 强转后同样得空结果）。过滤抽屉切换字段名会保留上一字段已填的
-        // 旧值，这是管理端可达的正常路径，不能拿 500 打断列表。
-        if (!in_array($value, ['suspicious', 'pending', 'normal'], true)) {
-            $builder->whereRaw('1 = 0');
-            return;
-        }
-
-        // fetch() 会把自己那份服务实例传进来：schema 探测是实例级 memo，共享实例让
-        // 过滤与徽标循环只探一次。其余共用 filter() 的端点各建各的。
-        $riskService = $riskService ?: new SubscriptionRiskService();
-        // 手动评估结果表就位后，「风险」列由它驱动，过滤必须走同一数据源。
-        if ($riskService->manualAvailable()) {
-            $this->applyManualRiskFilter($builder, $value);
-            return;
-        }
-        // —— 以下是结果表尚未安装时的回落口径（旧周期账本），与彼时徽标语义一致 ——
-        // 风险表未安装时徽标对全员显示「待观察」，过滤语义保持一致：pending 全命中，其余空集。
-        if (!$riskService->available()) {
-            if ($value !== 'pending') {
-                $builder->whereRaw('1 = 0');
-            }
-            return;
-        }
-
-        // 「某订阅的最新一个已评估周期状态为 X」：同订阅不存在 cycle_end 更大的行。
-        $latestCycleWithStatus = function (string $status) {
-            return function ($query) use ($status) {
-                $query->select(DB::raw(1))
-                    ->from('v2_subscription_risk_cycle as risk_latest')
-                    ->whereColumn('risk_latest.user_id', 'v2_user.id')
-                    ->where('risk_latest.status', $status)
-                    ->whereNotExists(function ($newer) {
-                        $newer->select(DB::raw(1))
-                            ->from('v2_subscription_risk_cycle as risk_newer')
-                            ->whereColumn('risk_newer.subscription_id', 'risk_latest.subscription_id')
-                            ->whereColumn('risk_newer.cycle_end', '>', 'risk_latest.cycle_end');
-                    });
-            };
-        };
-        $anyCycle = function ($query) {
-            $query->select(DB::raw(1))
-                ->from('v2_subscription_risk_cycle as risk_any')
-                ->whereColumn('risk_any.user_id', 'v2_user.id');
-        };
-        $firstCycleIncomplete = function ($query) {
-            $query->select(DB::raw(1))
-                ->from('v2_subscription as risk_sub')
-                ->whereColumn('risk_sub.user_id', 'v2_user.id')
-                ->where('risk_sub.started_at', '>', 0)
-                ->where('risk_sub.started_at', '>', time() - SubscriptionRiskService::CYCLE_SECONDS);
-        };
-
-        if ($value === 'suspicious') {
-            $builder->whereExists($latestCycleWithStatus('suspicious'));
-            return;
-        }
-        if ($value === 'pending') {
-            $builder->whereNotExists($latestCycleWithStatus('suspicious'))
-                ->where(function ($query) use ($anyCycle, $firstCycleIncomplete, $latestCycleWithStatus) {
-                    $query->whereNotExists($anyCycle)
-                        ->orWhereExists($firstCycleIncomplete)
-                        ->orWhereExists($latestCycleWithStatus('pending'));
-                });
-            return;
-        }
-        $builder->whereNotExists($latestCycleWithStatus('suspicious'))
-            ->whereExists($anyCycle)
-            ->whereNotExists($firstCycleIncomplete)
-            ->whereNotExists($latestCycleWithStatus('pending'));
-    }
-
-    /**
-     * 手动评估落库口径，与 SubscriptionRiskService::manualSummaryForUser 逐条一致：
-     *   可疑   = 任一现存订阅的手动判定为 suspicious
-     *   待观察 = 非可疑，且（无订阅 ∨ 有订阅未被任何一轮评估覆盖 ∨ 有订阅判定非 suspicious/normal）
-     *   正常   = 非可疑、有订阅、全部订阅已覆盖且判定均为 normal
-     * 判定行只对「现存订阅」计数（join v2_subscription），与摘要按订阅清单遍历同义——
-     * 订阅删除后的残留行两边都不作数。
-     */
-    private function applyManualRiskFilter($builder, string $value): void
-    {
-        $judgedRow = function (string $mode) {
-            return function ($query) use ($mode) {
-                $query->select(DB::raw(1))
-                    ->from('v2_subscription as risk_ms')
-                    ->join('v2_subscription_risk_manual as risk_mm', 'risk_mm.subscription_id', '=', 'risk_ms.id')
-                    ->whereColumn('risk_ms.user_id', 'v2_user.id');
-                if ($mode === 'suspicious') {
-                    $query->where('risk_mm.status', 'suspicious');
-                } else {
-                    // 待观察来源之一：已覆盖但既非可疑也非正常（no_data 及任何异常值）。
-                    $query->whereNotIn('risk_mm.status', ['suspicious', 'normal']);
-                }
-            };
-        };
-        $hasSubscription = function ($query) {
-            $query->select(DB::raw(1))
-                ->from('v2_subscription as risk_hs')
-                ->whereColumn('risk_hs.user_id', 'v2_user.id');
-        };
-        $uncoveredSubscription = function ($query) {
-            $query->select(DB::raw(1))
-                ->from('v2_subscription as risk_us')
-                ->whereColumn('risk_us.user_id', 'v2_user.id')
-                ->whereNotExists(function ($inner) {
-                    $inner->select(DB::raw(1))
-                        ->from('v2_subscription_risk_manual as risk_um')
-                        ->whereColumn('risk_um.subscription_id', 'risk_us.id');
-                });
-        };
-
-        if ($value === 'suspicious') {
-            $builder->whereExists($judgedRow('suspicious'));
-            return;
-        }
-        if ($value === 'pending') {
-            $builder->whereNotExists($judgedRow('suspicious'))
-                ->where(function ($query) use ($hasSubscription, $uncoveredSubscription, $judgedRow) {
-                    $query->whereNotExists($hasSubscription)
-                        ->orWhereExists($uncoveredSubscription)
-                        ->orWhereExists($judgedRow('odd'));
-                });
-            return;
-        }
-        $builder->whereNotExists($judgedRow('suspicious'))
-            ->whereExists($hasSubscription)
-            ->whereNotExists($uncoveredSubscription)
-            ->whereNotExists($judgedRow('odd'));
-    }
-
-    /**
-     * 用户级风险值（0-100）的 SQL 表达式，与 SubscriptionRiskService::summaryForUser 同源：
-     * 手动评估表就位时取它（只算现存订阅），否则取周期账本里「每个订阅最新的一个已评估周期」。
-     * 排序、筛选、徽标三处共用这一个表达式 —— 本文件的既有约定：口径不一致就会出现
-     * 「筛出来的行和列上的牌子对不上」。
-     *
-     * 返回 null 表示当前没有可用的分数列（未升级的库）：调用方按「无分数」退化处理。
-     */
-    private function riskScoreExpr(SubscriptionRiskService $riskService): ?string
-    {
-        $source = $riskService->scoreSource();
-        if ($source === 'manual') {
-            // 与 applyManualRiskFilter/manualSummaryForUser 同一锚点：只统计现存订阅的判定行。
-            return 'SELECT MAX(risk_score_src.risk_score)'
-                . ' FROM v2_subscription AS risk_score_sub'
-                . ' JOIN v2_subscription_risk_manual AS risk_score_src'
-                . ' ON risk_score_src.subscription_id = risk_score_sub.id'
-                . ' WHERE risk_score_sub.user_id = v2_user.id';
-        }
-        if ($source === 'cycle') {
-            // 周期账本按用户取，不 join 现存订阅 —— 与 cycleSummaryForUser 一致。
-            return 'SELECT MAX(risk_score_src.risk_score)'
-                . ' FROM v2_subscription_risk_cycle AS risk_score_src'
-                . ' WHERE risk_score_src.user_id = v2_user.id'
-                . ' AND NOT EXISTS (SELECT 1 FROM v2_subscription_risk_cycle AS risk_score_newer'
-                . ' WHERE risk_score_newer.subscription_id = risk_score_src.subscription_id'
-                . ' AND risk_score_newer.cycle_end > risk_score_src.cycle_end)';
-        }
-        return null;
-    }
-
-    /**
-     * 风险值数值筛选（= > >= < <=）。与「风险」徽标走同一个表达式，所以「筛出 >= 60 的行」
-     * 与「徽标显示 >= 60% 的行」永远一致；NULL（没判过）在两边都不命中，与排序表现一致。
-     */
-    private function applyRiskScoreFilter($builder, string $condition, string $value, ?SubscriptionRiskService $riskService = null): void
-    {
-        // 数值比较字段只有算术语义；词汇表外的 condition 属 API 面误用，拒绝。
-        if (!in_array($condition, ['=', '>', '>=', '<', '<='], true)) {
-            abort(500, __('参数有误'));
-        }
-        if (!is_numeric($value)) {
-            // 非数值按空集处理，与「风险」筛选遇到词汇表外的值同一口径：不拿 500 打断列表。
-            $builder->whereRaw('1 = 0');
-            return;
-        }
-
-        $riskService = $riskService ?: new SubscriptionRiskService();
-        $expr = $this->riskScoreExpr($riskService);
-        if ($expr === null) {
-            $builder->whereRaw('1 = 0');
-            return;
-        }
-
-        // $condition 已白名单、$value 已 is_numeric，这里是安全的参数绑定。
-        $builder->whereRaw("({$expr}) {$condition} ?", [(float)$value]);
-    }
-
     public function fetch(UserFetch $request)
     {
         $current = $request->input('current') ? $request->input('current') : 1;
         $pageSize = $request->input('pageSize') >= 10 ? $request->input('pageSize') : 10;
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        // 提前建好：风险值排序、风险过滤与下方徽标循环共享实例，schema 探测只跑一次。
-        $riskService = new SubscriptionRiskService();
         $userModel = User::select(
             DB::raw('*'),
             DB::raw('(u+d) as total_used')
         );
-        if ($sort === 'risk_score') {
-            // 风险值是派生值，v2_user 上没有这一列，用手动表/周期账本的同源表达式排序。
-            // 表达式不可用（未升级的库）时退回默认排序，而不是让整个列表 500。
-            $scoreExpr = $this->riskScoreExpr($riskService);
-            $userModel->orderByRaw(($scoreExpr === null ? 'created_at' : "({$scoreExpr})") . ' ' . $sortType);
-        } else {
-            $userModel->orderBy($sort, $sortType);
-        }
-        $this->filter($request, $userModel, $riskService);
+        $userModel->orderBy($sort, $sortType);
+        $this->filter($request, $userModel);
         $total = $userModel->count();
         $res = $userModel->forPage($current, $pageSize)
             ->get();
@@ -366,7 +144,6 @@ class UserController extends Controller
             $res[$i]['ips'] = $onlineDevices['ips'];
             $res[$i]['device_limit'] = $onlineDevices['device_limit'];
             $res[$i]['subscribe_url'] = Helper::getSubscribeUrl($res[$i]['token']);
-            $res[$i]['risk'] = $riskService->summaryForUser((int)$res[$i]['id']);
         }
         return response([
             'data' => $res,
@@ -430,7 +207,6 @@ class UserController extends Controller
             $subscription['subscribe_url'] = Helper::getSubscribeUrl($subscription->token, $subscription);
             return $subscription->makeHidden(['token', 'uuid']);
         })->values();
-        $user['risk'] = (new SubscriptionRiskService())->summaryForUser((int)$user->id);
         return response([
             'data' => $user
         ]);
@@ -621,8 +397,7 @@ class UserController extends Controller
                 'distinct_ip_count' => (int)(clone $query)->reorder()->select('request_ip')->distinct()->count('request_ip'),
                 'connection_ip_count' => $connections->pluck('ip')->unique()->count(),
                 'user_agents' => $uaSummary
-            ],
-            'risk' => (new SubscriptionRiskService())->summaryForUser($userId)
+            ]
         ]);
     }
 
@@ -660,35 +435,6 @@ class UserController extends Controller
             $record['ip_location'] = $locationService->lookup($record->ip);
         });
         return $records;
-    }
-
-    public function subscriptionRisk(Request $request)
-    {
-        $userId = (int)$request->input('user_id');
-        $user = User::find($userId);
-        if (!$user) abort(404, __('用户不存在'));
-        $subscriptionId = $request->input('subscription_id') ? (int)$request->input('subscription_id') : null;
-        if ($subscriptionId) {
-            if (!Schema::hasTable('v2_subscription')) abort(404, __('订阅不存在'));
-            $subscription = Subscription::where('id', $subscriptionId)->where('user_id', $userId)->first();
-            if (!$subscription) abort(404, __('订阅不存在'));
-            (new SubscriptionRiskService())->evaluateCompletedCycles($subscription);
-        } else {
-            $service = new SubscriptionService();
-            if ($service->available()) {
-                $riskService = new SubscriptionRiskService();
-                foreach ($service->forUser($user) as $subscription) {
-                    $riskService->evaluateCompletedCycles($subscription);
-                }
-            }
-        }
-        $riskService = new SubscriptionRiskService();
-        return response([
-            'data' => [
-                'summary' => $riskService->summaryForUser($userId),
-                'cycles' => $riskService->cyclesForUser($userId, $subscriptionId, $request->input('cycle_start') ? (int)$request->input('cycle_start') : null)
-            ]
-        ]);
     }
 
     public function clearSubscribeAudit(Request $request)

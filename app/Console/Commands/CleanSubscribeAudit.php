@@ -3,7 +3,9 @@
 namespace App\Console\Commands;
 
 use App\Services\SubscribeAuditRetentionService;
+use App\Utils\CacheKey;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -45,14 +47,26 @@ class CleanSubscribeAudit extends Command
         $this->info(sprintf('保留天数：%d（来自%s）', $result['days'], $source));
         $this->info('截止时间：' . date('Y-m-d H:i:s', $result['cutoff']) . ' 之前的记录会被清理');
         $this->info(sprintf(
-            '%s订阅拉取记录 %d 条，节点连接记录 %d 条。',
+            '%s订阅拉取记录 %d 条，节点连接记录 %d 条，清洗网关聚合 %d 行。',
             $dryRun ? '[dry-run] 将清理 ' : '已清理 ',
             $result['subscribe_request_log'],
-            $result['node_connection_log']
+            $result['node_connection_log'],
+            $result['subscribe_access_summary']
         ));
         if ($result['truncated']) {
             $this->warn('已达到 --limit 上限，剩余记录留待下次运行清理。');
         }
+
+        // 清洗网关页面要显示「上次清理时间」：运维判断保留期是否真的在生效，靠的就是它。
+        // 只在真的删过东西（或确认无需删除）时记录，--dry-run 不写。
+        if (!$dryRun) {
+            try {
+                Cache::put(CacheKey::get('SUBSCRIBE_AUDIT_LAST_CLEANED_AT', null), time());
+            } catch (\Throwable $e) {
+                // 记不住时间不该让清理整体失败。
+            }
+        }
+
         return self::SUCCESS;
     }
 
@@ -61,7 +75,11 @@ class CleanSubscribeAudit extends Command
      */
     private function warnMissingIndexes(): void
     {
-        foreach (['v2_subscribe_request_log' => 'requested_at', 'v2_node_connection_log' => 'last_seen_at'] as $table => $index) {
+        foreach ([
+            'v2_subscribe_request_log' => 'requested_at',
+            'v2_node_connection_log' => 'last_seen_at',
+            'v2_subscribe_access_summary' => 'last_seen_at'
+        ] as $table => $index) {
             if (!Schema::hasTable($table)) {
                 continue;
             }

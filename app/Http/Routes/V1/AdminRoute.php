@@ -137,22 +137,11 @@ class AdminRoute
             $router->post('/user/subscription/set-primary', 'V1\\Admin\\UserController@setPrimarySubscription');
             $router->post('/user/subscription/revoke', 'V1\\Admin\\UserController@revokeSubscription');
             $router->get ('/user/subscribe-requests', 'V1\\Admin\\UserController@subscribeRequests');
-            $router->get ('/user/risk', 'V1\\Admin\\UserController@subscriptionRisk');
             $router->post('/user/subscribe-audit/clear', 'V1\\Admin\\UserController@clearSubscribeAudit');
             // Rewards and games
             $router->get ('/reward/fetch', 'V1\\Admin\\RewardController@fetch');
             $router->post('/reward/save', 'V1\\Admin\\RewardController@save');
             // Risk
-            $router->get ('/risk/rule/fetch', 'V1\\Admin\\RiskRuleController@fetch');
-            $router->post('/risk/rule/save', 'V1\\Admin\\RiskRuleController@save');
-            $router->post('/risk/rule/show', 'V1\\Admin\\RiskRuleController@show');
-            $router->post('/risk/rule/sort', 'V1\\Admin\\RiskRuleController@sort');
-            $router->post('/risk/rule/drop', 'V1\\Admin\\RiskRuleController@drop');
-            $router->post('/risk/rule/recompute', 'V1\\Admin\\RiskRuleController@recompute');
-            $router->post('/risk/rule/manual-evaluate', 'V1\\Admin\\RiskRuleController@manualEvaluate');
-            // 订阅清洗网关的待处理区块：提醒台账里未处理的高风险订阅。
-            $router->get ('/risk/rule/high-risk', 'V1\\Admin\\RiskRuleController@highRisk');
-            $router->post('/risk/rule/high-risk/handle', 'V1\\Admin\\RiskRuleController@handleHighRisk');
             $router->get ('/risk/trace/fetch', 'V1\\Admin\\RiskTraceController@fetch');
             $router->get ('/risk/trace/history', 'V1\\Admin\\RiskTraceController@history');
             // lookup 与 reveal 用 POST 而非 GET：GET 会把 token 拼进 query string，落进
@@ -162,20 +151,17 @@ class AdminRoute
             // 多账号同 IP 关联分析。只读，数据来自 audit:ip-link 离线聚合出的累积表。
             $router->get ('/risk/shared-ip/fetch', 'V1\\Admin\\RiskSharedIpController@fetch');
             $router->get ('/risk/shared-ip/detail', 'V1\\Admin\\RiskSharedIpController@detail');
-            // 订阅拉取风控网关。规则目标仅能从既有审计记录派生。
-            $router->get ('/risk/gateway/fetch', 'V1\\Admin\\RiskGatewayController@fetch');
-            $router->get ('/risk/gateway/ip-records', 'V1\\Admin\\RiskGatewayController@ipRecords');
-            $router->get ('/risk/gateway/user-agent-records', 'V1\\Admin\\RiskGatewayController@userAgentRecords');
-            $router->get ('/risk/gateway/audit-records', 'V1\\Admin\\RiskGatewayController@auditRecords');
-            $router->get ('/risk/gateway/detail', 'V1\\Admin\\RiskGatewayController@detail');
-            // Compatibility aliases used by the compiled administrator bundle.
-            $router->get ('/risk/gateway/ip-summaries', 'V1\\Admin\\RiskGatewayController@ipRecords');
-            $router->get ('/risk/gateway/ua-summaries', 'V1\\Admin\\RiskGatewayController@userAgentRecords');
-            $router->get ('/risk/gateway/audit-detail', 'V1\\Admin\\RiskGatewayController@detail');
-            $router->get ('/risk/gateway/rules', 'V1\\Admin\\RiskGatewayController@rules');
-            $router->get ('/risk/gateway/history', 'V1\\Admin\\RiskGatewayController@history');
-            $router->post('/risk/gateway/block', 'V1\\Admin\\RiskGatewayController@block');
-            $router->post('/risk/gateway/release', 'V1\\Admin\\RiskGatewayController@release');
+            // 订阅清洗网关：拉取记录（账号 × 订阅 × IP × UA）+ 阻断名单。
+            // 阻断目标只能从既有拉取记录派生，接口不是任意封禁入口。
+            $router->get ('/risk/gateway/fetch', 'V1\\Admin\\SubscribeCleanGatewayController@fetch');
+            $router->get ('/risk/gateway/options', 'V1\\Admin\\SubscribeCleanGatewayController@options');
+            $router->post('/risk/gateway/export', 'V1\\Admin\\SubscribeCleanGatewayController@export');
+            $router->get ('/risk/gateway/config', 'V1\\Admin\\SubscribeCleanGatewayController@config');
+            $router->post('/risk/gateway/config/save', 'V1\\Admin\\SubscribeCleanGatewayController@saveConfig');
+            $router->get ('/risk/gateway/rules', 'V1\\Admin\\SubscribeCleanGatewayController@rules');
+            $router->get ('/risk/gateway/history', 'V1\\Admin\\SubscribeCleanGatewayController@history');
+            $router->post('/risk/gateway/block', 'V1\\Admin\\SubscribeCleanGatewayController@block');
+            $router->post('/risk/gateway/release', 'V1\\Admin\\SubscribeCleanGatewayController@release');
             // Stat
             $router->get ('/stat/getStat', 'V1\\Admin\\StatController@getStat');
             $router->get ('/stat/getOverride', 'V1\\Admin\\StatController@getOverride');

@@ -9,9 +9,10 @@ class SubscribeAuditRetentionService
 {
     public const DEFAULT_RETENTION_DAYS = 180;
 
-    // 风险周期是 30 天且只在周期完成后评估，保留期低于 31 天会在周期被评估前就删掉
-    // 证据。35 给延迟的调度留 4 天余量。校验层同样按这个下限拒绝。
-    public const MIN_RETENTION_DAYS = 35;
+    // 下限 1 天：订阅读取侧曾经有一条「保留期必须盖过 30 天风险周期」的约束，判定引擎
+    // 删除后这条约束消失，剩下的唯一要求是别把保留期设成 0 以外的无意义小值。
+    // 0 仍然表示关闭清理（永久保留）。
+    public const MIN_RETENTION_DAYS = 1;
 
     /**
      * 0 表示关闭清理。
@@ -32,10 +33,15 @@ class SubscribeAuditRetentionService
     }
 
     /**
-     * 清理超过保留期的审计记录。判定表 v2_subscription_risk_cycle 刻意不参与 ——
-     * 它是派生结论，必须比原始证据活得更久。
+     * 清理超过保留期的记录。
      *
-     * @return array{cutoff:int,days:int,subscribe_request_log:int,node_connection_log:int,truncated:bool}
+     * v2_subscribe_access_summary 跟着一起清：它是「订阅清洗网关」列表页的数据源，
+     * 原始证据删了、聚合行还挂在页面上，等于把保留期设置变成一句空话。这两张表必须
+     * 同进同退，页面看到的窗口才与留存设置严格一致。
+     *
+     * v2_ip_account_link 刻意不参与 —— 多账号同 IP 关联要的正是跨保留期的长期记忆。
+     *
+     * @return array{cutoff:int,days:int,subscribe_request_log:int,node_connection_log:int,subscribe_access_summary:int,truncated:bool}
      */
     public function purgeExpired(?int $days = null, int $chunk = 2000, int $maxRows = 500000, bool $dryRun = false): array
     {
@@ -45,6 +51,7 @@ class SubscribeAuditRetentionService
             'cutoff' => 0,
             'subscribe_request_log' => 0,
             'node_connection_log' => 0,
+            'subscribe_access_summary' => 0,
             'truncated' => false
         ];
         if ($days <= 0) {
@@ -61,24 +68,29 @@ class SubscribeAuditRetentionService
         $result['node_connection_log'] = $this->purgeByColumn(
             'v2_node_connection_log', 'last_seen_at', $cutoff, $chunk, $maxRows, $dryRun, $result['truncated']
         );
+        // 聚合行按「最后一次拉取」判断：只要这个四元组在保留期内还出现过就不删，
+        // 与同一四元组在原始日志里还留着证据保持一致。
+        $result['subscribe_access_summary'] = $this->purgeByColumn(
+            'v2_subscribe_access_summary', 'last_seen_at', $cutoff, $chunk, $maxRows, $dryRun, $result['truncated']
+        );
         return $result;
     }
 
     /**
-     * 清理单个用户的审计记录。这里连判定一起删：冻结之后这是唯一能重置误判徽章的
-     * 路径，而留着引用了具体 IP 的判定、下面证据却已清空，等于一条无法核实的指控。
+     * 清理单个用户的全部拉取痕迹。
      *
-     * @return array{subscribe_request_log:int,node_connection_log:int,subscription_risk_cycle:int,subscription_risk_manual:int,subscription_risk_manual_stage:int,ip_account_link:int}
+     * 聚合表必须按用户一起清：只删原始日志的话，该账号的 IP、UA 与拉取次数会以派生
+     * 形式残留在清洗网关页面上，与当年漏掉 v2_node_connection_log 是同一类问题。
+     *
+     * @return array{subscribe_request_log:int,node_connection_log:int,subscribe_access_summary:int,ip_account_link:int}
      */
-    public function purgeUser(int $userId, bool $withRisk = true, int $chunk = 5000): array
+    public function purgeUser(int $userId, int $chunk = 5000): array
     {
         $chunk = max(1, min(50000, $chunk));
         $counts = [
             'subscribe_request_log' => 0,
             'node_connection_log' => 0,
-            'subscription_risk_cycle' => 0,
-            'subscription_risk_manual' => 0,
-            'subscription_risk_manual_stage' => 0,
+            'subscribe_access_summary' => 0,
             'ip_account_link' => 0
         ];
         if ($userId <= 0) {
@@ -86,45 +98,14 @@ class SubscribeAuditRetentionService
         }
 
         $counts['subscribe_request_log'] = $this->purgeUserTable('v2_subscribe_request_log', $userId, $chunk);
+        $counts['node_connection_log'] = $this->purgeUserTable('v2_node_connection_log', $userId, $chunk);
+        $counts['subscribe_access_summary'] = $this->purgeUserTable('v2_subscribe_access_summary', $userId, $chunk);
         // 同 IP 关联累积表跟着原始日志一起清。它不参与保留期清理（派生结论要比证据活得久），
         // 但按用户清必须带上：否则清空/注销之后，该账号的真实 IP 会以派生形式残留在关联
-        // 分析里，与当年漏掉 v2_node_connection_log 是同一类问题。
+        // 分析里。
         $counts['ip_account_link'] = $this->purgeUserTable('v2_ip_account_link', $userId, $chunk);
-        $counts['node_connection_log'] = $this->purgeUserTable('v2_node_connection_log', $userId, $chunk);
-        if ($withRisk) {
-            $counts['subscription_risk_cycle'] = $this->purgeUserTable('v2_subscription_risk_cycle', $userId, $chunk);
-            // 手动评估判定表现在驱动「风险」列：证据删了、判定还挂在列表上，等于一条
-            // 无法核实的指控（同上方 ip_account_link 的道理）。行上的 user_id 是评估
-            // 时刻快照，订阅换绑后会过时，所以除按 user_id 清外，还要按该用户现存
-            // 订阅的 subscription_id 补一刀——徽标与筛选正是以订阅清单为锚。
-            $counts['subscription_risk_manual'] = $this->purgeUserTable('v2_subscription_risk_manual', $userId, $chunk)
-                + $this->purgeManualBySubscriptions('v2_subscription_risk_manual', $userId, $chunk);
-            // 未完成手动评估的暂存行同样含有 IP 派生判定，按用户清理时不能残留。
-            $counts['subscription_risk_manual_stage'] = $this->purgeUserTable('v2_subscription_risk_manual_stage', $userId, $chunk)
-                + $this->purgeManualBySubscriptions('v2_subscription_risk_manual_stage', $userId, $chunk);
-        }
-        return $counts;
-    }
 
-    private function purgeManualBySubscriptions(string $table, int $userId, int $chunk): int
-    {
-        if (!Schema::hasTable($table) || !Schema::hasTable('v2_subscription')) {
-            return 0;
-        }
-        $subscriptionIds = DB::table('v2_subscription')->where('user_id', $userId)->pluck('id');
-        if ($subscriptionIds->isEmpty()) {
-            return 0;
-        }
-        $total = 0;
-        do {
-            $deleted = DB::table($table)
-                ->whereIn('subscription_id', $subscriptionIds)
-                ->orderBy('id')
-                ->limit($chunk)
-                ->delete();
-            $total += $deleted;
-        } while ($deleted > 0);
-        return $total;
+        return $counts;
     }
 
     private function purgeByColumn(
@@ -143,7 +124,7 @@ class SubscribeAuditRetentionService
             return (int)DB::table($table)->where($column, '<', $cutoff)->count();
         }
 
-        // 分块删除而不是一条 DELETE：这两张表都在热路径上被写入，单条长事务比
+        // 分块删除而不是一条 DELETE：这几张表都在热路径上被写入，单条长事务比
         // 部分完成更糟。每块都走新加的单列索引，ORDER BY 让语句在 STATEMENT
         // 格式的 binlog 下也是确定的。
         $total = 0;

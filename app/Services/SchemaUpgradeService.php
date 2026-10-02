@@ -12,13 +12,10 @@ class SchemaUpgradeService
         'subscription_schema' => 'subscription_schema_v1',
         'risk_audit_schema' => 'risk_audit_schema_v1',
         'subscribe_gateway_schema' => 'subscribe_gateway_schema_v1',
-        'subscribe_audit_summary_schema' => 'subscribe_audit_summary_schema_v1',
+        'subscribe_access_summary_schema' => 'subscribe_access_summary_schema_v1',
         'ip_location_cache_schema' => 'ip_location_cache_schema_v1',
         'ip_location_enrichment_schema' => 'ip_location_enrichment_schema_v1',
         'node_connection_log_schema' => 'node_connection_log_schema_v1',
-        'risk_rule_schema' => 'risk_rule_schema_v1',
-        'risk_manual_schema' => 'risk_manual_schema_v1',
-        'risk_manual_stage_schema' => 'risk_manual_stage_schema_v1',
         'token_history_schema' => 'token_history_schema_v1',
         'password_policy_schema' => 'password_policy_schema_v1',
         'reseller_schema' => 'reseller_schema_v1',
@@ -37,8 +34,7 @@ class SchemaUpgradeService
         'telegram_registration_schema' => 'telegram_registration_schema_v1',
         'telegram_registration_invite_schema' => 'telegram_registration_invite_schema_v1',
         'two_factor_schema' => 'two_factor_schema_v1',
-        'server_tls_pin_schema' => 'server_tls_pin_schema_v1',
-        'risk_score_schema' => 'risk_score_schema_v1'
+        'server_tls_pin_schema' => 'server_tls_pin_schema_v1'
     ];
 
     public function run(): array
@@ -82,13 +78,13 @@ class SchemaUpgradeService
                 $this->applySubscriptionSchema();
                 return;
             case 'risk_audit_schema':
-                $this->applyRiskAuditSchema();
+                $this->applySubscribeAuditSchema();
                 return;
             case 'subscribe_gateway_schema':
                 $this->applySubscribeGatewaySchema();
                 return;
-            case 'subscribe_audit_summary_schema':
-                $this->applySubscribeAuditSummarySchema();
+            case 'subscribe_access_summary_schema':
+                $this->applySubscribeAccessSummarySchema();
                 return;
             case 'ip_location_cache_schema':
                 $this->applyIpLocationCacheSchema();
@@ -98,15 +94,6 @@ class SchemaUpgradeService
                 return;
             case 'node_connection_log_schema':
                 $this->applyNodeConnectionLogSchema();
-                return;
-            case 'risk_rule_schema':
-                $this->applyRiskRuleSchema();
-                return;
-            case 'risk_manual_schema':
-                $this->applyRiskManualSchema();
-                return;
-            case 'risk_manual_stage_schema':
-                $this->applyRiskManualStageSchema();
                 return;
             case 'token_history_schema':
                 $this->applyTokenHistorySchema();
@@ -303,7 +290,13 @@ class SchemaUpgradeService
             WHERE u.`u` <> s.`u` OR u.`d` <> s.`d`");
     }
 
-    private function applyRiskAuditSchema(): void
+    /**
+     * 迁移版本名沿用历史的 risk_audit_schema（改名会让已升级的库重跑一遍，
+     * 校验和也对不上），方法名按现在的职责叫「订阅拉取审计」。
+     * 同版本里曾经建过 30 天风险周期账本 v2_subscription_risk_cycle，
+     * 判定引擎删除后这里不再建表；已经存在的库保留该表，不做 DROP。
+     */
+    private function applySubscribeAuditSchema(): void
     {
         $this->requireTable('v2_user');
         $this->requireTable('v2_subscription');
@@ -350,52 +343,6 @@ class SchemaUpgradeService
         // 每次都要 INSERT 的全站最高频写路径，多一个二级索引就是每行多一次索引维护，
         // 而且在已有数百万行的表上跑 ALTER TABLE ADD KEY 本身也是一次与表规模成正比的
         // 在线 DDL。没有查询会用到的索引一律不加。
-
-        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_cycle` (
-            `id` bigint(20) NOT NULL AUTO_INCREMENT,
-            `user_id` int(11) NOT NULL,
-            `subscription_id` bigint(20) NOT NULL,
-            `cycle_start` bigint(20) NOT NULL,
-            `cycle_end` bigint(20) NOT NULL,
-            `transfer_enable` bigint(20) NOT NULL DEFAULT '0',
-            `used_traffic` bigint(20) NOT NULL DEFAULT '0',
-            `used_ratio` decimal(12,8) DEFAULT NULL,
-            `user_agent_count` int(11) NOT NULL DEFAULT '0',
-            `distinct_ip_count` int(11) NOT NULL DEFAULT '0',
-            `city_count` int(11) NOT NULL DEFAULT '0',
-            `region_count` int(11) NOT NULL DEFAULT '0',
-            `country_count` int(11) NOT NULL DEFAULT '0',
-            `status` varchar(16) NOT NULL DEFAULT 'pending',
-            `risk_reasons` text DEFAULT NULL,
-            `evaluated_at` bigint(20) DEFAULT NULL,
-            `created_at` int(11) NOT NULL,
-            `updated_at` int(11) NOT NULL,
-            PRIMARY KEY (`id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-        foreach ([
-            'user_id' => 'int(11) NOT NULL',
-            'subscription_id' => 'bigint(20) NOT NULL',
-            'cycle_start' => 'bigint(20) NOT NULL',
-            'cycle_end' => 'bigint(20) NOT NULL',
-            'transfer_enable' => "bigint(20) NOT NULL DEFAULT '0'",
-            'used_traffic' => "bigint(20) NOT NULL DEFAULT '0'",
-            'used_ratio' => 'decimal(12,8) DEFAULT NULL',
-            'user_agent_count' => "int(11) NOT NULL DEFAULT '0'",
-            'distinct_ip_count' => "int(11) NOT NULL DEFAULT '0'",
-            'city_count' => "int(11) NOT NULL DEFAULT '0'",
-            'region_count' => "int(11) NOT NULL DEFAULT '0'",
-            'country_count' => "int(11) NOT NULL DEFAULT '0'",
-            'status' => "varchar(16) NOT NULL DEFAULT 'pending'",
-            'risk_reasons' => 'text DEFAULT NULL',
-            'evaluated_at' => 'bigint(20) DEFAULT NULL',
-            'created_at' => 'int(11) NOT NULL',
-            'updated_at' => 'int(11) NOT NULL'
-        ] as $column => $definition) {
-            $this->ensureColumn('v2_subscription_risk_cycle', $column, $definition);
-        }
-        $this->ensureIndex('v2_subscription_risk_cycle', 'subscription_cycle_start', ['subscription_id', 'cycle_start'], true);
-        $this->ensureIndex('v2_subscription_risk_cycle', 'user_cycle_end', ['user_id', 'cycle_end']);
-        $this->ensureIndex('v2_subscription_risk_cycle', 'status', ['status']);
     }
 
     private function applySubscribeGatewaySchema(): void
@@ -482,90 +429,92 @@ class SchemaUpgradeService
         }
     }
 
-    private function applySubscribeAuditSummarySchema(): void
+    /**
+     * 订阅清洗网关的唯一数据源：一行 = 账号 × 订阅 × IP × User-Agent 四元组。
+     *
+     * 为什么不直接对 v2_subscribe_request_log 做 GROUP BY：那张表有保留期清理，而列表页
+     * 每次打开都要按用户/订阅/IP/UA/次数/时间六个维度筛选排序，直接在原始日志上做等于让
+     * 管理端的每次翻页都打一遍全站最高频写入的表。这里把它降维成四元组，筛选列全部落在
+     * 索引上。
+     *
+     * subscription_id 用 0 而不是 NULL 表示「写入时没有订阅」：唯一键里的 NULL 在 MySQL
+     * 下不参与去重，ON DUPLICATE KEY UPDATE 永远不触发，同一组合会无限插行。
+     *
+     * isp / organization / asn 是 IP 库的离线派生结果，由 access:locations 命令按
+     * location_resolved_at 增量回填 —— 订阅拉取写路径上不做归属地查询。
+     */
+    private function applySubscribeAccessSummarySchema(): void
     {
         $this->requireTable('v2_subscribe_request_log');
 
-        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscribe_ip_summary` (
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscribe_access_summary` (
             `id` bigint(20) NOT NULL AUTO_INCREMENT,
             `user_id` int(11) NOT NULL,
+            `subscription_id` bigint(20) NOT NULL DEFAULT '0',
             `request_ip` varchar(45) NOT NULL,
-            `hit_count` bigint(20) NOT NULL DEFAULT '0',
-            `first_seen_at` bigint(20) NOT NULL,
-            `last_seen_at` bigint(20) NOT NULL,
-            `recent_audit_id` bigint(20) NOT NULL,
-            `recent_subscription_id` bigint(20) DEFAULT NULL,
-            `recent_user_agent` varchar(1000) NOT NULL,
-            `recent_decision` varchar(16) NOT NULL DEFAULT 'allowed',
-            `created_at` int(11) NOT NULL,
-            `updated_at` int(11) NOT NULL,
-            PRIMARY KEY (`id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-        foreach ([
-            'user_id' => 'int(11) NOT NULL',
-            'request_ip' => 'varchar(45) NOT NULL',
-            'hit_count' => "bigint(20) NOT NULL DEFAULT '0'",
-            'first_seen_at' => 'bigint(20) NOT NULL',
-            'last_seen_at' => 'bigint(20) NOT NULL',
-            'recent_audit_id' => 'bigint(20) NOT NULL',
-            'recent_subscription_id' => 'bigint(20) DEFAULT NULL',
-            'recent_user_agent' => 'varchar(1000) NOT NULL',
-            'recent_decision' => "varchar(16) NOT NULL DEFAULT 'allowed'",
-            'created_at' => 'int(11) NOT NULL',
-            'updated_at' => 'int(11) NOT NULL'
-        ] as $column => $definition) {
-            $this->ensureColumn('v2_subscribe_ip_summary', $column, $definition);
-        }
-        $this->ensureIndex('v2_subscribe_ip_summary', 'user_request_ip', ['user_id', 'request_ip'], true);
-        $this->ensureIndex('v2_subscribe_ip_summary', 'last_seen_at', ['last_seen_at']);
-        $this->ensureIndex('v2_subscribe_ip_summary', 'recent_audit_id', ['recent_audit_id']);
-
-        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscribe_user_agent_summary` (
-            `id` bigint(20) NOT NULL AUTO_INCREMENT,
-            `user_id` int(11) NOT NULL,
             `ua_hash` char(64) NOT NULL,
             `user_agent` varchar(1000) NOT NULL,
             `hit_count` bigint(20) NOT NULL DEFAULT '0',
             `first_seen_at` bigint(20) NOT NULL,
             `last_seen_at` bigint(20) NOT NULL,
             `recent_audit_id` bigint(20) NOT NULL,
-            `recent_subscription_id` bigint(20) DEFAULT NULL,
-            `recent_request_ip` varchar(45) NOT NULL,
             `recent_decision` varchar(16) NOT NULL DEFAULT 'allowed',
+            `isp` varchar(255) DEFAULT NULL,
+            `organization` varchar(255) DEFAULT NULL,
+            `asn` int(10) unsigned DEFAULT NULL,
+            `location_status` varchar(16) DEFAULT NULL,
+            `location_resolved_at` bigint(20) DEFAULT NULL,
             `created_at` int(11) NOT NULL,
             `updated_at` int(11) NOT NULL,
             PRIMARY KEY (`id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         foreach ([
             'user_id' => 'int(11) NOT NULL',
+            'subscription_id' => "bigint(20) NOT NULL DEFAULT '0'",
+            'request_ip' => 'varchar(45) NOT NULL',
             'ua_hash' => 'char(64) NOT NULL',
             'user_agent' => 'varchar(1000) NOT NULL',
             'hit_count' => "bigint(20) NOT NULL DEFAULT '0'",
             'first_seen_at' => 'bigint(20) NOT NULL',
             'last_seen_at' => 'bigint(20) NOT NULL',
             'recent_audit_id' => 'bigint(20) NOT NULL',
-            'recent_subscription_id' => 'bigint(20) DEFAULT NULL',
-            'recent_request_ip' => 'varchar(45) NOT NULL',
             'recent_decision' => "varchar(16) NOT NULL DEFAULT 'allowed'",
+            'isp' => 'varchar(255) DEFAULT NULL',
+            'organization' => 'varchar(255) DEFAULT NULL',
+            'asn' => 'int(10) unsigned DEFAULT NULL',
+            'location_status' => 'varchar(16) DEFAULT NULL',
+            'location_resolved_at' => 'bigint(20) DEFAULT NULL',
             'created_at' => 'int(11) NOT NULL',
             'updated_at' => 'int(11) NOT NULL'
         ] as $column => $definition) {
-            $this->ensureColumn('v2_subscribe_user_agent_summary', $column, $definition);
+            $this->ensureColumn('v2_subscribe_access_summary', $column, $definition);
         }
-        $this->ensureIndex('v2_subscribe_user_agent_summary', 'user_ua_hash', ['user_id', 'ua_hash'], true);
-        $this->ensureIndex('v2_subscribe_user_agent_summary', 'last_seen_at', ['last_seen_at']);
-        $this->ensureIndex('v2_subscribe_user_agent_summary', 'recent_audit_id', ['recent_audit_id']);
+        // 唯一键是写入路径 ON DUPLICATE KEY UPDATE 的依据，必须是四元组本身。
+        $this->ensureIndex(
+            'v2_subscribe_access_summary',
+            'user_subscription_ip_ua',
+            ['user_id', 'subscription_id', 'request_ip', 'ua_hash'],
+            true
+        );
+        // 列表默认按最近拉取倒序，保留期清理也按这一列删。
+        $this->ensureIndex('v2_subscribe_access_summary', 'last_seen_at', ['last_seen_at']);
+        // 下面三个是「每个项目都要能筛选」的落点：按订阅、按 IP、按 ASN 精确筛。
+        $this->ensureIndex('v2_subscribe_access_summary', 'subscription_id', ['subscription_id']);
+        $this->ensureIndex('v2_subscribe_access_summary', 'request_ip', ['request_ip']);
+        $this->ensureIndex('v2_subscribe_access_summary', 'asn', ['asn']);
+        // 归属地回填命令的取数顺序：WHERE location_resolved_at IS NULL ORDER BY id。
+        $this->ensureIndex('v2_subscribe_access_summary', 'location_resolved_at', ['location_resolved_at']);
     }
 
     /**
      * 多账号同 IP 关联分析的累积表。
      *
      * 为什么不直接对 v2_subscribe_request_log 做 GROUP BY request_ip：那张表有保留期清理
-     * （audit:clean，默认 180 天、下限 35 天），过期原始行会被物理删除，而需求要的「历史
-     * 累积」恰恰是比保留期更长的记忆。这张表与 v2_subscription_risk_cycle 同性质 ——
-     * 派生结论必须比原始证据活得更久，所以它刻意不参与 purgeExpired()，只在账号注销 /
-     * 清空该用户审计记录时被 purgeUser() 带走（否则已注销账号的真实 IP 会以派生形式残留，
-     * 与当年漏掉 v2_node_connection_log 是同一类问题）。
+     * （audit:clean，默认 180 天），过期原始行会被物理删除，而需求要的「历史累积」恰恰是
+     * 比保留期更长的记忆。这张表与 v2_subscribe_access_summary 相反 —— 后者严格跟随保留期
+     * （页面看到的窗口必须与留存设置一致），本表是跨保留期的长期记忆，刻意不参与
+     * purgeExpired()，只在账号注销 / 清空该用户审计记录时被 purgeUser() 带走（否则已注销
+     * 账号的真实 IP 会以派生形式残留，与当年漏掉 v2_node_connection_log 是同一类问题）。
      *
      * 粒度取「IP + 账号 + UA 指纹」三元组，一行一个三元组，用 first_seen_at /
      * last_seen_at / hit_count 表达历史：规模由去重后的三元组基数决定，不随时间线性增长
@@ -687,264 +636,12 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_node_connection_log', 'last_seen_at', ['last_seen_at']);
     }
 
-    private function applyRiskRuleSchema(): void
-    {
-        $this->requireTable('v2_subscription_risk_cycle');
-
-        // 种子只在这次真的建了表时写，判断必须取在 CREATE 之前：
-        //   存量安装首次升级 ⇒ 表不存在 ⇒ 建表并写三条默认规则
-        //   全新安装 ⇒ install.sql 已建表并写好种子 ⇒ 不再写
-        //   任何后续部署 ⇒ 表已存在 ⇒ 不写，管理员删掉的规则不会复活
-        // 用「这次是否首次应用该迁移版本」来判断是不够的：全新安装不写
-        // v2_schema_migrations 行，首次 bash update.sh 会看到「未应用」，此时若管理员已经
-        // 删掉某条默认规则，下面的 WHERE NOT EXISTS 挡不住，规则会复活并重新给用户打标。
-        $freshTable = !Schema::hasTable('v2_risk_rule');
-
-        DB::statement("CREATE TABLE IF NOT EXISTS `v2_risk_rule` (
-            `id` int(11) NOT NULL AUTO_INCREMENT,
-            `label` varchar(255) NOT NULL,
-            `dimension` varchar(32) NOT NULL,
-            `operator` varchar(2) NOT NULL,
-            `threshold` decimal(18,8) NOT NULL,
-            `enabled` tinyint(1) NOT NULL DEFAULT '1',
-            `sort` int(11) DEFAULT NULL,
-            `created_at` int(11) NOT NULL,
-            `updated_at` int(11) NOT NULL,
-            PRIMARY KEY (`id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-        foreach ([
-            'label' => 'varchar(255) NOT NULL',
-            'dimension' => 'varchar(32) NOT NULL',
-            'operator' => 'varchar(2) NOT NULL',
-            'threshold' => 'decimal(18,8) NOT NULL',
-            'enabled' => "tinyint(1) NOT NULL DEFAULT '1'",
-            'sort' => 'int(11) DEFAULT NULL',
-            'created_at' => 'int(11) NOT NULL',
-            'updated_at' => 'int(11) NOT NULL'
-        ] as $column => $definition) {
-            $this->ensureColumn('v2_risk_rule', $column, $definition);
-        }
-        // 引擎唯一的读法是 WHERE enabled = 1 ORDER BY sort ASC, id ASC。
-        $this->ensureIndex('v2_risk_rule', 'enabled_sort', ['enabled', 'sort']);
-
-        // 新指标存进一个可空 JSON 列：已有的五个计数列和 used_ratio 是展示契约（编译产物
-        // 和 summaryForUser 都直接读），一个字节都不动，此后新增维度永远不需要再 DDL。
-        // 刻意不把这一列加进 SubscriptionRiskService::available()，那是硬闸门，多一个条件
-        // 就会在未升级的库上静默关掉全部风控评估。
-        $this->ensureColumn('v2_subscription_risk_cycle', 'metrics', 'text DEFAULT NULL');
-
-        if (!$freshTable) {
-            return;
-        }
-
-        // 第二道保险：并发部署或 CREATE 与 INSERT 之间被打断时，NOT EXISTS 保证不写重复行。
-        $now = time();
-        foreach ([
-            ['订阅 UA 种类过多', 'user_agent_count', '>', 3, 1],
-            ['跨省/州请求过多', 'region_count', '>=', 3, 2],
-            ['跨市请求过多', 'city_count', '>=', 3, 3]
-        ] as [$label, $dimension, $operator, $threshold, $sort]) {
-            DB::statement(
-                "INSERT INTO `v2_risk_rule`
-                    (`label`,`dimension`,`operator`,`threshold`,`enabled`,`sort`,`created_at`,`updated_at`)
-                 SELECT ?, ?, ?, ?, 1, ?, ?, ?
-                 FROM (SELECT 1) AS seed
-                 WHERE NOT EXISTS (
-                     SELECT 1 FROM `v2_risk_rule` r
-                     WHERE r.`dimension` = ? AND r.`operator` = ? AND r.`threshold` = ?
-                 )",
-                [$label, $dimension, $operator, $threshold, $sort, $now, $now, $dimension, $operator, $threshold]
-            );
-        }
-    }
-
-    /**
-     * 风险值（0-100 百分比）与管理员提醒台账。
-     *
-     * 全部是加列/建表，刻意不新建 v2_user 列：用户表是 traffic:update 每分钟改写的热表，
-     * 用户级别的风险值是「各订阅取最大」，读的时候用同一个子查询表达式算即可（排序、筛选、
-     * 徽标共用一个表达式，口径不会漂）。
-     *
-     * 新列一律不进 SubscriptionRiskService::available()：那是「缺列即停用全部风控」的硬闸门，
-     * 多一个条件就会让未升级的库静默失去全部评估。缺列时读不到就是 NULL，界面显示「—」。
-     *
-     * v2_subscription_risk_notify 同时承担三件事：
-     *   提醒幂等 —— notify_once 唯一键 = 同一订阅、同一来源、同一窗口只产生一条；
-     *   发送台账 —— sent_at 为空表示待发，发送失败下轮自动补发（先记后发，至少一次）；
-     *   管理员待办 —— handled_at 为空即「未处理」，未处理期间不再产生新提醒行。
-     */
-    private function applyRiskScoreSchema(): void
-    {
-        // apply() 每次 v2board:update 都会重跑每个版本体，且库结构可能被手工改动过，
-        // 所以这里一律「表在才加列」，不用 requireTable 把整次升级打断。
-        if (Schema::hasTable('v2_risk_rule')) {
-            $this->ensureColumn('v2_risk_rule', 'weight', "tinyint(3) unsigned NOT NULL DEFAULT '20'");
-        }
-
-        foreach ([
-            'v2_subscription_risk_cycle',
-            'v2_subscription_risk_manual',
-            'v2_subscription_risk_manual_stage'
-        ] as $table) {
-            if (Schema::hasTable($table)) {
-                $this->ensureColumn($table, 'risk_score', 'tinyint(3) unsigned DEFAULT NULL');
-            }
-        }
-        if (Schema::hasTable('v2_subscription_risk_manual')) {
-            $this->ensureIndex('v2_subscription_risk_manual', 'risk_score', ['risk_score']);
-        }
-
-        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_notify` (
-            `id` bigint(20) NOT NULL AUTO_INCREMENT,
-            `user_id` int(11) NOT NULL,
-            `subscription_id` bigint(20) NOT NULL,
-            `source` varchar(16) NOT NULL,
-            `window_start` bigint(20) NOT NULL,
-            `window_end` bigint(20) NOT NULL,
-            `risk_score` tinyint(3) unsigned NOT NULL,
-            `reasons` text DEFAULT NULL,
-            `recipients` int(11) NOT NULL DEFAULT '0',
-            `sent_at` bigint(20) DEFAULT NULL,
-            `handled_at` bigint(20) DEFAULT NULL,
-            `handled_by` varchar(255) DEFAULT NULL,
-            `created_at` int(11) NOT NULL,
-            `updated_at` int(11) NOT NULL,
-            PRIMARY KEY (`id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-        foreach ([
-            'user_id' => 'int(11) NOT NULL',
-            'subscription_id' => 'bigint(20) NOT NULL',
-            'source' => "varchar(16) NOT NULL",
-            'window_start' => 'bigint(20) NOT NULL',
-            'window_end' => 'bigint(20) NOT NULL',
-            'risk_score' => 'tinyint(3) unsigned NOT NULL',
-            'reasons' => 'text DEFAULT NULL',
-            'recipients' => "int(11) NOT NULL DEFAULT '0'",
-            'sent_at' => 'bigint(20) DEFAULT NULL',
-            'handled_at' => 'bigint(20) DEFAULT NULL',
-            'handled_by' => 'varchar(255) DEFAULT NULL',
-            'created_at' => 'int(11) NOT NULL',
-            'updated_at' => 'int(11) NOT NULL'
-        ] as $column => $definition) {
-            $this->ensureColumn('v2_subscription_risk_notify', $column, $definition);
-        }
-
-        // 幂等闸门：同一订阅、同一来源、同一窗口只可能有一行。
-        $this->ensureUniqueIndex('v2_subscription_risk_notify', 'notify_once', ['subscription_id', 'source', 'window_start']);
-        // 待发队列的取数顺序是 WHERE sent_at IS NULL ORDER BY risk_score DESC。
-        $this->ensureIndex('v2_subscription_risk_notify', 'pending', ['sent_at', 'risk_score']);
-        // 生成提醒前要问「这个订阅有没有未处理的待办」。
-        $this->ensureIndex('v2_subscription_risk_notify', 'pending_subscription', ['subscription_id', 'handled_at']);
-        $this->ensureIndex('v2_subscription_risk_notify', 'user_id', ['user_id']);
-    }
-
-    /**
-     * 手动自定义周期评估的判定表——用户列表「风险」列与筛选的数据源。刻意与
-     * v2_subscription_risk_cycle 分开：账本是 30 天网格上的冻结判定（审计抽屉的历史
-     * 周期视图继续用它），手动评估是任意窗口的即时体检，两者的周期语义不兼容。
-     *
-     * 一个订阅一行（subscription_id 唯一），每轮评估逐批 UPSERT、完成时按 run_id 清掉
-     * 未被本轮覆盖的残留行（订阅已删除或上一轮中断的遗留）——表的体量恒等于订阅数。
-     * 三态全落库：suspicious/normal/no_data，徽标据此三态渲染，不落「正常」就无法把
-     * 正常与「从未评估过」区分开。
-     */
-    private function applyRiskManualSchema(): void
-    {
-        $this->requireTable('v2_subscription_risk_cycle');
-
-        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_manual` (
-            `id` bigint(20) NOT NULL AUTO_INCREMENT,
-            `run_id` varchar(32) NOT NULL,
-            `user_id` int(11) NOT NULL,
-            `subscription_id` bigint(20) NOT NULL,
-            `status` varchar(16) NOT NULL DEFAULT 'no_data',
-            `window_start` bigint(20) NOT NULL DEFAULT 0,
-            `window_end` bigint(20) NOT NULL DEFAULT 0,
-            `risk_reasons` text DEFAULT NULL,
-            `metrics` text DEFAULT NULL,
-            `created_at` int(11) NOT NULL,
-            `updated_at` int(11) NOT NULL,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `subscription_id` (`subscription_id`),
-            KEY `user_id` (`user_id`),
-            KEY `run_id` (`run_id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-
-        foreach ([
-            'run_id' => "varchar(32) NOT NULL DEFAULT ''",
-            'user_id' => 'int(11) NOT NULL',
-            'subscription_id' => 'bigint(20) NOT NULL',
-            'status' => "varchar(16) NOT NULL DEFAULT 'no_data'",
-            'window_start' => 'bigint(20) NOT NULL DEFAULT 0',
-            'window_end' => 'bigint(20) NOT NULL DEFAULT 0',
-            'risk_reasons' => 'text DEFAULT NULL',
-            'metrics' => 'text DEFAULT NULL',
-            'created_at' => 'int(11) NOT NULL DEFAULT 0',
-            'updated_at' => 'int(11) NOT NULL DEFAULT 0'
-        ] as $column => $definition) {
-            $this->ensureColumn('v2_subscription_risk_manual', $column, $definition);
-        }
-        // UPSERT 语义靠 subscription_id 唯一键；徽标与过滤都以「现存订阅清单」为锚
-        // （行上的 user_id 是评估时刻快照，只作展示与运维检索用途）；完成批的残留
-        // 清理按 run_id。
-        $this->ensureUniqueIndex('v2_subscription_risk_manual', 'subscription_id', ['subscription_id']);
-        $this->ensureIndex('v2_subscription_risk_manual', 'user_id', ['user_id']);
-        $this->ensureIndex('v2_subscription_risk_manual', 'run_id', ['run_id']);
-    }
-
-    /**
-     * 手动评估的暂存表。未完成的轮次只写这里；扫描完毕后才以单条 INSERT ... SELECT
-     * 事务性地发布到 v2_subscription_risk_manual，避免半轮结果驱动用户风险徽标。
-     */
-    private function applyRiskManualStageSchema(): void
-    {
-        $this->requireTable('v2_subscription_risk_manual');
-
-        DB::statement("CREATE TABLE IF NOT EXISTS `v2_subscription_risk_manual_stage` (
-            `id` bigint(20) NOT NULL AUTO_INCREMENT,
-            `run_id` varchar(32) NOT NULL,
-            `user_id` int(11) NOT NULL,
-            `subscription_id` bigint(20) NOT NULL,
-            `status` varchar(16) NOT NULL DEFAULT 'no_data',
-            `window_start` bigint(20) NOT NULL DEFAULT 0,
-            `window_end` bigint(20) NOT NULL DEFAULT 0,
-            `risk_reasons` text DEFAULT NULL,
-            `metrics` text DEFAULT NULL,
-            `created_at` int(11) NOT NULL,
-            `updated_at` int(11) NOT NULL,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `run_subscription` (`run_id`,`subscription_id`),
-            KEY `run_id` (`run_id`),
-            KEY `updated_at` (`updated_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-        foreach ([
-            'run_id' => "varchar(32) NOT NULL DEFAULT ''",
-            'user_id' => 'int(11) NOT NULL',
-            'subscription_id' => 'bigint(20) NOT NULL',
-            'status' => "varchar(16) NOT NULL DEFAULT 'no_data'",
-            'window_start' => 'bigint(20) NOT NULL DEFAULT 0',
-            'window_end' => 'bigint(20) NOT NULL DEFAULT 0',
-            'risk_reasons' => 'text DEFAULT NULL',
-            'metrics' => 'text DEFAULT NULL',
-            'created_at' => 'int(11) NOT NULL DEFAULT 0',
-            'updated_at' => 'int(11) NOT NULL DEFAULT 0'
-        ] as $column => $definition) {
-            $this->ensureColumn('v2_subscription_risk_manual_stage', $column, $definition);
-        }
-        $this->ensureUniqueIndex('v2_subscription_risk_manual_stage', 'run_subscription', ['run_id', 'subscription_id']);
-        $this->ensureIndex('v2_subscription_risk_manual_stage', 'run_id', ['run_id']);
-        $this->ensureIndex('v2_subscription_risk_manual_stage', 'updated_at', ['updated_at']);
-    }
-
     private function applyTokenHistorySchema(): void
     {
         $this->requireTable('v2_user');
         $this->requireTable('v2_subscription');
 
-        // 与 applyRiskRuleSchema 同理：判断必须取在 CREATE 之前。
+        // 与 applyTokenHistorySchema 同理：判断必须取在 CREATE 之前。
         $freshTable = !Schema::hasTable('v2_subscription_token_history');
 
         // 订阅 token 被 resetSecret / resetSecurity 原地覆写，改之前不读旧值，全库没有
@@ -1104,7 +801,7 @@ class SchemaUpgradeService
     {
         $this->requireTable('v2_user');
 
-        // 与 applyRiskRuleSchema / applyTokenHistorySchema 同理：判断必须取在 ALTER 之前。
+        // 与 applyTokenHistorySchema 同理：判断必须取在 ALTER 之前。
         // run() 对每个版本每次部署都无条件重跑 apply()，不门控的话每次 update.sh 都会把
         // 已经重置过密码的用户重新标成待重置。
         $freshColumn = !Schema::hasColumn('v2_user', 'password_reset_required');

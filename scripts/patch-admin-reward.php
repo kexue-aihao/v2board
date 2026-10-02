@@ -28,7 +28,7 @@ JS;
     $bundle = str_replace($menuAnchor, $menuItem . "\n" . $menuAnchor, $bundle);
 }
 
-$routeAnchor = "        }, {\n            path: \"/risk/rule\",\n            exact: !0,\n            component: n(\"riskrulepage\").default";
+$routeAnchor = "        }, {\n            path: \"/risk/trace\",\n            exact: !0,\n            component: n(\"risktracepage\").default";
 if (strpos($bundle, 'path: "/reward"') === false) {
     $routeItem = <<<'JS'
         }, {

@@ -355,14 +355,11 @@ period 支持值：
 | email_verify | 0/1 | 0 | 注册邮箱验证 |
 | oauth_register_only | 0/1 | 0 | 仅允许第三方 OAuth 注册，关闭邮箱注册入口 |
 | admin_2fa_force_enable | 0/1 | 0 | 强制管理员/员工绑定二步验证；开启前若仍有管理员或员工未绑定，保存返回 422 |
-| subscribe_audit_retention_days | integer | 180 | 订阅审计保留天数，0=不清理，否则须在 35-3650 之间 |
+| subscribe_audit_retention_days | integer | 180 | 订阅审计保留天数，0=不清理，否则须在 1-3650 之间。同时决定「订阅清洗网关」列表能看到多久的记录 |
 | deposit_bounus | array | [] | 充值赠送阶梯，每项格式「充值金额:奖励金额」 |
 | reseller_enable | 0/1 | 0 | 启用分销/倒卖商模块 |
 | reseller_allowed_payment_drivers | array | [] | 倒卖商可用支付驱动白名单 |
 | telegram_subscription_binding_enable | 0/1 | 0 | 启用 Telegram 订阅绑定 |
-| risk_notify_enable | 0/1 | 1 | 订阅清洗网关的管理员提醒总闸；关闭时仍登记待办，只是不发消息 |
-| risk_notify_threshold | integer | 60 | 触发提醒的风险值百分比（1-100） |
-| risk_notify_max_per_run | integer | 20 | 单条摘要里展开的明细行数上限（1-200），超出只报数量 |
 | telegram_binding_check_interval | integer | 300 | Telegram 绑定校验间隔（秒），60-3600 |
 | telegram_account_binding_enable | 0/1 | 0 | 登录后引导未绑定的普通存量账号绑定 Telegram（需配置机器人 Token） |
 | telegram_register_enable | 0/1 | 0 | 启用 Telegram 机器人注册 |
@@ -375,9 +372,9 @@ period 支持值：
 
 | 方法 | 接口路径 | 请求参数 | 返回/说明 |
 | --- | --- | --- | --- |
-| GET | /user/fetch | current、pageSize、sort、sort_type、filter | 用户列表，含在线设备、订阅地址和风险摘要 |
+| GET | /user/fetch | current、pageSize、sort、sort_type、filter | 用户列表，含在线设备与订阅地址 |
 | POST | /user/update | 用户编辑字段 | 修改用户（改密码会要求重置并同步主订阅） |
-| GET | /user/getUserInfoById | id | 用户详情、订阅和风险 |
+| GET | /user/getUserInfoById | id | 用户详情与订阅 |
 | POST | /user/generate | 用户生成字段 | 创建用户（单个或批量，最多 500） |
 | POST | /user/dumpCSV | filter | 导出用户 |
 | POST | /user/sendMail | subject、content、filter | 按筛选批量发送邮件 |
@@ -390,8 +387,7 @@ period 支持值：
 | POST | /user/subscription/set-primary | user_id、subscription_id | 设置指定用户主订阅 |
 | POST | /user/subscription/revoke | user_id、subscription_id | 撤销指定用户订阅 |
 | GET | /user/subscribe-requests | user_id 等筛选参数 | 历史 UA、IP、归属地与节点连接记录 |
-| GET | /user/risk | user_id、subscription_id、cycle_start | 风险周期和摘要 |
-| POST | /user/subscribe-audit/clear | user_id | 清空该用户的订阅审计记录（会记录操作者） |
+| POST | /user/subscribe-audit/clear | user_id | 清空该用户的订阅审计记录与清洗网关聚合（会记录操作者） |
 | GET | /user/checkLogin | 无 | 管理端会话校验（编译后台登录后调用） |
 | GET | /user/info | 无 | 当前管理员本人信息（编译后台登录后调用） |
 
@@ -421,7 +417,6 @@ period 支持值：
 | ip_location | MMDB 查询出的归属信息 |
 | connections | 节点上报的真实连接 IP 列表（含 node_name、ip_location） |
 | summary | 请求数、UA 数、订阅拉取的不同 IP 数、节点连接的不同 IP 数及 UA 汇总列表 |
-| risk | 用户风险摘要 |
 
 IP 归属字段：
 
@@ -457,7 +452,7 @@ IP 归属字段：
 | 知识库 | /knowledge/fetch、getCategory、save、show、drop、sort |
 | 系统 | /system/getSystemStatus、getQueueStats、getQueueWorkload、getQueueMasters、getSystemLog |
 | 主题 | /theme/getThemes、saveThemeConfig、getThemeConfig |
-| 订阅清洗网关 | /risk/rule/fetch、save、show、sort、drop、recompute、manual-evaluate、high-risk、high-risk/handle |
+| 订阅清洗网关 | /risk/gateway/fetch、options、export、config、config/save、rules、history、block、release |
 | 订阅溯源 | /risk/trace/fetch、history、token/lookup、token/reveal |
 | 多账号同 IP | /risk/shared-ip/fetch、detail |
 | 倒卖商审批 | /reseller/summary、accounts、stores、review-logs、accounts/review、stores/review、accounts/reset-password |
@@ -497,9 +492,11 @@ start_at 默认取 30 天前、end_at 默认取当前时间；满足 start_at <=
 
 /system/getQueueMasters 由 Horizon 自带的 MasterSupervisorController@index 直接提供，只是挂在管理员密钥路径与 admin 中间件之下；未运行 Horizon 时该接口不可用，其余 /system/* 由本项目的 SystemController 提供。
 
-风控模块中：/risk/rule 的 save、show、sort、drop、recompute、manual-evaluate 为 POST；/risk/trace/fetch、/risk/trace/history 与 /risk/shared-ip/fetch、detail 为只读 GET；/risk/trace/token/lookup、/risk/trace/token/reveal 刻意使用 POST（而非 GET），以避免订阅 token 被拼进 query string 落入 nginx 访问日志、浏览器历史与 Referer。多账号同 IP 面板只读，数据来自 audit:ip-link 离线聚合出的 v2_ip_account_link 累积表。
+风控模块中：/risk/gateway 的 export、config/save、block、release 为 POST，其余为只读 GET；/risk/trace/fetch、/risk/trace/history 与 /risk/shared-ip/fetch、detail 为只读 GET；/risk/trace/token/lookup、/risk/trace/token/reveal 刻意使用 POST（而非 GET），以避免订阅 token 被拼进 query string 落入 nginx 访问日志、浏览器历史与 Referer。多账号同 IP 面板只读，数据来自 audit:ip-link 离线聚合出的 v2_ip_account_link 累积表。
 
-`POST /risk/rule/manual-evaluate` 为管理员发起的全站自定义时间窗订阅风险评估。首个请求传 `restart=1` 和整数 `hours`（1-2208，即 1 小时至 92 天）；响应返回 `run_id`、进度计数和时间窗。未完成时以返回的 `run_id` 发起后续请求推进批处理；完成后返回最多 200 条可疑订阅明细。评估按启动时的规则快照执行，并将结果写入手动风险结果表，供管理端用户列表的风险列和筛选使用。
+`POST /risk/gateway/export` 按当前筛选条件导出 CSV：UTF-8 带 BOM（Excel 直接打开不乱码）、CRLF 行尾、字段按 RFC 4180 转义（引号、逗号、换行、以及 Excel 会当公式执行的 `= + - @` 前缀）。单次上限 200000 行，触顶时最后一行会写明被截断。响应不是 JSON，管理端请求助手据此把 body 当二进制读回并触发浏览器下载。
+
+`POST /risk/gateway/block` 只能从已落库的拉取记录派生阻断目标（`summary_id` + `scope`），不是任意封禁入口。`scope` 四选一：`ip`、`user_agent`、`user`、`subscription`。命中后全站生效 —— 见第 10.1 节。
 
 倒卖商模块另注册了 /reseller/fetch、/reseller/update，以及旧版单数别名 /reseller/template/fetch、/reseller/template/save（与 templates、templates/save 等价，为兼容旧版前端保留）。
 
@@ -572,38 +569,61 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 
 节点流量上报优先按订阅级 node_user_id、subscription_id 处理，同时保留旧用户 ID 兼容。
 
-## 十、风险判定字段
+## 十、订阅清洗网关
 
-| 统计项 | 说明 |
+管理端只有**一个**风控页面：侧栏「订阅清洗网关」，路由 `/risk/gateway`。它取代了此前分开的「订阅清洗网关（策略页）」与「订阅风控网关（拦截页）」—— 判定引擎（12 维度规则、权重与风险值、30 天周期账本、Telegram 管理员提醒、用户列表的风险列与风险值列）已整体删除。剩下的是一条记录 + 一个动作：**看清谁在拉订阅，然后把该拦的拦掉**。
+
+### 10.1 一行是什么
+
+一行 = 账号 × 订阅 × IP × User-Agent 四元组，来自聚合表 `v2_subscribe_access_summary`，由每次订阅拉取时与原始审计 `v2_subscribe_request_log` 同步累加（四元组相同则 `hit_count + 1`，并刷新最近一次的时间与订阅）。
+
+页面按需求把六件事摆在一行里：
+
+| 列 | 内容 |
 | --- | --- |
-| cycle_start | 订阅生效时间 + N × 30 天 |
-| cycle_end | 周期结束时间 |
-| transfer_enable | 套餐总流量 |
-| used_traffic | 周期上传加下载流量 |
-| used_ratio | used_traffic / transfer_enable |
-| user_agent_count | 不同 UA 数量 |
-| distinct_ip_count | 不同 IP 数量 |
-| city_count | 不同城市数量 |
-| region_count | 不同地区数量 |
-| country_count | 不同国家数量 |
-| status | pending、normal、suspicious |
-| risk_score | 风险值百分比（0-100）：命中策略的权重累加、封顶 100；pending 与未升级的库为 NULL |
-| risk_reasons | 风险原因 JSON |
+| 账号 | 邮箱 + 用户 ID |
+| 订阅 | 该账号名下的**全部**订阅（多订阅时是一个列表），本行对应的那条排在最前并高亮 |
+| IP 记录 | 拉取订阅的 IP 地址；下面一行是归属地的运营商 / 归属机构 / ASN |
+| User-Agent | 拉取订阅所用的 UA 原文 |
+| 次数 | 该四元组的累计拉取次数 |
+| 时间（UTC+8） | 最近一次拉取时间（北京时间），下面一行是首次拉取时间 |
 
-风险数据只对已完成的固定 30 天周期计算。IP 归属查询失败不会阻断订阅接口。
+时间一律按 UTC+8 解析与渲染：列表里的时间文本由后端 `gmdate(ts + 8h)` 产出，筛选框里填的 `2026-10-01 00:00` 也按北京时间解释。前端不做任何时区换算。
 
-### 10.1 订阅清洗网关（原「风控规则」）
+### 10.2 筛选
 
-管理端 `风控规则` 页已更名为**订阅清洗网关**（路由仍是 `/risk/rule/*`，表名与类名不变）：
+**每一列都有筛选**：账号（模糊）、账号 ID（精确）、套餐、订阅 ID（精确）、IP（完整 IP 精确匹配，否则模糊）、运营商 / 归属机构（模糊）、ASN（`4134` / `AS4134` 都认）、User-Agent（模糊）、拉取次数（`= > >= < <=` 数值比较）、时间范围（UTC+8）、阻断状态（已阻断 / 未阻断）。「次数」与「时间」列可点击表头排序。
 
-- **策略 = 条件 + 权重**：每条规则有 0-100 的权重（默认 20）。判定命中时把权重累加得到风险值，封顶 100%。三条内置规则全部命中正好 60%，与提醒阈值对齐。权重只影响分数，不影响是否命中。
-- **分值语义**：`suspicious`/`normal` 写真实分数（0 表示判过且干净）；`pending` 与没有依据的周期写 NULL（"没判过"），按分数筛选/排序时两者不会混在一起。
-- **排序与筛选**：用户列表「风险值」列显示百分比并可排序（`sort=risk_score`），筛选支持 `= > >= < <=`，与风险徽标同源同口径。
-- **提醒**：风险值达到 `risk_notify_threshold`（默认 60）时，给**每位绑定了 Telegram 的管理员发一条私聊摘要**（不是群消息）。同一订阅每个评估窗口只提醒一次；在页面的「待处理」区块点「标记已处理」之前，不会为同一订阅再产生新提醒。
-- **节奏（重要）**：判定来自每日 0:20 的 `subscription:risk`（每个订阅每个 30 天周期最多产出一个新分值）与管理员手动评估，**不实时更新**。提醒在判定产出后立即发出，`risk:notify` 每 15 分钟兜底补发。
-- **投递**：走 `send_telegram` 队列，需要 Horizon 在跑；`telegram_bot_enable` 或 `telegram_bot_token` 未配置时只登记待办不发送，日志留 `风险提醒已登记但未发送`；一个绑定 Telegram 的管理员都没有时同样不发送（日志留 `风险提醒无法送达`），避免"以为发了"。
-- **接口**：`GET /risk/rule/high-risk` 待办列表（按风险值倒序，只含未处理行）、`POST /risk/rule/high-risk/handle`（`id` 或 `ids[]`，标记已处理）。
-- **配置**：`risk_notify_enable`（默认 1）、`risk_notify_threshold`（默认 60）、`risk_notify_max_per_run`（单条摘要的明细行上限，默认 20，超出只报数量）。编译产物的配置表单不提交这三项，需手工写 `config/v2board.php` 后 `artisan config:clear`；`/config/fetch` 会回显当前生效值。
+### 10.3 归属地
+
+`isp` / `organization` / `asn` 是 IP 库的派生结果，**不在订阅拉取写路径上查**（那条路径是全站最高频的写）。它们由两处补齐，互为兜底：
+
+- 列表页打开时，把当前这一页里 `location_resolved_at` 仍为空的行就地查一次并回写；
+- `php artisan access:locations` 按 `location_resolved_at` 增量补齐其余的（调度每 10 分钟跑一次）。
+
+`ip:clear-location-cache` 会连同这份冗余一起清空，避免 IP 库换版后两处口径分叉。
+
+### 10.4 阻断
+
+行尾的「阻断」按钮支持四种条件：`ip`、`user_agent`、`user`、`subscription`。阻断目标只能从已落库的拉取记录派生，接口不是任意封禁入口。
+
+**命中即整站拒绝**：阻断写入 `v2_subscribe_block_rule`（判定在 `SubscribeGatewayService::inspect()`），此后**全站**任何命中该条件的订阅请求一律返回 **HTTP 500 + 正文 `error`**。四种 scope 的优先级为订阅 → 账号 → IP → User-Agent，任一命中即生效。阻断/解除都写 `v2_subscribe_block_rule_event`，页面下半部分的「阻断操作留痕」就是它。
+
+> 注意：500 是**服务器错误**，多数客户端会把它当成临时故障并重试。这是需求指定的行为；如果某些客户端因此形成重试风暴，把 `ClientController::subscribe()` 里那三行改回 `abort(403, ...)` 即可。
+
+阻断可选到期时间（UTC+8，留空为永久）。到期后规则不再生效，但记录保留为「已到期」。
+
+### 10.5 日志留存
+
+留存天数就是 `subscribe_audit_retention_days`（默认 180，0 = 永久保留，范围 1-3650），可以直接在页面顶部改并保存（写 `config/v2board.php`），也可以用「系统配置」的同一项。
+
+`audit:clean`（每天 0:40）按它清理**原始审计、节点连接记录与清洗网关聚合表**三处。聚合表刻意跟原始日志同进同退：证据删了、聚合行还挂在页面上，留存设置就是一句空话。页面顶部显示当前生效天数、列表行数、原始审计条数与上次清理时间。保留期的**例外**只有 `v2_ip_account_link`（多账号同 IP 的长期记忆，刻意比证据活得久）。
+
+### 10.6 导出 CSV
+
+页面右上「导出 CSV」按**当前筛选条件**导出，与用户列表的导出同一条链路（响应不是 JSON，前端收 ArrayBuffer 后生成 Blob 下载）。格式：UTF-8 带 BOM（Excel 直接打开不乱码）、CRLF 行尾、字段按 RFC 4180 转义。单次上限 200000 行，触顶时最后一行写明被截断。
+
+导出的列：账号、账号ID、订阅ID、订阅、IP 地址、运营商、ASN、归属机构、User-Agent、拉取次数、首次拉取（UTC+8）、最近拉取（UTC+8）、阻断状态、阻断原因。
 
 ## 十一、运维命令
 
@@ -614,11 +634,10 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 | php artisan payment:invalidate-legacy --force | 作废所有未绑定支付尝试的旧待支付订单；支付安全升级后首次部署必须执行 |
 | php artisan ip:clear-location-cache | 清理 IP 归属缓存 |
 | php artisan ip:backfill-subscribe-locations | 回填历史 IP 归属 |
-| php artisan subscription:risk | 计算已完成风险周期（--force 重算已评估周期），随后汇总管理员提醒 |
-| php artisan risk:notify | 订阅清洗网关：汇总高风险订阅并发提醒（--dry-run 只登记不发送）；每 15 分钟由调度兜底 |
+| php artisan access:locations | 补齐清洗网关拉取记录的运营商 / 归属机构 / ASN（选项 --chunk/--limit/--refresh/--dry-run），每 10 分钟由调度兜底 |
 | php artisan reward:prune-rooms | 关闭超时的 Telegram 娱乐房间 |
 | php artisan audit:ip-link | 手动聚合「IP + 账号 + UA」累积记录（选项 --full/--force/--prune-days/--dry-run） |
-| php artisan audit:clean | 手动按保留期清理订阅审计日志（选项 --days/--dry-run） |
+| php artisan audit:clean | 手动按保留期清理订阅审计日志与清洗网关聚合（选项 --days/--dry-run） |
 | php artisan token-history:reconcile | 手动补齐订阅凭证历史（选项 --dry-run） |
 | php artisan telegram:verify-bindings | 手动校验 Telegram 绑定 |
 | php artisan order:recover-free | 恢复卡在「待开通」的已付免费订单（可选 trade_no 参数） |
@@ -653,7 +672,7 @@ AcePanel 使用对应的 `/opt/ace` 路径：
     PHP_INI=/opt/ace/server/php/81/etc/php.ini \
     DEPLOY_BRANCH=debug bash update.sh
 
-update.sh 会执行 Git 拉取、Composer 安装、数据库升级、缓存清理、IP 缓存清理和 Webman 重启；不会每次自动执行历史 IP 回填和风险计算。
+update.sh 会执行 Git 拉取、Composer 安装、数据库升级、缓存清理、IP 缓存清理与清洗网关归属地回填，然后重启 Webman；不会每次自动执行历史 IP 回填。
 
 PHP 配置只使用面板管理的同一套，不再存在项目内 php.ini：
 
@@ -739,7 +758,7 @@ init.sh 与 update.sh 会自动写入这条 cron（`deploy_install_cron`），�
 | --- | --- | --- |
 | traffic:update | 每分钟 | 节点上报的流量不入账，用户用量与统计长期为 0 |
 | v2board:statistics | 0:10 | 每日统计（收入、流量排行、节点统计）停更 |
-| subscription:risk | 0:20 | 已完成的固定 30 天风险周期永不评估，风险状态卡在 pending |
+| access:locations | 每 10 分钟 | 清洗网关列表的运营商 / ASN 停在「解析中」，按这两项筛选筛不出新记录（打开列表页仍会补当前页） |
 | check:order | 每分钟 | 订单不结算，用户付款后套餐不开通 |
 | check:commission | 每 15 分钟 | 佣金不确认，推广结算停摆 |
 | check:ticket | 每分钟 | 工单提醒不发送 |
@@ -895,11 +914,11 @@ Cloudflare Turnstile 本身可免费使用，但**不能**直接填入本项目�
 | 倒卖商与店铺中间件 | app/Http/Middleware/Reseller.php、Storefront.php |
 | 多订阅服务 | app/Services/SubscriptionService.php |
 | IP 归属服务 | app/Services/IpLocationService.php |
-| 风险服务 | app/Services/SubscriptionRiskService.php |
+| 订阅清洗网关 | app/Services/SubscribeCleanGatewayService.php、app/Http/Controllers/V1/Admin/SubscribeCleanGatewayController.php |
 | 订单与退款服务 | app/Services/OrderService.php |
 | 支付驱动与回调 | app/Services/PaymentService.php |
 | 余额原语与资金流水 | app/Services/UserService.php、app/Models/BalanceLog.php |
-| 订阅清洗网关与共享 IP | app/Services/RiskRuleService.php、app/Services/SubscriptionRiskNotifyService.php、app/Http/Controllers/V1/Admin/RiskSharedIpController.php |
+| 多账号同 IP 与订阅溯源 | app/Http/Controllers/V1/Admin/RiskSharedIpController.php、app/Http/Controllers/V1/Admin/RiskTraceController.php |
 
 ## 十四、倒卖商与店铺 API
 

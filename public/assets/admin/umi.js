@@ -21761,13 +21761,6 @@
                         title: "风控",
                         type: "heading"
                     }, {
-                        title: "订阅清洗网关",
-                        type: "item",
-                        href: "/risk/rule",
-                        icon: o.a.createElement("i", {
-                            className: "nav-main-link-icon si si-shield"
-                        })
-                    }, {
                         title: "订阅溯源",
                         type: "item",
                         href: "/risk/trace",
@@ -21775,7 +21768,7 @@
                             className: "nav-main-link-icon si si-magnifier"
                         })
                     }, {
-                        title: "订阅风控网关",
+                        title: "订阅清洗网关",
                         type: "item",
                         href: "/risk/gateway",
                         icon: o.a.createElement("i", {
@@ -71975,51 +71968,6 @@
                     }
                 })
             }
-            // 单用户重算：调完阈值先拿一个用户验证，比全站刷一遍安全得多（爆炸半径小、
-            // 一秒完成）。后端对单用户是同步跑完的（直接返回 done:true），所以这里没有
-            // 全站入口那种游标循环，也不能带 restart。
-            recomputeUserRisk(user, auditModal) {
-                var t = this
-                  , warning = ["重算会用当前规则重新判定所有已完成周期，覆盖此前的判定结果。", "若审计证据已被保留期清理，重算结果可能低于当初的真实值，原本「疑似内鬼」的周期可能被改为「正常」。", "节点连接记录按 last_seen_at 清理，历史周期的连接指标尤其容易失真。", "此操作不可撤销。"];
-                p["a"].confirm({
-                    title: "重算 " + user.email + " 的历史周期",
-                    width: 560,
-                    content: g.a.createElement("div", null, warning.map(function(line, index) {
-                        return g.a.createElement("p", {
-                            key: index,
-                            className: index === warning.length - 1 ? "mb-0 font-w600" : "mb-2"
-                        }, line)
-                    })),
-                    okText: "开始重算",
-                    okType: "danger",
-                    cancelText: "取消",
-                    onOk() {
-                        // 返回 Promise，让确定按钮保持 loading 直到请求结束。
-                        return Object(n("t3Un")["b"])("/" + window.settings.secure_path + "/risk/rule/recompute", {
-                            user_id: user.id
-                        }).then(function(res) {
-                            if (200 !== res.code) return;
-                            var counts = res.data || {};
-                            // 用户列表的风险列读的就是判定结果，不刷新会留着旧徽章。
-                            t.props.dispatch({
-                                type: "user/fetch"
-                            }),
-                            auditModal && auditModal.destroy(),
-                            p["a"].success({
-                                title: "重算完成",
-                                content: "订阅 " + (counts.subscriptions || 0) + " 个，重算周期 " + (counts.cycles || 0) + " 个。"
-                            }),
-                            // 弹窗标题里的风险判定也要重新读一遍。
-                            t.subscribeRequests(user)
-                        }).catch(function() {
-                            p["a"].error({
-                                title: "请求失败",
-                                content: "重算失败，请稍后重试"
-                            })
-                        })
-                    }
-                })
-            }
             subscribeRequests(e) {
                 var t = this;
                 Object(n("t3Un")["a"])("/" + window.settings.secure_path + "/user/subscribe-requests", {
@@ -72029,15 +71977,13 @@
                 }).then(function(r) {
                     if (200 !== r.code) return;
                     // 注意：这个回调里模块级的 antd 别名全被下面的局部变量遮蔽了
-                    // （s 是 r.risk、u 是格式化函数……），所以 Button 必须另起一个
+                    // （u 是格式化函数……），所以 Button 必须另起一个
                     // 可读的名字就地取，不能用模块级的 s["a"]。
                     var i = n("wCAj")["a"]
                       , auditButton = n("2/Rp")["a"]
                       , o = r.data || []
                       , a = r.connections || []
-                      , s = r.risk || {}
-                      , l = r.summary || {}
-                      , c = "suspicious" === s.status ? "疑似内鬼" : "normal" === s.status ? "正常" : "待观察";
+                      , l = r.summary || {};
                     // 归属地/运营商/IDC 三列在两张表里含义一致，共用格式化逻辑。
                     var u = function(e) {
                         var t = e || {};
@@ -72085,7 +72031,7 @@
                         }, t))
                     };
                     var auditModal = p["a"].info({
-                        title: "订阅审计 - " + e.email + "（风险：" + c + "）",
+                        title: "订阅审计 - " + e.email,
                         width: 1180,
                         content: g.a.createElement("div", {
                             style: {
@@ -72105,20 +72051,8 @@
                                 onClick: function() {
                                     t.clearSubscribeAudit(e, auditModal)
                                 }
-                            }, "清空该用户审计记录"), g.a.createElement(auditButton, {
-                                // 重算只改写判定、不删证据，比清空轻一档。用 dashed 和实心
-                                // danger 拉开视觉差，两个按钮不会被误点。
-                                type: "dashed",
-                                size: "small",
-                                icon: "reload",
-                                style: {
-                                    marginLeft: 8
-                                },
-                                onClick: function() {
-                                    t.recomputeUserRisk(e, auditModal)
-                                }
-                            }, "重算该用户历史周期")),
-                            d("订阅拉取 IP", "客户端下载订阅配置的来源；请求 " + (l.request_count || 0) + " 次，UA " + (l.user_agent_count || 0) + " 种，IP " + (l.distinct_ip_count || 0) + " 个，地区 " + (s.region_count || 0) + "，国家 " + (s.country_count || 0)),
+                            }, "清空该用户审计记录")),
+                            d("订阅拉取 IP", "客户端下载订阅配置的来源；请求 " + (l.request_count || 0) + " 次，UA " + (l.user_agent_count || 0) + " 种，IP " + (l.distinct_ip_count || 0) + " 个"),
                             g.a.createElement(i, {
                                 size: "small",
                                 tableLayout: "auto",
@@ -72302,34 +72236,6 @@
                         return g.a.createElement(h["a"], {
                             color: e ? "red" : "green"
                         }, e ? "\u5c01\u7981" : "\u6b63\u5e38")
-                    }
-                }, {
-                    title: "风险",
-                    dataIndex: "risk",
-                    key: "risk",
-                    render: e=>{
-                        var t = e && e.status,
-                            n = "suspicious" === t ? "red" : "normal" === t ? "green" : "orange",
-                            r = "suspicious" === t ? "疑似内鬼" : "normal" === t ? "正常" : "待观察";
-                        return g.a.createElement(h["a"], {
-                            color: n,
-                            title: e && e.reasons && e.reasons.length ? e.reasons.join("；") : ""
-                        }, r)
-                    }
-                }, {
-                    title: "风险值",
-                    key: "risk_score",
-                    dataIndex: "risk",
-                    sorter: !0,
-                    render: e=>{
-                        var score = e && null !== e.score && void 0 !== e.score ? Number(e.score) : null;
-                        return null === score || isNaN(score) ? g.a.createElement("span", {
-                            className: "text-muted"
-                        }, "—") : g.a.createElement("span", {
-                            style: {
-                                fontWeight: 600
-                            }
-                        }, score + "%")
                     }
                 }, {
                     title: "\u8ba2\u9605",
@@ -72564,27 +72470,6 @@
                             key: "\u5c01\u7981",
                             value: 1
                         }]
-                    }, {
-                        // 手工补丁：风险徽标过滤。选项值与 summaryForUser 的三态一致，
-                        // 后端在 UserController::applyRiskFilter 里翻成同语义 EXISTS。
-                        key: "risk",
-                        title: "风险",
-                        condition: ["="],
-                        type: "select",
-                        options: [{
-                            key: "疑似内鬼",
-                            value: "suspicious"
-                        }, {
-                            key: "待观察",
-                            value: "pending"
-                        }, {
-                            key: "正常",
-                            value: "normal"
-                        }]
-                    }, {
-                        key: "risk_score",
-                        title: "风险值",
-                        condition: [">=", ">", "<", "<=", "="]
                     }, {
                         key: "invite_by_email",
                         title: "\u9080\u8bf7\u4eba\u90ae\u7bb1",
@@ -83854,10 +83739,6 @@
             path: "/reward",
             exact: !0,
             component: n("rewardpage").default
-        }, {
-            path: "/risk/rule",
-            exact: !0,
-            component: n("riskrulepage").default
         }, {
             path: "/risk/trace",
             exact: !0,
@@ -117661,977 +117542,6 @@
             }
         }
     },
-    riskrulepage: function(e, t, n) {
-        "use strict";
-        n.r(t);
-        // 手工补丁：订阅清洗网关页面（原「风控规则」）。故意不建 dva model —— 数据访问直接走 t3Un 请求助手，
-        // 与 d1ca 里的订阅审计补丁同一路数。维度与运算符列表全部来自 /risk/rule/fetch
-        // 的响应，前端不留第二份副本（唯一事实源是 RiskRuleService 的类常量）。
-        var r = n("jehZ")
-          , i = n.n(r)
-          , o = (n("g9YV"),
-        n("wCAj"))
-          , a = (n("+L6B"),
-        n("2/Rp"))
-          , s = (n("5NDa"),
-        n("5rEg"))
-          , l = (n("Pwec"),
-        n("CtXQ"))
-          , c = (n("2qtc"),
-        n("kLXV"))
-          , u = (n("OaEy"),
-        n("2fM7"))
-          , h = (n("BoS7"),
-        n("Sdc0"))
-          , f = (n("/zsF"),
-        n("PArb"))
-          , d = n("q1tI")
-          , p = n.n(d)
-          , m = n("Bl7J")
-          , g = n("v32e");
-        function riskUrl(path) {
-            return "/" + window.settings.secure_path + path
-        }
-        function riskGet(path, params) {
-            return Object(n("t3Un")["a"])(riskUrl(path), params)
-        }
-        function riskPost(path, params) {
-            return Object(n("t3Un")["b"])(riskUrl(path), params)
-        }
-        // enabled 是 tinyint，从 PDO 出来可能是 int 也可能是字符串，统一收口。
-        function riskEnabled(value) {
-            return !0 === value || 1 === value || "1" === value
-        }
-        // threshold 是 decimal(18,8)，回来是 "3.00000000"；展示与回填都要去掉尾零。
-        function riskNumberText(value) {
-            if (null === value || void 0 === value || "" === value)
-                return "";
-            var num = Number(value);
-            return isNaN(num) ? String(value) : String(num)
-        }
-        // 权重是后加列：未升级的库与老记录里没有它，展示与回填一律按默认 20% 处理
-        // （后端缺列时同样按默认值计分，两边口径一致）。
-        function riskWeightText(value) {
-            if (null === value || void 0 === value || "" === value)
-                return "20";
-            var num = Number(value);
-            return isNaN(num) ? "20" : String(Math.max(0, Math.min(100, Math.round(num))))
-        }
-        // 重算会改写被冻结的判定结果，确认文案必须带全部四行保真度警告。
-        var RISK_RECOMPUTE_WARNING = ["重算会用当前规则重新判定所有已完成周期，覆盖此前的判定结果。", "若审计证据已被保留期清理，重算结果可能低于当初的真实值，原本「疑似内鬼」的周期可能被改为「正常」。", "节点连接记录按 last_seen_at 清理，历史周期的连接指标尤其容易失真。", "此操作不可撤销。"];
-        // 手动评估与重算是两回事：前者纯计算不落库，后者改写账本。说明文案必须把
-        // 「不影响 30 天账本与风险列」讲清，免得管理员误以为按钮之间可以互替。
-        var MANUAL_EVALUATE_NOTES = ["手动评估用当前启用的规则对所选时间窗做一次全站体检，结果落库并刷新用户列表的「风险」列（整体覆盖上一次手动评估），30 天周期账本不受影响。", "流量使用率按天级统计聚合（覆盖窗口的整天流量除以套餐总量），短窗口下数值含义有限，含流量使用率维度的规则请自行斟酌。", "评估会分批进行，期间请保持本页面打开。"];
-        // 手动评估结果表的指标展示顺序：拉取侧 → 流量 → 节点侧，与后端维度注册表分组一致。
-        var MANUAL_METRIC_KEYS = ["distinct_ip_count", "user_agent_count", "city_count", "region_count", "country_count", "used_ratio", "node_ip_count", "node_new_ip_count", "node_count", "node_country_count", "node_region_count", "node_city_count"];
-        function manualPad(n) {
-            return (n < 10 ? "0" : "") + n
-        }
-        // 刻意用 YYYY-MM-DD HH:mm 的语言中立格式：不含汉字，覆盖翻译层不会碰它。
-        function manualTimeText(ts) {
-            if (!ts)
-                return "-";
-            var d = new Date(1e3 * ts);
-            return d.getFullYear() + "-" + manualPad(d.getMonth() + 1) + "-" + manualPad(d.getDate()) + " " + manualPad(d.getHours()) + ":" + manualPad(d.getMinutes())
-        }
-        class RiskRulePage extends p.a.Component {
-            constructor(props) {
-                super(props),
-                this.defaultSubmit = {
-                    label: "",
-                    dimension: void 0,
-                    operator: ">",
-                    threshold: "",
-                    weight: "20",
-                    enabled: !0
-                },
-                this.state = {
-                    rules: [],
-                    dimensions: {},
-                    operators: {},
-                    // 表缺失（未升级的库）与表存在但为空是两种状态：前者引擎走内置兜底
-                    // 规则，后者才真的一条都不命中。横幅文案必须分开，不能混为一谈。
-                    available: !0,
-                    fetchLoading: !0,
-                    saveLoading: !1,
-                    // 待处理区块：提醒台账里未处理的高风险订阅。分值来自 30 天周期账本或
-                    // 管理员手动评估，不实时更新；达到阈值时管理员会收到 Telegram 私聊提醒。
-                    pending: [],
-                    pendingTotal: 0,
-                    pendingThreshold: 60,
-                    // null = 还没取到；0 = 一个绑定 Telegram 的管理员都没有（提醒发不出去）。
-                    pendingNotifiable: null,
-                    pendingAvailable: !0,
-                    pendingLoading: !0,
-                    visible: !1,
-                    submit: i()({}, this.defaultSubmit),
-                    recomputeVisible: !1,
-                    recomputeRunning: !1,
-                    recomputeProgress: null,
-                    manualVisible: !1,
-                    manualStarted: !1,
-                    manualRunning: !1,
-                    manualProgress: null,
-                    manualResults: [],
-                    manualPreset: "168",
-                    manualCustomValue: "",
-                    manualCustomUnit: "days"
-                },
-                // 全站重算是前端驱动的游标循环。每次启动领一个 token，组件卸载或弹窗
-                // 关闭时把 token 推进一格，在飞的那一批响应就会被丢弃、循环停下来。
-                this.recomputeToken = 0,
-                // 手动评估的游标循环同一套 token 机制，但独立计数：两个循环互不干扰。
-                this.manualToken = 0,
-                // restart 响应下发的轮次号，后续 step 逐一回带；游标被别的轮次接管后
-                // 服务端据此终止本客户端的迟到请求，绝不跨轮嫁接。
-                this.manualRunId = ""
-            }
-            componentDidMount() {
-                this.fetch(),
-                this.fetchPending()
-            }
-            componentWillUnmount() {
-                this.recomputeToken++,
-                this.manualToken++
-            }
-            fetch() {
-                this.setState({
-                    fetchLoading: !0
-                }),
-                riskGet("/risk/rule/fetch").then(res=>{
-                    // 非 200 已由请求助手弹出带服务端消息的提示，这里只收 loading。
-                    if (200 !== res.code)
-                        return void this.setState({
-                            fetchLoading: !1
-                        });
-                    this.setState({
-                        rules: res.data || [],
-                        dimensions: res.dimensions || {},
-                        operators: res.operators || {},
-                        available: !1 !== res.available,
-                        fetchLoading: !1
-                    })
-                }
-                ).catch(()=>this.setState({
-                    fetchLoading: !1
-                }))
-            }
-            fetchPending() {
-                this.setState({
-                    pendingLoading: !0
-                }),
-                riskGet("/risk/rule/high-risk", {
-                    current: 1,
-                    pageSize: 20
-                }).then(res=>{
-                    if (200 !== res.code)
-                        return void this.setState({
-                            pendingLoading: !1
-                        });
-                    this.setState({
-                        pending: res.data || [],
-                        pendingTotal: res.total || 0,
-                        pendingThreshold: res.threshold || 60,
-                        pendingNotifiable: null === res.notifiable_admins || void 0 === res.notifiable_admins ? null : Number(res.notifiable_admins),
-                        pendingAvailable: !1 !== res.available,
-                        pendingLoading: !1
-                    })
-                }
-                ).catch(()=>this.setState({
-                    pendingLoading: !1
-                }))
-            }
-            handlePending(record) {
-                riskPost("/risk/rule/high-risk/handle", {
-                    id: record.id
-                }).then(res=>{
-                    200 === res.code && this.fetchPending()
-                }
-                )
-            }
-            openModal(record) {
-                this.setState({
-                    visible: !0,
-                    submit: record ? {
-                        id: record.id,
-                        label: record.label || "",
-                        dimension: record.dimension,
-                        operator: record.operator,
-                        threshold: riskNumberText(record.threshold),
-                        weight: riskWeightText(record.weight),
-                        enabled: riskEnabled(record.enabled)
-                    } : i()({}, this.defaultSubmit)
-                })
-            }
-            closeModal() {
-                this.setState({
-                    visible: !1,
-                    submit: i()({}, this.defaultSubmit)
-                })
-            }
-            submitChange(key, value) {
-                var patch = {};
-                patch[key] = value,
-                this.setState({
-                    submit: i()({}, this.state.submit, patch)
-                })
-            }
-            save() {
-                var submit = this.state.submit
-                  , label = String(submit.label || "").trim();
-                if (!label)
-                    return void c["a"].warning({
-                        title: "提示",
-                        content: "请填写策略名称"
-                    });
-                if (!submit.dimension)
-                    return void c["a"].warning({
-                        title: "提示",
-                        content: "请选择判定维度"
-                    });
-                if (!submit.operator)
-                    return void c["a"].warning({
-                        title: "提示",
-                        content: "请选择运算符"
-                    });
-                if ("" === submit.threshold || null === submit.threshold || void 0 === submit.threshold || isNaN(Number(submit.threshold)))
-                    return void c["a"].warning({
-                        title: "提示",
-                        content: "请填写有效的阈值"
-                    });
-                var weightText = String(null === submit.weight || void 0 === submit.weight ? "20" : submit.weight).trim();
-                if ("" === weightText || isNaN(Number(weightText)) || Number(weightText) < 0 || 100 < Number(weightText))
-                    return void c["a"].warning({
-                        title: "提示",
-                        content: "请填写 0-100 之间的权重"
-                    });
-                this.setState({
-                    saveLoading: !0
-                }),
-                riskPost("/risk/rule/save", {
-                    id: submit.id,
-                    label: label,
-                    dimension: submit.dimension,
-                    operator: submit.operator,
-                    threshold: Number(submit.threshold),
-                    weight: Number(weightText),
-                    enabled: submit.enabled ? 1 : 0
-                }).then(res=>{
-                    this.setState({
-                        saveLoading: !1
-                    }),
-                    200 === res.code && (this.closeModal(),
-                    this.fetch())
-                }
-                ).catch(()=>this.setState({
-                    saveLoading: !1
-                }))
-            }
-            show(record) {
-                riskPost("/risk/rule/show", {
-                    id: record.id,
-                    show: riskEnabled(record.enabled) ? 0 : 1
-                }).then(res=>{
-                    200 === res.code && this.fetch()
-                }
-                )
-            }
-            drop(record) {
-                c["a"].confirm({
-                    title: "警告",
-                    content: "确定要删除规则「" + (record.label || "") + "」吗？已判定的历史周期不受影响，除非重算。",
-                    okText: "确定删除",
-                    okType: "danger",
-                    cancelText: "取消",
-                    onOk: ()=>riskPost("/risk/rule/drop", {
-                        id: record.id
-                    }).then(res=>{
-                        200 === res.code && this.fetch()
-                    }
-                    )
-                })
-            }
-            move(index, offset) {
-                var rules = this.state.rules.slice()
-                  , target = index + offset;
-                if (target < 0 || target >= rules.length)
-                    return;
-                var swap = rules[index];
-                rules[index] = rules[target],
-                rules[target] = swap,
-                // 先乐观交换本地顺序，再把完整有序 id 列表交给后端。
-                this.setState({
-                    rules: rules
-                }),
-                riskPost("/risk/rule/sort", {
-                    ids: rules.map(rule=>rule.id)
-                }).then(()=>this.fetch()).catch(()=>this.fetch())
-            }
-            confirmRecompute() {
-                c["a"].confirm({
-                    title: "重算历史周期",
-                    width: 560,
-                    content: p.a.createElement("div", null, RISK_RECOMPUTE_WARNING.map((line,index)=>p.a.createElement("p", {
-                        key: index,
-                        className: index === RISK_RECOMPUTE_WARNING.length - 1 ? "mb-0 font-w600" : "mb-2"
-                    }, line))),
-                    okText: "开始重算",
-                    okType: "danger",
-                    cancelText: "取消",
-                    onOk: ()=>this.startRecompute()
-                })
-            }
-            startRecompute() {
-                var token = ++this.recomputeToken;
-                this.setState({
-                    recomputeVisible: !0,
-                    recomputeRunning: !0,
-                    recomputeProgress: null
-                }),
-                this.recomputeStep(token, !0)
-            }
-            recomputeStep(token, restart) {
-                riskPost("/risk/rule/recompute", restart ? {
-                    restart: 1
-                } : {}).then(res=>{
-                    if (token !== this.recomputeToken)
-                        return;
-                    if (200 !== res.code)
-                        return void this.setState({
-                            recomputeRunning: !1
-                        });
-                    var data = res.data || {};
-                    this.setState({
-                        recomputeProgress: data,
-                        recomputeRunning: !data.done
-                    }),
-                    data.done ? this.fetch() : this.recomputeStep(token, !1)
-                }
-                ).catch(()=>{
-                    token === this.recomputeToken && this.setState({
-                        recomputeRunning: !1
-                    })
-                }
-                )
-            }
-            closeRecompute() {
-                this.recomputeToken++,
-                this.setState({
-                    recomputeVisible: !1,
-                    recomputeRunning: !1
-                })
-            }
-            renderRecomputeBody() {
-                var progress = this.state.recomputeProgress || {}
-                  , subscriptions = progress.subscriptions || 0
-                  , cycles = progress.cycles || 0
-                  , total = progress.total || 0
-                  , percent = total > 0 ? Math.min(100, Math.round(subscriptions / total * 100)) : 0;
-                return p.a.createElement("div", null, p.a.createElement("p", {
-                    className: "mb-2"
-                }, this.state.recomputeRunning ? "正在分批重算，请保持本页面打开……" : progress.done ? "重算完成。" : "重算已停止，重新点击「重算历史周期」会从头开始。"), p.a.createElement("p", {
-                    className: "mb-2"
-                }, "已处理订阅 " + subscriptions + (total > 0 ? " / " + total : "") + "，重算周期 " + cycles + " 个" + (total > 0 ? "（" + percent + "%）" : "")), p.a.createElement("p", {
-                    className: "mb-0 text-muted font-size-sm"
-                }, "关闭本弹窗只会停止后续分批，已重算的周期不会回滚。"))
-            }
-            openManual() {
-                // 每次打开都回到配置视图并清掉上一轮结果：结果本来就是即时体检的快照，
-                // 不落库、不跨弹窗保留。
-                this.setState({
-                    manualVisible: !0,
-                    manualStarted: !1,
-                    manualRunning: !1,
-                    manualProgress: null,
-                    manualResults: []
-                })
-            }
-            closeManual() {
-                this.manualToken++,
-                this.setState({
-                    manualVisible: !1,
-                    manualRunning: !1
-                })
-            }
-            // 返回整数小时数；非法输入返回 null。上限 2208 小时（92 天）与后端校验一致。
-            manualHours() {
-                var state = this.state;
-                if ("custom" !== state.manualPreset)
-                    return parseInt(state.manualPreset, 10);
-                var value = Number(state.manualCustomValue);
-                if ("" === String(state.manualCustomValue).trim() || isNaN(value) || value <= 0)
-                    return null;
-                var hours = "days" === state.manualCustomUnit ? Math.round(24 * value) : Math.round(value);
-                return hours >= 1 && hours <= 2208 ? hours : null
-            }
-            startManual() {
-                var hours = this.manualHours();
-                if (null === hours)
-                    return void c["a"].warning({
-                        title: "提示",
-                        content: "请输入 1 小时到 92 天之间的评估窗口"
-                    });
-                var token = ++this.manualToken;
-                this.manualRunId = "",
-                this.setState({
-                    manualStarted: !0,
-                    manualRunning: !0,
-                    manualProgress: null,
-                    manualResults: []
-                }),
-                this.manualStep(token, hours)
-            }
-            // 窗口只随首个 restart 请求发送，后端把它冻结在游标状态里；后续分批回带
-            // restart 下发的 run_id，轮次不符会被服务端终止。
-            manualStep(token, hours) {
-                riskPost("/risk/rule/manual-evaluate", null !== hours ? {
-                    restart: 1,
-                    hours: hours
-                } : {
-                    run_id: this.manualRunId
-                }).then(res=>{
-                    if (token !== this.manualToken)
-                        return;
-                    if (200 !== res.code)
-                        // 一批都没跑成（典型：60 秒并发守卫拒了 restart）就退回配置视图，
-                        // 别把人困在 0/0 的进度页上；服务端消息已由请求助手弹出。
-                        return void this.setState(this.state.manualProgress ? {
-                            manualRunning: !1
-                        } : {
-                            manualRunning: !1,
-                            manualStarted: !1
-                        });
-                    var data = res.data || {};
-                    data.run_id && (this.manualRunId = data.run_id),
-                    this.setState({
-                        manualProgress: data,
-                        manualRunning: !data.done,
-                        manualResults: data.done ? data.results || [] : this.state.manualResults
-                    }),
-                    data.done || this.manualStep(token, null)
-                }
-                ).catch(()=>{
-                    token === this.manualToken && this.setState({
-                        manualRunning: !1
-                    })
-                }
-                )
-            }
-            renderManualConfig() {
-                var state = this.state;
-                return p.a.createElement("div", null, p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "评估窗口"), p.a.createElement(u["a"], {
-                    style: {
-                        width: "100%"
-                    },
-                    value: state.manualPreset,
-                    onChange: value=>this.setState({
-                        manualPreset: value
-                    })
-                }, p.a.createElement(u["a"].Option, {
-                    value: "24"
-                }, "近 24 小时"), p.a.createElement(u["a"].Option, {
-                    value: "72"
-                }, "近 3 天"), p.a.createElement(u["a"].Option, {
-                    value: "168"
-                }, "近 7 天"), p.a.createElement(u["a"].Option, {
-                    value: "336"
-                }, "近 14 天"), p.a.createElement(u["a"].Option, {
-                    value: "720"
-                }, "近 30 天"), p.a.createElement(u["a"].Option, {
-                    value: "custom"
-                }, "自定义"))), "custom" === state.manualPreset && p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "自定义窗口长度"), p.a.createElement("div", {
-                    className: "d-flex"
-                }, p.a.createElement(s["a"], {
-                    type: "number",
-                    min: 1,
-                    style: {
-                        flex: 1,
-                        marginRight: 8
-                    },
-                    placeholder: "请输入数值",
-                    value: state.manualCustomValue,
-                    onChange: e=>this.setState({
-                        manualCustomValue: e.target.value
-                    })
-                }), p.a.createElement(u["a"], {
-                    style: {
-                        width: 90
-                    },
-                    value: state.manualCustomUnit,
-                    onChange: value=>this.setState({
-                        manualCustomUnit: value
-                    })
-                }, p.a.createElement(u["a"].Option, {
-                    value: "hours"
-                }, "小时"), p.a.createElement(u["a"].Option, {
-                    value: "days"
-                }, "天")))), MANUAL_EVALUATE_NOTES.map((line,index)=>p.a.createElement("p", {
-                    key: index,
-                    className: (index === MANUAL_EVALUATE_NOTES.length - 1 ? "mb-0" : "mb-2") + " text-muted font-size-sm"
-                }, line)))
-            }
-            renderManualResults() {
-                // 布局教训（生产 134 行实测）：指标堆 12 个 div 会把行高撑到几百像素，而
-                // antd 单元格默认垂直居中，其余列内容被顶出 y 滚动可视区，看起来像空表；
-                // 双滚动下不给列宽，指标列还会被挤到几十像素逐字断行。所以：列给显式宽、
-                // 单元格顶部对齐、指标改行内流式（对内不断行、对间可换行）、长串 break-all。
-                var dimensions = this.state.dimensions
-                  , cellTop = ()=>({
-                    style: {
-                        verticalAlign: "top"
-                    }
-                })
-                  , columns = [{
-                    title: "用户",
-                    key: "user",
-                    width: 190,
-                    onCell: cellTop,
-                    render: (value,record)=>p.a.createElement("div", {
-                        style: {
-                            wordBreak: "break-all"
-                        }
-                    }, record.email ? record.email : p.a.createElement(p.a.Fragment, null, "#" + record.user_id + " ", "用户已删除"))
-                }, {
-                    title: "订阅",
-                    dataIndex: "subscription_id",
-                    key: "subscription_id",
-                    width: 72,
-                    onCell: cellTop,
-                    render: value=>"#" + value
-                }, {
-                    title: "命中理由",
-                    key: "reasons",
-                    // 刻意不给宽：吸收剩余宽度与 y 滚动条沟槽，表头表体才对得齐。
-                    onCell: cellTop,
-                    render: (value,record)=>p.a.createElement("div", null, (record.reasons || []).map((reason,index)=>p.a.createElement("div", {
-                        key: index,
-                        className: index ? "mt-1" : "",
-                        style: {
-                            wordBreak: "break-all"
-                        }
-                    }, reason)))
-                }, {
-                    title: "关键指标",
-                    key: "metrics",
-                    width: 270,
-                    onCell: cellTop,
-                    render: (value,record)=>{
-                        var metrics = record.metrics || {};
-                        // 维度标签复用 /risk/rule/fetch 下发的注册表；值与标签是分开的
-                        // 文本节点，标签词条已在覆盖翻译层字典里。刻意不带单位。
-                        return p.a.createElement("div", {
-                            className: "text-muted font-size-sm"
-                        }, MANUAL_METRIC_KEYS.filter(key=>void 0 !== metrics[key] && null !== metrics[key]).map(key=>{
-                            var meta = dimensions[key] || {}
-                              , text = "used_ratio" === key ? Math.round(1e4 * Number(metrics[key])) / 100 + "%" : String(metrics[key]);
-                            return p.a.createElement("span", {
-                                key: key,
-                                style: {
-                                    display: "inline-block",
-                                    whiteSpace: "nowrap",
-                                    marginRight: 10
-                                }
-                            }, (meta.label || key) + "：", text)
-                        }
-                        ))
-                    }
-                }];
-                return p.a.createElement(o["a"], {
-                    size: "small",
-                    rowKey: record=>record.subscription_id,
-                    dataSource: this.state.manualResults,
-                    columns: columns,
-                    pagination: !1,
-                    scroll: {
-                        y: 320
-                    }
-                })
-            }
-            renderManualBody() {
-                if (!this.state.manualStarted)
-                    return this.renderManualConfig();
-                var state = this.state
-                  , progress = state.manualProgress || {}
-                  , scanned = progress.scanned || 0
-                  , total = progress.total || 0
-                  , flagged = progress.flagged || 0
-                  , percent = total > 0 ? Math.min(100, Math.round(scanned / total * 100)) : 0;
-                return p.a.createElement("div", null, p.a.createElement("p", {
-                    className: "mb-2"
-                }, state.manualRunning ? "正在分批评估，请保持本页面打开……" : progress.done ? "评估完成。" : "评估已停止，重新打开本弹窗可再次发起。"), progress.start_at ? p.a.createElement("p", {
-                    className: "mb-2 text-muted font-size-sm"
-                }, "评估窗口：", manualTimeText(progress.start_at) + " ~ " + manualTimeText(progress.end_at)) : null, p.a.createElement("p", {
-                    className: "mb-2"
-                }, "已扫描订阅 " + scanned + " / " + total + "，发现可疑 " + flagged + " 个（" + percent + "%）"), progress.done ? p.a.createElement("p", {
-                    className: "mb-2"
-                }, "共扫描 " + scanned + " 个订阅，窗口内有数据 " + (progress.with_evidence || 0) + " 个，命中规则 " + flagged + " 个。") : null, progress.done && progress.overflow > 0 ? p.a.createElement("div", {
-                    className: "alert alert-warning",
-                    role: "alert"
-                }, p.a.createElement("p", {
-                    className: "mb-0"
-                }, "可疑结果超过 200 条上限，仅列出前 200 条，其余 " + progress.overflow + " 条未展示；建议收窄评估窗口或调高规则阈值。")) : null, progress.done ? state.manualResults.length ? this.renderManualResults() : p.a.createElement("p", {
-                    className: "mb-0"
-                }, "所选窗口内未发现命中规则的订阅。") : p.a.createElement("p", {
-                    className: "mb-0 text-muted font-size-sm"
-                }, "评估边跑边落库，完成后「风险」列以本轮结果为准；中途关闭本弹窗只停止后续分批。"))
-            }
-            render() {
-                var state = this.state
-                  , rules = state.rules
-                  , dimensions = state.dimensions
-                  , operators = state.operators
-                  , enabledCount = rules.filter(rule=>riskEnabled(rule.enabled)).length
-                  , currentDimension = dimensions[state.submit.dimension] || {}
-                  , columns = [{
-                    title: "#",
-                    dataIndex: "id",
-                    key: "id"
-                }, {
-                    title: "名称",
-                    dataIndex: "label",
-                    key: "label"
-                }, {
-                    title: "维度",
-                    dataIndex: "dimension",
-                    key: "dimension",
-                    render: value=>{
-                        // 库里留着已从注册表移除的旧维度时退化成显示原始 key，不白屏。
-                        var dimension = dimensions[value];
-                        return dimension ? dimension.label : value
-                    }
-                }, {
-                    title: "条件",
-                    key: "condition",
-                    render: (value,record)=>{
-                        var dimension = dimensions[record.dimension] || {};
-                        return (operators[record.operator] || record.operator) + " " + riskNumberText(record.threshold) + (dimension.unit || "")
-                    }
-                }, {
-                    title: "权重",
-                    dataIndex: "weight",
-                    key: "weight",
-                    render: value=>{
-                        return riskWeightText(value) + "%"
-                    }
-                }, {
-                    title: "启用",
-                    dataIndex: "enabled",
-                    key: "enabled",
-                    render: (value,record)=>{
-                        return p.a.createElement(h["a"], {
-                            size: "small",
-                            checked: riskEnabled(value),
-                            onChange: ()=>this.show(record)
-                        })
-                    }
-                }, {
-                    title: "优先级",
-                    dataIndex: "sort",
-                    key: "sort",
-                    render: (value,record,index)=>{
-                        return p.a.createElement("div", null, p.a.createElement("span", {
-                            style: {
-                                marginRight: 8
-                            }
-                        }, null === value || void 0 === value ? "-" : value), p.a.createElement(a["a"], {
-                            size: "small",
-                            icon: "arrow-up",
-                            title: "上移",
-                            disabled: 0 === index,
-                            onClick: ()=>this.move(index, -1)
-                        }), p.a.createElement(a["a"], {
-                            size: "small",
-                            icon: "arrow-down",
-                            title: "下移",
-                            style: {
-                                marginLeft: 4
-                            },
-                            disabled: index === rules.length - 1,
-                            onClick: ()=>this.move(index, 1)
-                        }))
-                    }
-                }, {
-                    title: "操作",
-                    key: "action",
-                    align: "right",
-                    render: (value,record)=>{
-                        return p.a.createElement(p.a.Fragment, null, p.a.createElement("a", {
-                            href: "javascript:void(0);",
-                            onClick: ()=>this.openModal(record)
-                        }, "编辑"), p.a.createElement(f["a"], {
-                            type: "vertical"
-                        }), p.a.createElement("a", {
-                            href: "javascript:void(0);",
-                            onClick: ()=>this.drop(record)
-                        }, "删除"))
-                    }
-                }]
-                  , pendingColumns = [{
-                    title: "用户",
-                    key: "email",
-                    render: (value,record)=>(record.email || "#" + record.user_id) + "（订阅 #" + record.subscription_id + "）"
-                }, {
-                    title: "风险值",
-                    key: "risk_score",
-                    align: "center",
-                    render: (value,record)=>{
-                        var score = null === record.risk_score || void 0 === record.risk_score ? null : Number(record.risk_score);
-                        return null === score || isNaN(score) ? p.a.createElement("span", {
-                            className: "text-muted"
-                        }, "—") : p.a.createElement("span", {
-                            style: {
-                                color: "#c0392b",
-                                fontWeight: 600
-                            }
-                        }, score + "%")
-                    }
-                }, {
-                    title: "命中理由",
-                    key: "reasons",
-                    render: (value,record)=>{
-                        return p.a.createElement("div", null, (record.reasons || []).slice(0, 3).map((reason,index)=>p.a.createElement("div", {
-                            key: index,
-                            className: "text-muted font-size-sm"
-                        }, reason)))
-                    }
-                }, {
-                    title: "窗口",
-                    key: "window",
-                    render: (value,record)=>manualTimeText(record.window_start) + " ~ " + manualTimeText(record.window_end)
-                }, {
-                    title: "提醒",
-                    key: "sent_at",
-                    render: (value,record)=>record.sent_at ? manualTimeText(record.sent_at) : "未发送"
-                }, {
-                    title: "操作",
-                    key: "action",
-                    align: "right",
-                    render: (value,record)=>p.a.createElement("a", {
-                        href: "javascript:void(0);",
-                        onClick: ()=>this.handlePending(record)
-                    }, "标记已处理")
-                }];
-                // 必须展开路由 props，否则侧边栏会在 location.pathname 上崩。
-                return p.a.createElement(m["a"], i()({}, this.props, {
-                    title: "订阅清洗网关"
-                }), p.a.createElement(g["a"], {
-                    loading: state.fetchLoading
-                }, p.a.createElement("div", {
-                    className: "block block-rounded"
-                }, p.a.createElement("div", {
-                    className: "bg-white"
-                }, p.a.createElement("div", {
-                    className: "d-flex justify-content-between align-items-center",
-                    style: {
-                        padding: 15
-                    }
-                }, p.a.createElement(a["a"], {
-                    onClick: ()=>this.openModal(null)
-                }, p.a.createElement(l["a"], {
-                    type: "plus"
-                }), " 新增策略"), p.a.createElement("div", null, p.a.createElement(a["a"], {
-                    style: {
-                        marginRight: 8
-                    },
-                    onClick: ()=>this.openManual()
-                }, p.a.createElement(l["a"], {
-                    type: "clock-circle"
-                }), " 自定义周期评估"), p.a.createElement(a["a"], {
-                    type: "danger",
-                    onClick: ()=>this.confirmRecompute()
-                }, p.a.createElement(l["a"], {
-                    type: "reload"
-                }), " 重算历史周期"))), p.a.createElement("div", {
-                    style: {
-                        padding: "0 15px 15px"
-                    }
-                }, p.a.createElement("p", {
-                    className: "mb-1 text-muted font-size-sm"
-                }, "规则改动只影响之后新完成的周期；要让改动应用到历史周期，请点击「重算历史周期」。"), p.a.createElement("p", {
-                    className: "mb-0 text-muted font-size-sm"
-                }, "「自定义周期评估」用当前规则对最近一段时间做全站体检，结果落库并驱动用户列表的「风险」列与筛选，30 天周期账本不受影响。"), p.a.createElement("p", {
-                    className: "mb-0 text-muted font-size-sm"
-                }, "风险值（0-100%）由命中策略的权重累加得到；达到提醒阈值（默认 60%）时会给已绑定 Telegram 的管理员发私聊提醒。判定来自 30 天周期账本与管理员手动评估，不实时更新。"), !state.fetchLoading && !state.available && p.a.createElement("div", {
-                    className: "alert alert-warning mb-0",
-                    role: "alert",
-                    style: {
-                        marginTop: 12
-                    }
-                }, p.a.createElement("p", {
-                    className: "mb-0"
-                }, "清洗策略表尚未安装（数据库尚未升级），当前仍按内置默认策略判定；升级数据库后才能增删策略。")), !state.fetchLoading && state.available && 0 === enabledCount && p.a.createElement("div", {
-                    className: "alert alert-warning mb-0",
-                    role: "alert",
-                    style: {
-                        marginTop: 12
-                    }
-                }, p.a.createElement("p", {
-                    className: "mb-0"
-                }, "当前没有启用任何清洗策略，之后完成的周期都不会再触发动作。"))), p.a.createElement("div", {
-                    className: "block block-rounded"
-                }, p.a.createElement("div", {
-                    className: "bg-white"
-                }, p.a.createElement("div", {
-                    className: "d-flex justify-content-between align-items-center",
-                    style: {
-                        padding: 15
-                    }
-                }, p.a.createElement("h3", {
-                    className: "block-title mb-0"
-                }, "待处理高风险订阅（≥ ", String(state.pendingThreshold), "%）"), p.a.createElement("span", {
-                    className: "text-muted font-size-sm"
-                }, state.pendingLoading ? "加载中…" : "共 " + state.pendingTotal + " 条")), !state.pendingLoading && state.pendingAvailable && 0 === state.pendingNotifiable && p.a.createElement("div", {
-                    className: "alert alert-warning mb-0",
-                    role: "alert",
-                    style: {
-                        margin: "0 15px 15px"
-                    }
-                }, "没有管理员绑定 Telegram，提醒发不出去；请先让管理员在机器人里发送 /bind 完成绑定。"), !state.pendingLoading && state.pendingAvailable && 0 === state.pending.length && p.a.createElement("div", {
-                    className: "alert alert-success mb-0",
-                    role: "alert",
-                    style: {
-                        margin: "0 15px 15px"
-                    }
-                }, "当前没有待处理的高风险订阅。"), p.a.createElement(o["a"], {
-                    tableLayout: "auto",
-                    rowKey: record=>record.id,
-                    dataSource: state.pending,
-                    columns: pendingColumns,
-                    pagination: !1,
-                    locale: {
-                        emptyText: state.pendingAvailable ? "暂无待处理订阅" : "数据库尚未升级，风险值与待办不可用"
-                    },
-                    scroll: {
-                        x: 900
-                    }
-                }))), p.a.createElement(o["a"], {
-                    tableLayout: "auto",
-                    rowKey: record=>record.id,
-                    dataSource: rules,
-                    columns: columns,
-                    pagination: !1,
-                    locale: {
-                        emptyText: "暂无清洗策略"
-                    },
-                    scroll: {
-                        x: 900
-                    }
-                })))), p.a.createElement(c["a"], {
-                    title: state.submit.id ? "编辑策略" : "新增策略",
-                    visible: state.visible,
-                    onCancel: ()=>this.closeModal(),
-                    onOk: ()=>this.save(),
-                    okText: "提交",
-                    cancelText: "取消",
-                    okButtonProps: {
-                        loading: state.saveLoading
-                    }
-                }, p.a.createElement("div", null, p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "名称"), p.a.createElement(s["a"], {
-                    placeholder: "会原样出现在风险理由里，例如：跨省/州请求过多",
-                    value: state.submit.label,
-                    onChange: e=>this.submitChange("label", e.target.value)
-                })), p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "判定维度"), p.a.createElement(u["a"], {
-                    style: {
-                        width: "100%"
-                    },
-                    placeholder: "请选择判定维度",
-                    value: state.submit.dimension,
-                    onChange: value=>this.submitChange("dimension", value)
-                }, Object.keys(dimensions).map(key=>{
-                    return p.a.createElement(u["a"].Option, {
-                        key: key,
-                        value: key
-                    }, dimensions[key].label)
-                }
-                ))), p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "运算符"), p.a.createElement(u["a"], {
-                    style: {
-                        width: "100%"
-                    },
-                    placeholder: "请选择运算符",
-                    value: state.submit.operator,
-                    onChange: value=>this.submitChange("operator", value)
-                }, Object.keys(operators).map(key=>{
-                    return p.a.createElement(u["a"].Option, {
-                        key: key,
-                        value: key
-                    }, operators[key])
-                }
-                ))), p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "阈值"), p.a.createElement(s["a"], {
-                    type: "number",
-                    placeholder: "请输入阈值",
-                    addonAfter: currentDimension.unit || void 0,
-                    value: state.submit.threshold,
-                    onChange: e=>this.submitChange("threshold", e.target.value)
-                }), p.a.createElement("p", {
-                    className: "mb-0 mt-1 text-muted font-size-sm"
-                }, "流量使用率填 0 ~ 1 的小数（如 0.4），计数类维度填整数。")), p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "权重"), p.a.createElement(s["a"], {
-                    type: "number",
-                    placeholder: "请输入权重（0-100）",
-                    addonAfter: "%",
-                    value: state.submit.weight,
-                    onChange: e=>this.submitChange("weight", e.target.value)
-                }), p.a.createElement("p", {
-                    className: "mb-0 mt-1 text-muted font-size-sm"
-                }, "命中该规则给风险值加多少分；多条命中累加、封顶 100%。默认 20%，三条内置规则全中即 60%，正好等于提醒阈值。")), p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", {
-                    style: {
-                        display: "block"
-                    }
-                }, "启用"), p.a.createElement(h["a"], {
-                    checked: !!state.submit.enabled,
-                    onChange: value=>this.submitChange("enabled", value)
-                })))), p.a.createElement(c["a"], {
-                    title: "重算历史周期",
-                    visible: state.recomputeVisible,
-                    maskClosable: !1,
-                    closable: !state.recomputeRunning,
-                    okText: state.recomputeRunning ? "停止并关闭" : "关闭",
-                    okType: state.recomputeRunning ? "danger" : "primary",
-                    cancelButtonProps: {
-                        style: {
-                            display: "none"
-                        }
-                    },
-                    onOk: ()=>this.closeRecompute(),
-                    onCancel: ()=>this.closeRecompute()
-                }, this.renderRecomputeBody()), p.a.createElement(c["a"], {
-                    title: "自定义周期评估",
-                    // 配置视图窄、评估/结果视图宽：结果表四列显式宽度合计约 820，
-                    // 880 的弹窗身体（-48 内边距）刚好容纳，不再出现横向挤压。
-                    width: state.manualStarted ? 880 : 640,
-                    visible: state.manualVisible,
-                    maskClosable: !1,
-                    closable: !state.manualRunning,
-                    okText: state.manualStarted ? state.manualRunning ? "停止并关闭" : "关闭" : "开始评估",
-                    okType: state.manualStarted && state.manualRunning ? "danger" : "primary",
-                    cancelText: "取消",
-                    cancelButtonProps: state.manualStarted ? {
-                        style: {
-                            display: "none"
-                        }
-                    } : void 0,
-                    onOk: ()=>state.manualStarted ? this.closeManual() : this.startManual(),
-                    onCancel: ()=>this.closeManual()
-                }, this.renderManualBody()))
-            }
-        }
-        t["default"] = RiskRulePage
-    },
     risktracepage: function(e, t, n) {
         "use strict";
         n.r(t);
@@ -119176,7 +118086,7 @@
         // 手工补丁：风控板块「多账号同 IP」面板（组件 v2boardSharedIpPanel）。数据来自累积
         // 表 v2_ip_account_link，由计划任务 audit:ip-link 每小时离线聚合；本页两个端点都是
         // 只读的，唯一副作用是 IP 归属查询会填充 v2_ip_location_cache（与 d1ca 的订阅审计
-        // 弹窗同款）。与 riskrulepage / risktracepage 同一路数：不建 dva model，数据访问直接
+        // 弹窗同款）。与 risktracepage 同一路数：不建 dva model，数据访问直接
         // 走 t3Un 请求助手；唯一需要 dispatch 的地方是「在用户管理中打开」，沿用 d1ca 已有的
         // user/addFilter 播种模式，所以只 connect 取 dispatch、不注册任何 model。
         var r = n("jehZ")
@@ -119922,8 +118832,11 @@
     riskgatewaypage: function(e, t, n) {
         "use strict";
         n.r(t);
-        // 订阅风控网关不读取或展示订阅凭证；这里只消费已经脱敏的审计字段，并复用风控页面的
-        // secure_path + t3Un 请求方式。数据库尚未升级时后端会返回 available:false。
+        // 订阅清洗网关。整块替换原「订阅风控网关」页面，与「订阅清洗网关（策略页）」
+        // 合并成这一个栏目：一行 = 账号 × 订阅 × IP × User-Agent 的拉取记录。
+        //
+        // 页面不读取也不展示订阅凭证；时间一律由后端按 UTC+8 渲染好（*_text 字段），
+        // 前端不做任何时区换算，筛选框里的时间也按 UTC+8 原样回传。
         var r = n("jehZ")
           , i = n.n(r)
           , o = (n("g9YV"), n("wCAj"))
@@ -119933,7 +118846,6 @@
           , c = (n("2qtc"), n("kLXV"))
           , u = (n("OaEy"), n("2fM7"))
           , y = (n("+BJd"), n("mr32"))
-          , D = (n("iQDF"), n("+eQT"))
           , d = n("q1tI")
           , p = n.n(d)
           , m = n("Bl7J")
@@ -119948,12 +118860,17 @@
         function gatewayPost(path, params) {
             return Object(n("t3Un")["b"])(gatewayUrl(path), params)
         }
-        function gatewayTime(value) {
-            if (!value)
-                return "-";
-            var number = Number(value)
-              , date = number > 0 ? w(1e3 * number) : w(value);
-            return date && date.isValid && date.isValid() ? date.format("YYYY-MM-DD HH:mm:ss") : "-"
+        // 空字符串一律不发给后端：后端把「参数缺失」和「参数为空」当同一件事处理，
+        // 前端少发几个键能让 URL 与日志里少一堆噪声。
+        function gatewayCompact(params) {
+            var out = {};
+            Object.keys(params || {}).forEach(function(key) {
+                var value = params[key];
+                if (null === value || void 0 === value || "" === value)
+                    return;
+                out[key] = value
+            });
+            return out
         }
         function gatewayPage(pagination) {
             var page = pagination || {}
@@ -119966,980 +118883,1052 @@
         }
         function gatewayScopeText(scope) {
             return {
-                subscription: "当前订阅",
-                user: "当前用户",
-                ip: "当前 IP",
-                user_agent: "当前 User-Agent"
+                ip: "IP 地址",
+                user_agent: "User-Agent",
+                user: "账号",
+                subscription: "订阅"
             }[scope] || scope || "-"
         }
-        function gatewayStatusText(status) {
+        function gatewayRuleStatusText(status) {
             return {
-                active: "有效",
-                disabled: "已解除",
+                active: "生效中",
                 expired: "已到期",
-                inactive: "无效"
+                released: "已解除"
             }[status] || status || "-"
         }
-        function gatewayDecisionText(decision) {
-            return "blocked" === decision ? "阻断" : "error" === decision ? "错误" : "通过"
+        // 订阅列表：本行那一条排在前面并高亮，其余陪衬 —— 需求要的是「这个账号买了
+        // 哪些订阅」，同时还要能一眼看出这一行属于哪一条。
+        function gatewaySubscriptions(record) {
+            var list = record && record.subscriptions ? record.subscriptions.slice() : [];
+            var currentId = Number(record && record.subscription_id || 0);
+            list.sort(function(left, right) {
+                var leftCurrent = Number(left.id) === currentId ? 0 : 1
+                  , rightCurrent = Number(right.id) === currentId ? 0 : 1;
+                return leftCurrent - rightCurrent || Number(left.id) - Number(right.id)
+            });
+            return list
         }
-        class RiskGatewayPage extends p.a.Component {
+        function gatewaySubscriptionText(subscription) {
+            var plan = subscription.plan_name || ("套餐 #" + subscription.plan_id);
+            return "#" + subscription.id + " " + plan
+        }
+        // 归属地只有三种状态：已解析、查不到、还没查。第三种要跟「查不到」分开显示，
+        // 否则运维会以为这个 IP 真的没有 ASN。
+        function gatewayCarrierText(record) {
+            if (!record)
+                return "-";
+            var parts = [];
+            if (record.isp)
+                parts.push(record.isp);
+            if (record.organization && record.organization !== record.isp)
+                parts.push(record.organization);
+            if (record.asn)
+                parts.push("AS" + record.asn);
+            if (parts.length)
+                return parts.join(" · ");
+            return "pending" === record.location_status ? "解析中" : "未知"
+        }
+        // 留存统计的一格。标签与值是两个独立文本节点，这样翻译层只会翻标签；
+        // 拼成一整句的话整句都不在字典里，英文界面会留一段中文。
+        function statItem(label, value) {
+            return p.a.createElement("div", {
+                className: "mr-4"
+            }, p.a.createElement("span", {
+                className: "text-muted"
+            }, label, "："), p.a.createElement("span", {
+                className: "font-w600"
+            }, String(value)))
+        }
+        function gatewayTimeText(value) {
+            return value ? String(value) : "-"
+        }
+        var CLEAN_FILTER_KEYS = ["email", "user_id", "plan_id", "subscription_id", "ip", "carrier", "asn", "user_agent", "hit_condition", "hit_count", "blocked", "start_time", "end_time"];
+        var CLEAN_EMPTY_FILTERS = {
+            email: "",
+            user_id: "",
+            plan_id: void 0,
+            subscription_id: "",
+            ip: "",
+            carrier: "",
+            asn: "",
+            user_agent: "",
+            hit_condition: ">=",
+            hit_count: "",
+            blocked: void 0,
+            start_time: "",
+            end_time: ""
+        };
+        var CLEAN_HIT_CONDITIONS = [">=", ">", "=", "<", "<="];
+        var CLEAN_BLOCKED_OPTIONS = [{
+            key: "已阻断",
+            value: "yes"
+        }, {
+            key: "未阻断",
+            value: "no"
+        }];
+        var CLEAN_SCOPE_ORDER = ["ip", "user_agent", "user", "subscription"];
+        class SubscribeCleanGatewayPage extends p.a.Component {
             constructor(props) {
                 super(props),
                 this.state = {
-                    view: "ip",
-                    rows: [],
-                    pagination: {
-                        current: 1,
-                        pageSize: 20
-                    },
-                    filters: {
-                        user: "",
-                        subscription_id: "",
-                        request_ip: "",
-                        user_agent: "",
-                        decision: "",
-                        range: [null, null]
-                    },
+                    filters: i()({}, CLEAN_EMPTY_FILTERS),
+                    // 输入框改动即改 state，但只有点「查询」才发请求：每次按键都打后端
+                    // 会让筛选变成击键查询。
+                    data: [],
+                    total: 0,
                     loading: !0,
                     available: !0,
-                    error: "",
-                    blockVisible: !1,
-                    blocking: !1,
-                    blockRecord: null,
-                    block: {
-                        scope: "subscription",
-                        reason: "",
-                        expiresType: "permanent",
-                        expiresAt: null
+                    pagination: {
+                        current: 1,
+                        pageSize: 20,
+                        total: 0
                     },
-                    rulesVisible: !1,
+                    sort: "last_seen_at",
+                    sortDir: "desc",
+                    options: {
+                        plans: [],
+                        scopes: [],
+                        retention_days: 180,
+                        retention_min: 1,
+                        retention_default: 180
+                    },
+                    stats: {
+                        records: 0,
+                        raw_logs: 0,
+                        earliest_text: "",
+                        last_cleaned_text: ""
+                    },
+                    retentionInput: "",
+                    retentionSaving: !1,
+                    exporting: !1,
+                    blockVisible: !1,
+                    blockRecord: null,
+                    blockScope: "ip",
+                    blockReason: "",
+                    blockExpires: "",
+                    blockSaving: !1,
                     rules: [],
                     rulesTotal: 0,
-                    rulesLoading: !1,
+                    rulesLoading: !0,
                     rulesPagination: {
                         current: 1,
-                        pageSize: 20
+                        pageSize: 10,
+                        total: 0
                     },
-                    ruleFilters: {
-                        scope: "",
-                        status: "",
-                        keyword: ""
-                    },
-                    historyVisible: !1,
-                    historyLoading: !1,
-                    historyRule: null,
                     history: [],
-                    detailVisible: !1,
-                    detailLoading: !1,
-                    detailRecord: null,
-                    detailError: "",
-                    detailSource: null,
-                    detailPagination: {
+                    historyTotal: 0,
+                    historyLoading: !0,
+                    historyPagination: {
                         current: 1,
-                        pageSize: 20
+                        pageSize: 10,
+                        total: 0
                     }
-                },
-                this.filterTimer = null,
-                this.ruleFilterTimer = null,
-                this.unmounted = !1
+                }
             }
             componentDidMount() {
-                this.fetch()
+                this.fetchOptions(),
+                this.fetchConfig(),
+                this.fetch(),
+                this.fetchRules(),
+                this.fetchHistory()
             }
-            componentWillUnmount() {
-                this.unmounted = !0,
-                this.filterTimer && clearTimeout(this.filterTimer),
-                this.ruleFilterTimer && clearTimeout(this.ruleFilterTimer)
-            }
-            timeParams() {
-                var range = this.state.filters.range;
-                return range && range[0] && range[1] ? {
-                    start_at: range[0].clone().startOf("day").unix(),
-                    end_at: range[1].clone().endOf("day").unix()
-                } : {}
-            }
-            fetch() {
-                var state = this.state
-                  , filters = state.filters
-                  , path = "ua" === state.view ? "/risk/gateway/ua-summaries" : "/risk/gateway/ip-summaries";
+            setFilter(key, value) {
+                var patch = {};
+                patch[key] = value,
                 this.setState({
-                    loading: !0
-                }),
-                gatewayGet(path, i()({
-                    user_filter: filters.user,
-                    subscription_id: filters.subscription_id,
-                    request_ip: filters.request_ip,
-                    user_agent: filters.user_agent,
-                    decision: filters.decision
-                }, this.timeParams(), gatewayPage(state.pagination))).then(res=>{
-                    if (this.unmounted)
-                        return;
-                    if (200 !== res.code)
-                        return void this.setState({
-                            loading: !1,
-                            error: res.msg || "订阅风控网关请求失败，请稍后重试"
-                        });
-                    this.setState({
-                        rows: res.data || [],
-                        available: !1 !== res.available,
-                        error: res.error || "",
-                        pagination: i()({}, this.state.pagination, {
-                            total: res.total || 0
-                        }),
-                        loading: !1
-                    })
-                }).catch(error=>{
-                    this.unmounted || this.setState({
-                        loading: !1,
-                        error: error && error.message || "订阅风控网关请求失败，请检查网络或管理员登录状态"
-                    })
+                    filters: i()({}, this.state.filters, patch)
                 })
             }
-            resetFilters(patch) {
+            resetFilters() {
                 this.setState({
-                    filters: i()({}, this.state.filters, patch),
+                    filters: i()({}, CLEAN_EMPTY_FILTERS),
                     pagination: i()({}, this.state.pagination, {
                         current: 1
                     })
-                }, ()=>this.fetch())
+                }, ()=>this.fetch(1))
             }
-            inputFilter(field, value) {
-                this.filterTimer && clearTimeout(this.filterTimer),
-                this.filterTimer = setTimeout(()=>{
-                    this.filterTimer = null;
-                    var patch = {};
-                    patch[field] = value,
-                    this.resetFilters(patch)
-                }, 400)
-            }
-            tableChange(pagination) {
-                this.setState({
-                    pagination: i()({}, this.state.pagination, gatewayPage(pagination))
-                }, ()=>this.fetch())
-            }
-            switchView(view) {
-                if (view === this.state.view)
-                    return;
-                this.setState({
-                    view: view,
-                    rows: [],
-                    pagination: i()({}, this.state.pagination, {
-                        current: 1,
-                        total: 0
-                    })
-                }, ()=>this.fetch())
-            }
-            openAuditDetail(record, pagination) {
-                var source = record || this.state.detailSource
-                  , auditId = Number(source && (source.latest_audit_id || source.id));
-                if (!(auditId > 0))
-                    return void c["a"].warning({
-                        title: "提示",
-                        content: "该汇总记录没有可追溯的原始审计记录"
-                    });
-                var page = gatewayPage(pagination || this.state.detailPagination);
-                this.setState({
-                    detailVisible: !0,
-                    detailLoading: !0,
-                    detailRecord: null,
-                    detailError: "",
-                    detailSource: source,
-                    detailPagination: page
-                }),
-                gatewayGet("/risk/gateway/audit-detail", {
-                    id: auditId,
-                    summary_type: source && source.ua_hash ? "ua" : "ip",
-                    current: page.current,
-                    pageSize: page.pageSize
-                }).then(res=>{
-                    if (this.unmounted)
+            // 只把非空条件发出去。sort/sort_dir 单独拼，不混进筛选对象 —— 导出要用
+            // 同一份筛选条件，但导出按固定顺序（不跟随当前排序）走。
+            requestParams(extra) {
+                var filters = this.state.filters
+                  , params = {}
+                  , self = this;
+                CLEAN_FILTER_KEYS.forEach(function(key) {
+                    var value = filters[key];
+                    if (null === value || void 0 === value || "" === value)
                         return;
-                    if (200 !== res.code || !res.data)
-                        return void this.setState({
-                            detailLoading: !1,
-                            detailError: res.msg || res.error || "无法读取原始拉取明细"
-                        });
-                    this.setState({
-                        detailLoading: !1,
-                        detailRecord: res.data,
-                        detailError: ""
-                    })
-                }).catch(error=>this.unmounted || this.setState({
-                    detailLoading: !1,
-                    detailError: error && error.message || "无法读取原始拉取明细，请稍后重试"
-                }))
+                    params[key] = value
+                });
+                params.sort = self.state.sort,
+                params.sort_dir = self.state.sortDir;
+                return i()({}, params, gatewayCompact(extra || {}))
             }
-            closeAuditDetail() {
+            filtersOnly() {
+                var params = this.requestParams();
+                return gatewayCompact({
+                    email: params.email,
+                    user_id: params.user_id,
+                    plan_id: params.plan_id,
+                    subscription_id: params.subscription_id,
+                    ip: params.ip,
+                    carrier: params.carrier,
+                    asn: params.asn,
+                    user_agent: params.user_agent,
+                    hit_condition: params.hit_condition,
+                    hit_count: params.hit_count,
+                    blocked: params.blocked,
+                    start_time: params.start_time,
+                    end_time: params.end_time
+                })
+            }
+            fetchOptions() {
+                var self = this;
+                gatewayGet("/risk/gateway/options").then(function(res) {
+                    if (200 !== res.code || !res.data)
+                        return;
+                    var data = res.data;
+                    self.setState({
+                        options: {
+                            plans: data.plans || [],
+                            scopes: data.scopes || [],
+                            retention_days: Number(data.retention_days || 0),
+                            retention_min: Number(data.retention_min || 1),
+                            retention_default: Number(data.retention_default || 180)
+                        },
+                        retentionInput: String(Number(data.retention_days || 0))
+                    })
+                })
+            }
+            fetchConfig() {
+                var self = this;
+                gatewayGet("/risk/gateway/config").then(function(res) {
+                    if (200 !== res.code || !res.data)
+                        return;
+                    self.setState({
+                        stats: res.data,
+                        retentionInput: String(Number(res.data.retention_days || 0))
+                    })
+                })
+            }
+            fetch(page) {
+                var self = this
+                  , pagination = gatewayPage(this.state.pagination)
+                  , target = page || pagination.current;
                 this.setState({
-                    detailVisible: !1,
-                    detailLoading: !1,
-                    detailRecord: null,
-                    detailError: "",
-                    detailSource: null,
-                    detailPagination: {
-                        current: 1,
-                        pageSize: 20
+                    loading: !0,
+                    pagination: i()({}, this.state.pagination, {
+                        current: target
+                    })
+                });
+                gatewayGet("/risk/gateway/fetch", i()({}, this.requestParams(), {
+                    current: target,
+                    pageSize: pagination.pageSize
+                })).then(function(res) {
+                    if (200 !== res.code) {
+                        self.setState({
+                            loading: !1
+                        });
+                        return
                     }
+                    self.setState({
+                        data: res.data || [],
+                        total: Number(res.total || 0),
+                        loading: !1,
+                        available: !1 !== res.available,
+                        pagination: i()({}, self.state.pagination, {
+                            current: Number(res.page || target),
+                            pageSize: Number(res.pageSize || pagination.pageSize),
+                            total: Number(res.total || 0)
+                        })
+                    })
+                }).catch(function() {
+                    self.setState({
+                        loading: !1
+                    }),
+                    c["a"].error({
+                        title: "请求失败",
+                        content: "读取订阅拉取记录失败，请稍后重试"
+                    })
+                })
+            }
+            tableChange(pagination, filters, sorter) {
+                var nextPage = gatewayPage(pagination)
+                  , patch = {
+                    pagination: i()({}, this.state.pagination, {
+                        current: nextPage.current,
+                        pageSize: nextPage.pageSize
+                    })
+                };
+                if (sorter && sorter.field && sorter.order) {
+                    patch.sort = sorter.field,
+                    patch.sortDir = "ascend" === sorter.order ? "asc" : "desc"
+                }
+                this.setState(patch, ()=>this.fetch(nextPage.current))
+            }
+            exportCsv() {
+                var self = this;
+                this.setState({
+                    exporting: !0
+                });
+                // 导出可能跑几十秒（全量分块拼 CSV），按钮上的 loading 是唯一的进度提示，
+                // 不再叠一层 Modal —— kLXV 是 antd 的 Modal，没有 message.loading。
+                return gatewayPost("/risk/gateway/export", this.filtersOnly()).then(function(res) {
+                    self.setState({
+                        exporting: !1
+                    });
+                    if (200 !== res.code || !res.buffer) {
+                        c["a"].error({
+                            title: "导出失败",
+                            content: "服务端没有返回可下载的数据"
+                        });
+                        return
+                    }
+                    var blob = new Blob([res.buffer], {
+                        type: "text/csv;charset=UTF-8"
+                    })
+                      , url = window.URL.createObjectURL(blob)
+                      , link = document.createElement("a");
+                    link.href = url,
+                    link.download = "订阅清洗网关-" + w().format("YYYYMMDD-HHmmss") + ".csv",
+                    document.body.appendChild(link),
+                    link.click(),
+                    document.body.removeChild(link),
+                    window.URL.revokeObjectURL(url),
+                    c["a"].success({
+                        title: "导出完成",
+                        content: "导出的是当前筛选条件下的全部记录。"
+                    })
+                }).catch(function() {
+                    self.setState({
+                        exporting: !1
+                    }),
+                    c["a"].error({
+                        title: "导出失败",
+                        content: "请稍后重试"
+                    })
+                })
+            }
+            saveRetention() {
+                var self = this
+                  , raw = String(this.state.retentionInput === null || void 0 === this.state.retentionInput ? "" : this.state.retentionInput).trim();
+                if (!/^\d+$/.test(raw)) {
+                    c["a"].warning({
+                        title: "提示",
+                        content: "留存天数只能填数字，0 表示永久保留。"
+                    });
+                    return
+                }
+                var min = Number(this.state.options.retention_min || 1);
+                if (0 !== Number(raw) && Number(raw) < min) {
+                    c["a"].warning({
+                        title: "提示",
+                        content: "留存天数不能小于 " + min + " 天；填 0 表示永久保留。"
+                    });
+                    return
+                }
+                this.setState({
+                    retentionSaving: !0
+                });
+                return gatewayPost("/risk/gateway/config/save", {
+                    retention_days: Number(raw)
+                }).then(function(res) {
+                    self.setState({
+                        retentionSaving: !1
+                    });
+                    if (200 !== res.code)
+                        return;
+                    c["a"].success({
+                        title: "已保存",
+                        content: "超出留存期的拉取记录会在每天 0:40 的清理任务中被删除。"
+                    }),
+                    self.setState({
+                        stats: i()({}, self.state.stats, {
+                            retention_days: Number(raw)
+                        })
+                    }),
+                    self.fetchConfig()
+                }).catch(function() {
+                    self.setState({
+                        retentionSaving: !1
+                    }),
+                    c["a"].error({
+                        title: "保存失败",
+                        content: "请检查 config 目录是否可写。"
+                    })
                 })
             }
             openBlock(record) {
-                var auditId = Number(record && (record.latest_audit_id || record.id));
-                if (!(auditId > 0))
-                    return void c["a"].warning({
-                        title: "提示",
-                        content: "该汇总记录没有可用于阻断的原始审计记录"
-                    });
-                record = i()({}, record, {
-                    id: auditId
-                }),
+                var scopes = []
+                  , self = this;
+                CLEAN_SCOPE_ORDER.forEach(function(scope) {
+                    if ("subscription" === scope && !(Number(record.subscription_id) > 0))
+                        return;
+                    scopes.push(scope)
+                });
                 this.setState({
                     blockVisible: !0,
                     blockRecord: record,
-                    block: {
-                        scope: record.subscription_id ? "subscription" : "user",
-                        reason: "",
-                        expiresType: "permanent",
-                        expiresAt: null
-                    }
+                    blockScope: scopes.length ? scopes[0] : "ip",
+                    blockReason: "",
+                    blockExpires: ""
                 })
             }
             closeBlock() {
                 this.setState({
                     blockVisible: !1,
-                    blockRecord: null,
-                    blocking: !1
-                })
-            }
-            changeBlock(key, value) {
-                var patch = {};
-                patch[key] = value,
-                this.setState({
-                    block: i()({}, this.state.block, patch)
+                    blockRecord: null
                 })
             }
             submitBlock() {
-                var block = this.state.block
-                  , reason = String(block.reason || "").trim();
-                if (!reason)
-                    return void c["a"].warning({
+                var self = this
+                  , record = this.state.blockRecord;
+                if (!record)
+                    return;
+                var reason = String(this.state.blockReason || "").trim();
+                if (!reason) {
+                    c["a"].warning({
                         title: "提示",
-                        content: "请填写阻断原因"
+                        content: "请填写阻断原因，这条原因会写进操作留痕。"
                     });
-                if ("expires" === block.expiresType && !block.expiresAt)
-                    return void c["a"].warning({
-                        title: "提示",
-                        content: "请选择到期时间"
-                    });
+                    return
+                }
+                var payload = {
+                    summary_id: record.id,
+                    scope: this.state.blockScope,
+                    reason: reason
+                }
+                  , expires = String(this.state.blockExpires || "").trim();
+                if (expires)
+                    payload.expires_at = expires;
                 this.setState({
-                    blocking: !0
-                }),
-                gatewayPost("/risk/gateway/block", {
-                    log_id: this.state.blockRecord.id,
-                    scope: block.scope,
-                    reason: reason,
-                    expires_at: "expires" === block.expiresType ? block.expiresAt.unix() : null
-                }).then(res=>{
+                    blockSaving: !0
+                });
+                return gatewayPost("/risk/gateway/block", payload).then(function(res) {
+                    self.setState({
+                        blockSaving: !1
+                    });
                     if (200 !== res.code)
-                        return void this.setState({
-                            blocking: !1
-                        });
-                    this.closeBlock(),
-                    this.fetch(),
-                    this.state.rulesVisible && this.fetchRules()
-                }).catch(()=>this.setState({
-                    blocking: !1
-                }))
-            }
-            openRules() {
-                this.setState({
-                    rulesVisible: !0
-                }, ()=>this.fetchRules())
-            }
-            closeRules() {
-                this.setState({
-                    rulesVisible: !1
-                })
-            }
-            fetchRules() {
-                var state = this.state
-                  , filters = state.ruleFilters;
-                this.setState({
-                    rulesLoading: !0
-                }),
-                gatewayGet("/risk/gateway/rules", i()({
-                    scope: filters.scope,
-                    status: filters.status,
-                    keyword: filters.keyword
-                }, gatewayPage(state.rulesPagination))).then(res=>{
-                    if (this.unmounted)
                         return;
-                    if (200 !== res.code)
-                        return void this.setState({
-                            rulesLoading: !1
-                        });
-                    this.setState({
-                        rules: res.data || [],
-                        available: !1 !== res.available,
-                        rulesTotal: res.total || 0,
-                        rulesPagination: i()({}, this.state.rulesPagination, {
-                            total: res.total || 0
-                        }),
-                        rulesLoading: !1
+                    c["a"].success({
+                        title: "已阻断",
+                        content: "命中该条件的所有订阅请求都会收到 500 错误。"
+                    }),
+                    self.setState({
+                        blockVisible: !1,
+                        blockRecord: null
+                    }),
+                    self.fetch(),
+                    self.fetchRules()
+                }).catch(function() {
+                    self.setState({
+                        blockSaving: !1
                     })
-                }).catch(error=>this.unmounted || this.setState({
-                    rulesLoading: !1,
-                    error: error && error.message || "阻断规则请求失败，请检查网络或管理员登录状态"
-                }))
-            }
-            changeRuleFilters(patch) {
-                this.setState({
-                    ruleFilters: i()({}, this.state.ruleFilters, patch),
-                    rulesPagination: i()({}, this.state.rulesPagination, {
-                        current: 1
-                    })
-                }, ()=>this.fetchRules())
-            }
-            inputRuleFilter(value) {
-                this.ruleFilterTimer && clearTimeout(this.ruleFilterTimer),
-                this.ruleFilterTimer = setTimeout(()=>{
-                    this.ruleFilterTimer = null,
-                    this.changeRuleFilters({
-                        keyword: value
-                    })
-                }, 400)
+                })
             }
             releaseRule(rule) {
-                var reason = "";
+                var self = this;
                 c["a"].confirm({
                     title: "解除阻断",
-                    content: p.a.createElement("div", null, p.a.createElement("p", {
-                        className: "text-muted"
-                    }, "解除后将立即停止该规则的阻断效果。"), p.a.createElement(s["a"], {
-                        placeholder: "解除原因（可选）",
-                        onChange: event=>{
-                            reason = event.target.value
-                        }
-                    })),
+                    content: "解除后该目标立即恢复正常下发。",
                     okText: "确认解除",
-                    okType: "danger",
                     cancelText: "取消",
-                    onOk: ()=>gatewayPost("/risk/gateway/release", {
-                        id: rule.id,
-                        reason: String(reason || "").trim() || void 0
-                    }).then(res=>{
-                        200 === res.code && this.fetchRules()
+                    onOk() {
+                        return gatewayPost("/risk/gateway/release", {
+                            id: rule.id
+                        }).then(function(res) {
+                            if (200 !== res.code)
+                                return;
+                            c["a"].success({
+                                title: "已解除",
+                                content: "该目标已从阻断名单移除。"
+                            }),
+                            self.fetch(),
+                            self.fetchRules()
+                        })
+                    }
+                })
+            }
+            fetchRules(page) {
+                var self = this
+                  , pagination = gatewayPage(this.state.rulesPagination)
+                  , target = page || pagination.current;
+                this.setState({
+                    rulesLoading: !0
+                });
+                gatewayGet("/risk/gateway/rules", {
+                    status: "active",
+                    current: target,
+                    pageSize: pagination.pageSize
+                }).then(function(res) {
+                    if (200 !== res.code) {
+                        self.setState({
+                            rulesLoading: !1
+                        });
+                        return
+                    }
+                    self.setState({
+                        rules: res.data || [],
+                        rulesTotal: Number(res.total || 0),
+                        rulesLoading: !1,
+                        rulesPagination: i()({}, self.state.rulesPagination, {
+                            current: target,
+                            total: Number(res.total || 0)
+                        })
                     })
                 })
             }
-            showHistory(rule) {
+            fetchHistory(page) {
+                var self = this
+                  , pagination = gatewayPage(this.state.historyPagination)
+                  , target = page || pagination.current;
                 this.setState({
-                    historyVisible: !0,
-                    historyLoading: !0,
-                    historyRule: rule,
-                    history: []
-                }),
+                    historyLoading: !0
+                });
                 gatewayGet("/risk/gateway/history", {
-                    rule_id: rule.id
-                }).then(res=>{
-                    if (this.unmounted)
-                        return;
-                    this.setState({
-                        history: 200 === res.code ? res.data || [] : [],
-                        historyLoading: !1
+                    current: target,
+                    pageSize: pagination.pageSize
+                }).then(function(res) {
+                    if (200 !== res.code) {
+                        self.setState({
+                            historyLoading: !1
+                        });
+                        return
+                    }
+                    self.setState({
+                        history: res.data || [],
+                        historyTotal: Number(res.total || 0),
+                        historyLoading: !1,
+                        historyPagination: i()({}, self.state.historyPagination, {
+                            current: target,
+                            total: Number(res.total || 0)
+                        })
                     })
-                }).catch(()=>this.unmounted || this.setState({
-                    historyLoading: !1
-                }))
+                })
             }
-            renderTarget(rule) {
-                if ("subscription" === rule.scope)
-                    return rule.target ? "#" + rule.target : "-";
-                if ("user" === rule.scope)
-                    return rule.target ? "#" + rule.target : "-";
-                return rule.target || "-"
-            }
-            renderRules() {
-                var state = this.state
-                  , columns = [{
-                    title: "状态",
-                    key: "status",
-                    width: 90,
-                    render: (value, rule)=>p.a.createElement(y["a"], {
-                        color: "active" === rule.effective_status || "active" === rule.status ? "red" : void 0
-                    }, gatewayStatusText(rule.effective_status || rule.status))
-                }, {
-                    title: "范围",
-                    dataIndex: "scope",
-                    width: 120,
-                    render: gatewayScopeText
-                }, {
-                    title: "目标",
-                    key: "target",
-                    render: (value, rule)=>p.a.createElement("span", {
+            renderFilterBar() {
+                var self = this
+                  , filters = this.state.filters
+                  , plans = this.state.options.plans || []
+                  , planOptions = plans.map(function(plan) {
+                    return p.a.createElement(u["a"].Option, {
+                        key: String(plan.id),
+                        value: String(plan.id)
+                    }, "#" + plan.id + " " + plan.name)
+                });
+                var field = function(label, control) {
+                    return p.a.createElement("div", {
+                        className: "col-md-6 col-xl-3 mb-2"
+                    }, p.a.createElement("label", {
+                        className: "font-w600 small mb-1 d-block"
+                    }, label), control)
+                };
+                return p.a.createElement("div", {
+                    className: "row"
+                },
+                    field("账号（邮箱）", p.a.createElement(s["a"], {
+                        allowClear: !0,
+                        placeholder: "支持模糊匹配",
+                        value: filters.email,
+                        onChange: e=>this.setFilter("email", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    })),
+                    field("账号 ID", p.a.createElement(s["a"], {
+                        allowClear: !0,
+                        placeholder: "精确匹配",
+                        value: filters.user_id,
+                        onChange: e=>this.setFilter("user_id", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    })),
+                    field("套餐", p.a.createElement(u["a"], {
+                        allowClear: !0,
+                        placeholder: "全部套餐",
                         style: {
-                            wordBreak: "break-all"
-                        }
-                    }, this.renderTarget(rule))
-                }, {
-                    title: "原因",
-                    dataIndex: "reason",
-                    width: 180,
-                    render: value=>p.a.createElement("span", {
-                        style: {
-                            wordBreak: "break-all"
-                        }
-                    }, value || "-")
-                }, {
-                    title: "创建人 / 时间",
-                    key: "blocked",
-                    width: 190,
-                    render: (value, rule)=>p.a.createElement("div", null, rule.blocked_by_email || "-", p.a.createElement("div", {
-                        className: "text-muted font-size-sm"
-                    }, gatewayTime(rule.blocked_at)))
-                }, {
-                    title: "到期",
-                    dataIndex: "expires_at",
-                    width: 170,
-                    render: value=>value ? gatewayTime(value) : "永久"
-                }, {
-                    title: "解除信息",
-                    key: "released",
-                    width: 200,
-                    render: (value, rule)=>rule.released_at || rule.released_by_email ? p.a.createElement("div", null, rule.released_by_email || "-", p.a.createElement("div", {
-                        className: "text-muted font-size-sm"
-                    }, gatewayTime(rule.released_at)), rule.release_reason ? p.a.createElement("div", {
-                        className: "text-muted font-size-sm",
-                        style: {
-                            wordBreak: "break-all"
-                        }
-                    }, rule.release_reason) : null) : "-"
-                }, {
-                    title: "操作",
-                    key: "action",
-                    fixed: "right",
-                    width: 145,
-                    render: (value, rule)=>p.a.createElement("span", null, p.a.createElement("a", {
-                        href: "javascript:void(0);",
-                        onClick: ()=>this.showHistory(rule)
-                    }, "历史"), ("active" === rule.effective_status || "active" === rule.status) ? p.a.createElement("a", {
-                        href: "javascript:void(0);",
-                        style: {
-                            marginLeft: 10
+                            width: "100%"
                         },
-                        onClick: ()=>this.releaseRule(rule)
-                    }, "解除") : null)
-                }];
-                return p.a.createElement(c["a"], {
-                    title: "阻断规则",
-                    visible: state.rulesVisible,
-                    width: 1180,
-                    footer: null,
-                    onCancel: ()=>this.closeRules()
+                        value: filters.plan_id,
+                        onChange: e=>this.setFilter("plan_id", e)
+                    }, planOptions)),
+                    field("订阅 ID", p.a.createElement(s["a"], {
+                        allowClear: !0,
+                        placeholder: "精确匹配",
+                        value: filters.subscription_id,
+                        onChange: e=>this.setFilter("subscription_id", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    })),
+                    field("IP 地址", p.a.createElement(s["a"], {
+                        allowClear: !0,
+                        placeholder: "完整 IP 精确匹配，否则模糊",
+                        value: filters.ip,
+                        onChange: e=>this.setFilter("ip", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    })),
+                    field("运营商 / 归属机构", p.a.createElement(s["a"], {
+                        allowClear: !0,
+                        placeholder: "支持模糊匹配",
+                        value: filters.carrier,
+                        onChange: e=>this.setFilter("carrier", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    })),
+                    field("ASN", p.a.createElement(s["a"], {
+                        allowClear: !0,
+                        placeholder: "如 4134 或 AS4134",
+                        value: filters.asn,
+                        onChange: e=>this.setFilter("asn", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    })),
+                    field("User-Agent", p.a.createElement(s["a"], {
+                        allowClear: !0,
+                        placeholder: "支持模糊匹配",
+                        value: filters.user_agent,
+                        onChange: e=>this.setFilter("user_agent", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    })),
+                    field("拉取次数", p.a.createElement(s["a"].Group, {
+                        compact: !0,
+                        style: {
+                            width: "100%"
+                        }
+                    }, p.a.createElement(u["a"], {
+                        style: {
+                            width: "30%"
+                        },
+                        value: filters.hit_condition,
+                        onChange: e=>this.setFilter("hit_condition", e)
+                    }, CLEAN_HIT_CONDITIONS.map(function(condition) {
+                        return p.a.createElement(u["a"].Option, {
+                            key: condition,
+                            value: condition
+                        }, condition)
+                    })), p.a.createElement(s["a"], {
+                        style: {
+                            width: "70%"
+                        },
+                        allowClear: !0,
+                        placeholder: "次数",
+                        value: filters.hit_count,
+                        onChange: e=>this.setFilter("hit_count", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    }))),
+                    field("阻断状态", p.a.createElement(u["a"], {
+                        allowClear: !0,
+                        placeholder: "全部",
+                        style: {
+                            width: "100%"
+                        },
+                        value: filters.blocked,
+                        onChange: e=>this.setFilter("blocked", e)
+                    }, CLEAN_BLOCKED_OPTIONS.map(function(option) {
+                        return p.a.createElement(u["a"].Option, {
+                            key: option.value,
+                            value: option.value
+                        }, option.key)
+                    }))),
+                    field("开始时间（UTC+8）", p.a.createElement(s["a"], {
+                        allowClear: !0,
+                        placeholder: "YYYY-MM-DD HH:mm",
+                        value: filters.start_time,
+                        onChange: e=>this.setFilter("start_time", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    })),
+                    field("结束时间（UTC+8）", p.a.createElement(s["a"], {
+                        allowClear: !0,
+                        placeholder: "YYYY-MM-DD HH:mm",
+                        value: filters.end_time,
+                        onChange: e=>this.setFilter("end_time", e.target.value),
+                        onPressEnter: ()=>this.fetch(1)
+                    })),
+                    p.a.createElement("div", {
+                        className: "col-md-6 col-xl-3 mb-2 d-flex align-items-end"
+                    }, p.a.createElement(a["a"], {
+                        type: "primary",
+                        icon: "search",
+                        className: "mr-2",
+                        onClick: ()=>this.fetch(1)
+                    }, "查询"), p.a.createElement(a["a"], {
+                        icon: "reload",
+                        className: "mr-2",
+                        onClick: ()=>this.resetFilters()
+                    }, "重置"), p.a.createElement(a["a"], {
+                        type: "success",
+                        icon: "download",
+                        loading: this.state.exporting,
+                        onClick: ()=>this.exportCsv()
+                    }, "导出 CSV")))
+            }
+            renderRetention() {
+                var self = this
+                  , options = this.state.options
+                  , stats = this.state.stats
+                  , days = Number(stats.retention_days === null || void 0 === stats.retention_days ? options.retention_days : stats.retention_days);
+                return p.a.createElement("div", {
+                    className: "row align-items-end"
                 }, p.a.createElement("div", {
-                    className: "d-flex flex-wrap align-items-center",
+                    className: "col-md-4 col-xl-3 mb-2"
+                }, p.a.createElement("label", {
+                    className: "font-w600 small mb-1 d-block"
+                }, "日志留存天数（UTC+8 自然日）"), p.a.createElement(s["a"].Group, {
+                    compact: !0,
                     style: {
-                        marginBottom: 14
+                        width: "100%"
                     }
-                }, p.a.createElement(u["a"], {
-                    allowClear: !0,
-                    placeholder: "全部范围",
-                    value: state.ruleFilters.scope || void 0,
-                    onChange: value=>this.changeRuleFilters({
-                        scope: value || ""
-                    }),
+                }, p.a.createElement(s["a"], {
                     style: {
-                        width: 150,
-                        marginRight: 10,
-                        marginBottom: 6
-                    }
-                }, ["subscription", "user", "ip", "user_agent"].map(scope=>p.a.createElement(u["a"].Option, {
-                    key: scope,
-                    value: scope
-                }, gatewayScopeText(scope)))), p.a.createElement(u["a"], {
-                    allowClear: !0,
-                    placeholder: "全部状态",
-                    value: state.ruleFilters.status || void 0,
-                    onChange: value=>this.changeRuleFilters({
-                        status: value || ""
-                    }),
-                    style: {
-                        width: 130,
-                        marginRight: 10,
-                        marginBottom: 6
-                    }
-                }, ["active", "disabled", "expired"].map(status=>p.a.createElement(u["a"].Option, {
-                    key: status,
-                    value: status
-                }, gatewayStatusText(status)))), p.a.createElement(s["a"], {
-                    allowClear: !0,
-                    placeholder: "搜索目标、原因或创建人",
-                    defaultValue: state.ruleFilters.keyword,
-                    onChange: event=>this.inputRuleFilter(event.target.value),
-                    style: {
-                        width: 240,
-                        marginRight: 10,
-                        marginBottom: 6
-                    }
+                        width: "60%"
+                    },
+                    value: this.state.retentionInput,
+                    onChange: e=>this.setState({
+                        retentionInput: e.target.value
+                    })
                 }), p.a.createElement(a["a"], {
                     style: {
-                        marginBottom: 6
+                        width: "40%"
                     },
-                    onClick: ()=>this.fetchRules()
-                }, p.a.createElement(l["a"], {
-                    type: "reload"
-                }), " 刷新")), p.a.createElement(o["a"], {
-                    loading: state.rulesLoading,
-                    rowKey: rule=>rule.id,
-                    dataSource: state.rules,
-                    columns: columns,
-                    pagination: i()({}, state.rulesPagination, {
-                        size: "small",
-                        showSizeChanger: !0,
-                        pageSizeOptions: ["10", "20", "50", "100"]
-                    }),
-                    onChange: pagination=>this.setState({
-                        rulesPagination: i()({}, this.state.rulesPagination, gatewayPage(pagination))
-                    }, ()=>this.fetchRules()),
-                    locale: {
-                        emptyText: "暂无阻断规则"
-                    },
-                    scroll: {
-                        x: 1120,
-                        y: 430
-                    }
-                }))
+                    type: "primary",
+                    loading: this.state.retentionSaving,
+                    onClick: ()=>this.saveRetention()
+                }, "保存"))), p.a.createElement("div", {
+                    className: "col-md-8 col-xl-9 mb-2 text-muted small"
+                }, p.a.createElement("div", null, "0 表示永久保留，上限 3650 天。超出留存期的拉取记录与清洗网关列表会一起被清理，页面看到的窗口与这个设置严格一致。"), p.a.createElement("div", {
+                    className: "d-flex flex-wrap"
+                }, statItem("当前生效（天）", days), statItem("列表行数", Number(stats.records || 0)), statItem("原始审计", Number(stats.raw_logs || 0)), stats.earliest_text ? statItem("最早一条", stats.earliest_text) : null, stats.last_cleaned_text ? statItem("上次清理", stats.last_cleaned_text) : null)))
             }
-            renderHistory() {
-                var state = this.state
+            renderTable() {
+                var self = this
                   , columns = [{
-                    title: "时间",
-                    key: "time",
-                    width: 180,
-                    render: (value, event)=>gatewayTime(event.created_at || event.operated_at || event.at || event.timestamp)
+                    title: "账号",
+                    dataIndex: "user_email",
+                    key: "user_email",
+                    width: 220,
+                    render: (value, record)=>p.a.createElement("div", null, p.a.createElement("div", {
+                        className: "font-w600"
+                    }, value || "-"), p.a.createElement("div", {
+                        className: "text-muted small"
+                    }, "#" + record.user_id))
                 }, {
-                    title: "事件",
-                    key: "action",
-                    width: 130,
-                    render: (value, event)=>event.action || event.event || event.type || "-"
-                }, {
-                    title: "操作人",
-                    key: "operator",
-                    width: 200,
-                    render: (value, event)=>event.operator_email || event.admin_email || event.created_by_email || "-"
-                }, {
-                    title: "原因 / 详情",
-                    key: "detail",
-                    render: (value, event)=>p.a.createElement("span", {
-                        style: {
-                            wordBreak: "break-all"
-                        }
-                    }, event.reason || event.release_reason || event.detail || "-")
-                }];
-                return p.a.createElement(c["a"], {
-                    title: "规则历史" + (state.historyRule ? " #" + state.historyRule.id : ""),
-                    visible: state.historyVisible,
-                    width: 780,
-                    footer: null,
-                    onCancel: ()=>this.setState({
-                        historyVisible: !1,
-                        historyRule: null
-                    })
-                }, p.a.createElement(o["a"], {
-                    loading: state.historyLoading,
-                    rowKey: (event, index)=>event.id || index,
-                    dataSource: state.history,
-                    columns: columns,
-                    pagination: !1,
-                    locale: {
-                        emptyText: "暂无操作历史"
-                    },
-                    scroll: {
-                        x: 680
+                    title: "订阅",
+                    dataIndex: "subscriptions",
+                    key: "subscriptions",
+                    width: 240,
+                    render: (value, record)=>{
+                        var list = gatewaySubscriptions(record);
+                        if (!list.length)
+                            return p.a.createElement("span", {
+                                className: "text-muted"
+                            }, "无订阅");
+                        var currentId = Number(record.subscription_id || 0);
+                        return p.a.createElement("div", null, list.map(function(subscription) {
+                            var isCurrent = Number(subscription.id) === currentId;
+                            return p.a.createElement("div", {
+                                key: String(subscription.id)
+                            }, p.a.createElement(y["a"], {
+                                color: isCurrent ? "blue" : "default",
+                                className: "mb-1"
+                            }, gatewaySubscriptionText(subscription)), "active" !== subscription.status ? p.a.createElement("span", {
+                                className: "text-muted small ml-1"
+                            }, subscription.status) : null)
+                        }))
                     }
-                }))
-            }
-            renderIpLocation(location) {
-                var value = location && typeof location === "object" ? location : {}
-                  , area = [value.country_name || value.country || value.country_code, value.province || value.region, value.city, value.district].filter(item=>item).join(" / ")
-                  , operator = value.operator_code || "-"
-                  , asn = value.asn ? "AS" + value.asn : "-"
-                  , organization = value.organization || "-"
-                  , network = value.network_type || "-"
-                  , connection = value.connection_type || "-"
-                  , idc = null === value.is_idc || void 0 === value.is_idc ? "未知" : value.is_idc ? "是" : "否"
-                  , residential = null === value.is_residential || void 0 === value.is_residential ? "未知" : value.is_residential ? "是" : "否"
-                  , confidence = null === value.geo_confidence || void 0 === value.geo_confidence || "" === value.geo_confidence ? "-" : (100 * Number(value.geo_confidence)).toFixed(2) + "%"
-                  , radius = null === value.accuracy_radius || void 0 === value.accuracy_radius || "" === value.accuracy_radius ? "-" : value.accuracy_radius + " km";
-                return p.a.createElement("div", {
-                    className: "font-size-sm",
-                    style: {
-                        lineHeight: "1.7",
-                        minWidth: 230
-                    }
-                }, p.a.createElement("div", null, "归属地：", area || "-"), p.a.createElement("div", null, "ISP：", value.isp || "-", "　运营商：", operator), p.a.createElement("div", null, "ASN / 组织：", asn, " / ", organization), p.a.createElement("div", null, "网络 / 连接：", network, " / ", connection), p.a.createElement("div", null, "IDC / 住宅：", idc, " / ", residential), p.a.createElement("div", null, "置信度 / 半径：", confidence, " / ", radius))
-            }
-            renderAuditDetail() {
-                var state = this.state
-                  , record = state.detailRecord || {}
-                  , rows = [["时间", gatewayTime(record.requested_at)], ["用户", (record.user_email || "-") + (record.user_id ? " (#" + record.user_id + ")" : "")], ["订阅", record.subscription_id ? (record.subscription_plan_name || "未命名套餐") + " (#" + record.subscription_id + ")" : "-"], ["IP", record.request_ip || "-"], ["User-Agent", record.user_agent || "-"], ["结果", gatewayDecisionText(record.decision)], ["命中范围", gatewayScopeText(record.block_scope)], ["原因", record.block_reason || "-"]]
-                  , rawColumns = [{
-                    title: "时间",
-                    dataIndex: "requested_at",
-                    width: 170,
-                    render: gatewayTime
                 }, {
-                    title: "IP",
+                    title: "IP 记录",
                     dataIndex: "request_ip",
-                    width: 150,
-                    render: value=>value || "-"
+                    key: "request_ip",
+                    width: 220,
+                    render: (value, record)=>p.a.createElement("div", null, p.a.createElement("div", {
+                        className: "font-w600"
+                    }, value || "-"), p.a.createElement("div", {
+                        className: "text-muted small"
+                    }, gatewayCarrierText(record)))
                 }, {
                     title: "User-Agent",
                     dataIndex: "user_agent",
-                    render: value=>p.a.createElement("span", {
+                    key: "user_agent",
+                    render: value=>p.a.createElement("div", {
                         style: {
                             wordBreak: "break-all"
-                        }
+                        },
+                        title: value || ""
                     }, value || "-")
                 }, {
-                    title: "结果",
-                    dataIndex: "decision",
-                    width: 90,
-                    render: gatewayDecisionText
-                }]
-                  , content = state.detailLoading ? p.a.createElement(g["a"], null) : state.detailError ? p.a.createElement("div", {
-                    className: "alert alert-danger mb-0",
-                    role: "alert"
-                }, state.detailError) : p.a.createElement("div", {
-                    className: "table-responsive"
-                }, p.a.createElement("table", {
-                    className: "table table-bordered table-vcenter mb-3"
-                }, p.a.createElement("tbody", null, rows.map((item, index)=>p.a.createElement("tr", {
-                    key: index
-                }, p.a.createElement("th", {
-                    style: {
-                        width: 130
-                    }
-                }, item[0]), p.a.createElement("td", {
-                    style: {
-                        wordBreak: "break-all"
-                    }
-                }, item[1]))))), p.a.createElement("h5", {
-                    className: "font-w600 mb-2"
-                }, "原始拉取记录（共 ", Number(record.raw_total || 0), " 条）"), p.a.createElement(o["a"], {
-                    size: "small",
-                    rowKey: raw=>raw.id,
-                    dataSource: record.raw_records || [],
-                    columns: rawColumns,
-                    pagination: i()({}, state.detailPagination, {
-                        size: "small",
-                        total: record.raw_total || 0,
-                        showSizeChanger: !0,
-                        pageSizeOptions: ["10", "20", "50", "100"]
-                    }),
-                    onChange: pagination=>this.openAuditDetail(state.detailSource || record, pagination),
-                    locale: {
-                        emptyText: "暂无原始拉取记录"
-                    },
-                    scroll: {
-                        x: 760,
-                        y: 320
-                    }
-                }), record.id ? p.a.createElement(a["a"], {
-                    type: "danger",
-                    onClick: ()=>{
-                        this.closeAuditDetail(),
-                        this.openBlock(record)
-                    }
-                }, "阻断此记录") : null);
-                return p.a.createElement(c["a"], {
-                    title: "原始拉取明细",
-                    visible: state.detailVisible,
-                    footer: null,
-                    width: 900,
-                    onCancel: ()=>this.closeAuditDetail()
-                }, content)
-            }
-            renderBlock() {
-                var state = this.state
-                  , record = state.blockRecord || {}
-                  , block = state.block;
-                return p.a.createElement(c["a"], {
-                    title: "阻断订阅请求",
-                    visible: state.blockVisible,
-                    okText: "确认阻断",
-                    okType: "danger",
-                    cancelText: "取消",
-                    onCancel: ()=>this.closeBlock(),
-                    onOk: ()=>this.submitBlock(),
-                    okButtonProps: {
-                        loading: state.blocking
-                    }
-                }, p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "阻断范围"), p.a.createElement(u["a"], {
-                    value: block.scope,
-                    style: {
-                        width: "100%"
-                    },
-                    onChange: value=>this.changeBlock("scope", value)
-                }, p.a.createElement(u["a"].Option, {
-                    value: "subscription",
-                    disabled: !record.subscription_id
-                }, "当前订阅"), p.a.createElement(u["a"].Option, {
-                    value: "user"
-                }, "当前用户"), p.a.createElement(u["a"].Option, {
-                    value: "ip"
-                }, "当前 IP"), p.a.createElement(u["a"].Option, {
-                    value: "user_agent"
-                }, "当前 User-Agent"))), p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "阻断原因"), p.a.createElement(s["a"].TextArea, {
-                    rows: 3,
-                    value: block.reason,
-                    placeholder: "请填写阻断原因",
-                    onChange: event=>this.changeBlock("reason", event.target.value)
-                })), p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "有效期"), p.a.createElement(u["a"], {
-                    value: block.expiresType,
-                    style: {
-                        width: "100%"
-                    },
-                    onChange: value=>this.changeBlock("expiresType", value)
-                }, p.a.createElement(u["a"].Option, {
-                    value: "permanent"
-                }, "永久"), p.a.createElement(u["a"].Option, {
-                    value: "expires"
-                }, "到期时间"))), "expires" === block.expiresType ? p.a.createElement("div", {
-                    className: "form-group"
-                }, p.a.createElement("label", null, "到期时间"), p.a.createElement(D["a"], {
-                    showTime: !0,
-                    format: "YYYY-MM-DD HH:mm",
-                    placeholder: "请选择到期时间",
-                    value: block.expiresAt,
-                    onChange: value=>this.changeBlock("expiresAt", value),
-                    style: {
-                        width: "100%"
-                    }
-                })) : null)
-            }
-            render() {
-                var state = this.state
-                  , filters = state.filters
-                  , isUa = "ua" === state.view
-                  , columns = [{
-                    title: "用户",
-                    key: "user",
-                    width: 185,
-                    render: (value, row)=>p.a.createElement("span", {
-                        style: {
-                            wordBreak: "break-all"
-                        }
-                    }, row.user_email || "-")
-                }, {
-                    title: "订阅",
-                    key: "subscription",
-                    width: 160,
-                    render: (value, row)=>row.subscription_plan_name || "-"
-                }, {
-                    title: isUa ? "最近 IP" : "IP",
-                    key: "request_ip",
-                    width: 145,
-                    render: (value, row)=>(isUa ? row.latest_request_ip : row.request_ip) || "-"
-                }, {
-                    title: "User-Agent",
-                    key: "user_agent",
-                    width: 235,
-                    render: (value, row)=>p.a.createElement("div", {
-                        style: {
-                            wordBreak: "break-all"
-                        }
-                    }, row.latest_user_agent || "-", isUa && row.ua_hash ? p.a.createElement("div", {
-                        className: "text-muted font-size-sm"
-                    }, "SHA-256: ", row.ua_hash) : null)
-                }, {
-                    title: "次数 / 时间",
-                    key: "request_count",
-                    width: 190,
-                    render: (value, row)=>p.a.createElement("div", null, p.a.createElement("div", null, "累计 ", Number(row.request_count || 0), " 次"), p.a.createElement("div", {
-                        className: "text-muted font-size-sm"
-                    }, "首次：", gatewayTime(row.first_requested_at)), p.a.createElement("div", {
-                        className: "text-muted font-size-sm"
-                    }, "最近：", gatewayTime(row.last_requested_at)))
-                }, {
-                    title: "最近结果",
-                    dataIndex: "latest_decision",
+                    title: "次数",
+                    dataIndex: "hit_count",
+                    key: "hit_count",
                     width: 100,
-                    render: value=>p.a.createElement(y["a"], {
-                        color: "blocked" === value ? "red" : "error" === value ? "orange" : "green"
-                    }, gatewayDecisionText(value))
+                    sorter: !0,
+                    sortOrder: "hit_count" === self.state.sort ? ("asc" === self.state.sortDir ? "ascend" : "descend") : null,
+                    render: value=>p.a.createElement("span", {
+                        className: "font-w600"
+                    }, Number(value || 0))
                 }, {
-                    title: "详细 IP 信息",
-                    key: "ip_location",
-                    width: 300,
-                    render: (value, row)=>this.renderIpLocation(row.ip_location)
+                    title: "时间（UTC+8）",
+                    // dataIndex 用 last_seen_at（而不是渲染用的 last_seen_text）：
+                    // antd 表头排序传回来的 sorter.field 就是 dataIndex，后端只认
+                    // last_seen_at，写 text 会永远落到默认排序。渲染改从 record 取。
+                    dataIndex: "last_seen_at",
+                    key: "last_seen_at",
+                    width: 200,
+                    sorter: !0,
+                    sortOrder: "last_seen_at" === self.state.sort ? ("asc" === self.state.sortDir ? "ascend" : "descend") : null,
+                    render: (value, record)=>p.a.createElement("div", null, p.a.createElement("div", null, gatewayTimeText(record.last_seen_text)), p.a.createElement("div", {
+                        className: "text-muted small"
+                    }, "首次", " ", gatewayTimeText(record.first_seen_text)))
+                }, {
+                    title: "阻断状态",
+                    dataIndex: "block",
+                    key: "block",
+                    width: 150,
+                    render: (value, record)=>{
+                        if (!value)
+                            return p.a.createElement(y["a"], {
+                                color: "green"
+                            }, "未阻断");
+                        return p.a.createElement("div", null, p.a.createElement(y["a"], {
+                            color: "red",
+                            title: value.reason || ""
+                        }, "已阻断", " · ", gatewayScopeText(value.scope)), p.a.createElement("div", {
+                            className: "text-muted small"
+                        }, value.expires_at_text ? ["至 ", value.expires_at_text] : "永久"))
+                    }
                 }, {
                     title: "操作",
                     key: "action",
-                    fixed: "right",
-                    width: 145,
-                    render: (value, row)=>p.a.createElement("span", null, p.a.createElement("a", {
-                        href: "javascript:void(0);",
-                        onClick: ()=>this.openAuditDetail(row)
-                    }, "查看明细"), p.a.createElement("a", {
-                        href: "javascript:void(0);",
-                        style: {
-                            marginLeft: 10
-                        },
-                        onClick: ()=>this.openBlock(row)
-                    }, "阻断"))
+                    width: 160,
+                    render: (value, record)=>{
+                        if (record.block) {
+                            return p.a.createElement(a["a"], {
+                                size: "small",
+                                onClick: ()=>this.releaseRule(record.block)
+                            }, "解除阻断")
+                        }
+                        return p.a.createElement(a["a"], {
+                            size: "small",
+                            type: "danger",
+                            onClick: ()=>this.openBlock(record)
+                        }, "阻断")
+                    }
                 }];
-                return p.a.createElement(m["a"], i()({}, this.props, {
-                    title: "订阅风控网关"
-                }), p.a.createElement(g["a"], {
-                    loading: state.loading
-                }, !state.loading && !state.available ? p.a.createElement("div", {
-                    className: "alert alert-warning",
-                    role: "alert"
-                }, p.a.createElement("p", {
-                    className: "mb-0"
-                }, "订阅风控网关所需的数据表或接口尚未安装，暂时无法读取审计记录。")) : null, !state.loading && state.error ? p.a.createElement("div", {
-                    className: "alert alert-danger",
-                    role: "alert"
-                }, p.a.createElement("p", {
-                    className: "mb-0"
-                }, state.error)) : null, p.a.createElement("div", {
+                return p.a.createElement(o["a"], {
+                    rowKey: row=>String(row.id),
+                    loading: this.state.loading,
+                    columns: columns,
+                    dataSource: this.state.data,
+                    onChange: (pagination, filters, sorter)=>this.tableChange(pagination, filters, sorter),
+                    pagination: {
+                        current: this.state.pagination.current,
+                        pageSize: this.state.pagination.pageSize,
+                        total: this.state.total,
+                        showSizeChanger: !0,
+                        showTotal: value=>"共 " + value + " 条"
+                    },
+                    scroll: {
+                        x: 1500
+                    }
+                })
+            }
+            renderRules() {
+                var self = this
+                  , columns = [{
+                    title: "阻断目标",
+                    dataIndex: "target",
+                    key: "target",
+                    render: (value, record)=>{
+                        var text = "user" === record.scope ? record.user_email || ("#" + record.user_id) : "subscription" === record.scope ? "#" + record.subscription_id + " " + (record.subscription_label || "") : "ip" === record.scope ? record.ip : record.user_agent;
+                        return p.a.createElement("div", null, p.a.createElement("div", {
+                            className: "font-w600"
+                        }, text || "-"), p.a.createElement("div", {
+                            className: "text-muted small"
+                        }, gatewayScopeText(record.scope)))
+                    }
+                }, {
+                    title: "原因",
+                    dataIndex: "reason",
+                    key: "reason"
+                }, {
+                    title: "阻断时间（UTC+8）",
+                    dataIndex: "blocked_at_text",
+                    key: "blocked_at_text",
+                    width: 190
+                }, {
+                    title: "到期时间（UTC+8）",
+                    dataIndex: "expires_at_text",
+                    key: "expires_at_text",
+                    width: 190,
+                    render: value=>value || "永久"
+                }, {
+                    title: "操作",
+                    key: "action",
+                    width: 120,
+                    render: (value, record)=>p.a.createElement(a["a"], {
+                        size: "small",
+                        onClick: ()=>this.releaseRule(record)
+                    }, "解除")
+                }];
+                return p.a.createElement(o["a"], {
+                    rowKey: row=>String(row.id),
+                    size: "small",
+                    loading: this.state.rulesLoading,
+                    columns: columns,
+                    dataSource: this.state.rules,
+                    pagination: {
+                        current: this.state.rulesPagination.current,
+                        pageSize: this.state.rulesPagination.pageSize,
+                        total: this.state.rulesTotal
+                    },
+                    onChange: pagination=>this.fetchRules(pagination.current)
+                })
+            }
+            renderHistory() {
+                var columns = [{
+                    title: "时间（UTC+8）",
+                    dataIndex: "created_at_text",
+                    key: "created_at_text",
+                    width: 190
+                }, {
+                    title: "动作",
+                    dataIndex: "action",
+                    key: "action",
+                    width: 100,
+                    render: value=>p.a.createElement(y["a"], {
+                        color: "block" === value ? "red" : "green"
+                    }, "block" === value ? "阻断" : "解除")
+                }, {
+                    title: "目标",
+                    dataIndex: "target",
+                    key: "target",
+                    render: (value, record)=>p.a.createElement("div", null, p.a.createElement("div", null, value || "-"), p.a.createElement("div", {
+                        className: "text-muted small"
+                    }, gatewayScopeText(record.scope)))
+                }, {
+                    title: "操作人",
+                    dataIndex: "actor_email",
+                    key: "actor_email",
+                    render: value=>value || "-"
+                }, {
+                    title: "原因",
+                    dataIndex: "reason",
+                    key: "reason",
+                    render: value=>value || "-"
+                }];
+                return p.a.createElement(o["a"], {
+                    rowKey: row=>String(row.id),
+                    size: "small",
+                    loading: this.state.historyLoading,
+                    columns: columns,
+                    dataSource: this.state.history,
+                    pagination: {
+                        current: this.state.historyPagination.current,
+                        pageSize: this.state.historyPagination.pageSize,
+                        total: this.state.historyTotal
+                    },
+                    onChange: pagination=>this.fetchHistory(pagination.current)
+                })
+            }
+            renderBlockModal() {
+                var record = this.state.blockRecord
+                  , self = this;
+                if (!this.state.blockVisible || !record)
+                    return null;
+                var scopes = [];
+                CLEAN_SCOPE_ORDER.forEach(function(scope) {
+                    if ("subscription" === scope && !(Number(record.subscription_id) > 0))
+                        return;
+                    scopes.push(scope)
+                });
+                var targetText = "user" === this.state.blockScope ? record.user_email || ("#" + record.user_id) : "subscription" === this.state.blockScope ? "#" + record.subscription_id : "ip" === this.state.blockScope ? record.request_ip : record.user_agent;
+                return p.a.createElement(c["a"], {
+                    title: "阻断订阅拉取",
+                    visible: !0,
+                    onCancel: ()=>this.closeBlock(),
+                    onOk: ()=>this.submitBlock(),
+                    confirmLoading: this.state.blockSaving,
+                    okText: "确认阻断",
+                    okType: "danger",
+                    cancelText: "取消",
+                    width: 560
+                }, p.a.createElement("div", {
+                    className: "mb-3"
+                }, p.a.createElement("div", {
+                    className: "font-w600 mb-1"
+                }, "阻断条件"), p.a.createElement(u["a"], {
+                    style: {
+                        width: "100%"
+                    },
+                    value: this.state.blockScope,
+                    onChange: e=>this.setState({
+                        blockScope: e
+                    })
+                }, scopes.map(function(scope) {
+                    return p.a.createElement(u["a"].Option, {
+                        key: scope,
+                        value: scope
+                    }, gatewayScopeText(scope))
+                }))), p.a.createElement("p", {
+                    className: "text-muted small"
+                }, "全站生效：命中该条件的所有订阅请求都会返回 500 错误，不只是这个账号。"), p.a.createElement("div", {
+                    className: "alert alert-warning small"
+                }, "当前目标：", p.a.createElement("span", {
+                    className: "font-w600",
+                    style: {
+                        wordBreak: "break-all"
+                    }
+                }, targetText || "-")), p.a.createElement("div", {
+                    className: "mb-3"
+                }, p.a.createElement("div", {
+                    className: "font-w600 mb-1"
+                }, "阻断原因"), p.a.createElement(s["a"].TextArea, {
+                    rows: 3,
+                    value: this.state.blockReason,
+                    placeholder: "会写进操作留痕，便于日后复核",
+                    onChange: e=>this.setState({
+                        blockReason: e.target.value
+                    })
+                })), p.a.createElement("div", null, p.a.createElement("div", {
+                    className: "font-w600 mb-1"
+                }, "到期时间（UTC+8，留空为永久）"), p.a.createElement(s["a"], {
+                    allowClear: !0,
+                    placeholder: "YYYY-MM-DD HH:mm",
+                    value: this.state.blockExpires,
+                    onChange: e=>this.setState({
+                        blockExpires: e.target.value
+                    })
+                })))
+            }
+            // 版式照原风控网关页：一个 Card 里若干 block block-rounded 区块 —— 这个主题的
+            // 页面都是这个结构，直接套用省得跟其它页面风格打架。
+            section(title, extra, body) {
+                return p.a.createElement("div", {
                     className: "block block-rounded"
                 }, p.a.createElement("div", {
-                    className: "bg-white"
-                }, p.a.createElement("div", {
-                    className: "d-flex flex-wrap align-items-center",
-                    style: {
-                        padding: 15
-                    }
-                }, p.a.createElement("div", {
-                    style: {
-                        marginRight: 18,
-                        marginBottom: 6
-                    }
-                }, p.a.createElement(a["a"], {
-                    type: isUa ? "default" : "primary",
-                    style: {
-                        marginRight: 8
-                    },
-                    onClick: ()=>this.switchView("ip")
-                }, "IP 记录"), p.a.createElement(a["a"], {
-                    type: isUa ? "primary" : "default",
-                    onClick: ()=>this.switchView("ua")
-                }, "User-Agent 记录")), p.a.createElement(s["a"], {
-                    allowClear: !0,
-                    placeholder: "用户 ID 或邮箱",
-                    defaultValue: filters.user,
-                    onChange: event=>this.inputFilter("user", event.target.value),
-                    style: {
-                        width: 180,
-                        marginRight: 10,
-                        marginBottom: 6
-                    }
-                }), p.a.createElement(s["a"], {
-                    allowClear: !0,
-                    placeholder: "订阅 ID",
-                    defaultValue: filters.subscription_id,
-                    onChange: event=>this.inputFilter("subscription_id", event.target.value),
-                    style: {
-                        width: 125,
-                        marginRight: 10,
-                        marginBottom: 6
-                    }
-                }), p.a.createElement(s["a"], {
-                    allowClear: !0,
-                    placeholder: "IP",
-                    defaultValue: filters.request_ip,
-                    onChange: event=>this.inputFilter("request_ip", event.target.value),
-                    style: {
-                        width: 145,
-                        marginRight: 10,
-                        marginBottom: 6
-                    }
-                }), p.a.createElement(s["a"], {
-                    allowClear: !0,
-                    placeholder: "User-Agent",
-                    defaultValue: filters.user_agent,
-                    onChange: event=>this.inputFilter("user_agent", event.target.value),
-                    style: {
-                        width: 180,
-                        marginRight: 10,
-                        marginBottom: 6
-                    }
-                }), p.a.createElement(u["a"], {
-                    allowClear: !0,
-                    placeholder: "全部结果",
-                    value: filters.decision || void 0,
-                    onChange: value=>this.resetFilters({
-                        decision: value || ""
-                    }),
-                    style: {
-                        width: 120,
-                        marginRight: 10,
-                        marginBottom: 6
-                    }
-                }, p.a.createElement(u["a"].Option, {
-                    value: "allowed"
-                }, "通过"), p.a.createElement(u["a"].Option, {
-                    value: "blocked"
-                }, "阻断"), p.a.createElement(u["a"].Option, {
-                    value: "error"
-                }, "错误")), p.a.createElement(D["a"].RangePicker, {
-                    format: "YYYY-MM-DD",
-                    placeholder: ["开始日期", "结束日期"],
-                    value: filters.range,
-                    onChange: range=>this.resetFilters({
-                        range: range && range.length ? range : [null, null]
-                    }),
-                    style: {
-                        width: 245,
-                        marginRight: 10,
-                        marginBottom: 6
-                    }
-                }), p.a.createElement(a["a"], {
-                    style: {
-                        marginRight: 8,
-                        marginBottom: 6
-                    },
+                    className: "block-header"
+                }, p.a.createElement("h3", {
+                    className: "block-title"
+                }, title), extra ? p.a.createElement("div", {
+                    className: "block-options"
+                }, extra) : null), p.a.createElement("div", {
+                    className: "block-content"
+                }, body))
+            }
+            render() {
+                if (!this.state.available) {
+                    return p.a.createElement(m["a"], i()({}, this.props, {
+                        title: "订阅清洗网关"
+                    }), p.a.createElement(g["a"], null, p.a.createElement("div", {
+                        className: "alert alert-warning mb-0",
+                        role: "alert"
+                    }, "订阅拉取记录表尚未安装。请先执行 php artisan v2board:update 完成数据库升级，升级后历史拉取记录会自动回填。")))
+                }
+                return p.a.createElement(m["a"], i()({}, this.props, {
+                    title: "订阅清洗网关"
+                }), p.a.createElement(g["a"], null, this.section("日志留存", p.a.createElement(a["a"], {
+                    size: "small",
                     onClick: ()=>this.fetch()
                 }, p.a.createElement(l["a"], {
                     type: "reload"
-                }), " 刷新"), p.a.createElement(a["a"], {
-                    type: "primary",
-                    style: {
-                        marginBottom: 6
-                    },
-                    onClick: ()=>this.openRules()
-                }, "阻断规则")), p.a.createElement("div", {
-                    style: {
-                        padding: "0 15px 15px"
-                    }
-                }, p.a.createElement(o["a"], {
-                    rowKey: row=>isUa ? String(row.user_id) + ":" + String(row.ua_hash) : String(row.user_id) + ":" + String(row.request_ip),
-                    dataSource: state.rows,
-                    columns: columns,
-                    pagination: i()({}, state.pagination, {
-                        size: "small",
-                        showSizeChanger: !0,
-                        pageSizeOptions: ["10", "20", "50", "100"]
-                    }),
-                    onChange: pagination=>this.tableChange(pagination),
-                    locale: {
-                        emptyText: isUa ? "暂无 User-Agent 汇总记录" : "暂无 IP 汇总记录"
-                    },
-                    scroll: {
-                        x: 1680
-                    }
-                }))))), this.renderAuditDetail(), this.renderBlock(), this.renderRules(), this.renderHistory())
+                }), " 刷新"), this.renderRetention()), this.section("筛选", null, this.renderFilterBar()), this.section("拉取记录", p.a.createElement("span", {
+                    className: "text-muted small"
+                }, "共 " + Number(this.state.total || 0) + " 条"), this.renderTable()), this.section("生效中的阻断名单", null, this.renderRules()), this.section("阻断操作留痕", null, this.renderHistory()), this.renderBlockModal()))
             }
         }
-        t["default"] = RiskGatewayPage
+        t["default"] = SubscribeCleanGatewayPage
     },
     resellerpage: function(e, t, n) {
     "use strict";

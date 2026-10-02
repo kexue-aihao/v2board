@@ -30,7 +30,12 @@ class ClientController extends Controller
             $result = (new SubscribeGatewayService())->inspect($request, $user, $subscription);
             (new SubscribeAuditService())->record($request, $user, $subscription, $result);
             if ($result['decision'] === 'blocked') {
-                abort(403, 'subscription is unavailable');
+                // 命中「订阅清洗网关」里的阻断条件：按需求返回 500 + error 正文。
+                // 审计先写（上一行），所以被阻断的请求同样留痕，能在清洗网关页面上
+                // 看到阻断时间与命中次数。
+                return response('error', 500, [
+                    'Content-Type' => 'text/plain; charset=utf-8'
+                ]);
             }
 
             $serverService = new ServerService();

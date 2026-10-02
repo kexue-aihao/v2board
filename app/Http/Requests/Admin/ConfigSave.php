@@ -122,10 +122,6 @@ class ConfigSave extends FormRequest
         'payment_return_url_allowlist' => 'nullable|array',
         'telegram_subscription_binding_enable' => 'in:0,1',
         'telegram_binding_check_interval' => 'integer|min:60|max:3600',
-        // 订阅清洗网关：高风险订阅的管理员提醒（阈值与单轮明细上限）
-        'risk_notify_enable' => 'in:0,1',
-        'risk_notify_threshold' => 'integer|min:1|max:100',
-        'risk_notify_max_per_run' => 'integer|min:1|max:200',
         'oauth_telegram_enable' => 'in:0,1',
         'oauth_google_enable' => 'in:0,1',
         'oauth_google_client_id' => 'nullable|string|max:255',
@@ -172,15 +168,16 @@ class ConfigSave extends FormRequest
             }
         };
 
-        // 下限不能低于风险评估的 30 天周期：保留期更短会在周期被评估前就删掉证据，
-        // 判定永远是空的。35 给延迟的调度留 4 天余量。
+        // 0（不清理）或 1 至 3650 天。下限就是 SubscribeAuditRetentionService 里的那一份：
+        // 判定引擎删除后，保留期不再需要盖过 30 天风险周期，唯一要求是别填无意义的小值。
         $rules['subscribe_audit_retention_days'][] = function ($attribute, $value, $fail) {
             if ($value === null || $value === '') {
                 return;
             }
             $days = (int)$value;
-            if ($days !== 0 && ($days < 35 || $days > 3650)) {
-                $fail('订阅审计保留天数必须为 0（不清理）或 35 至 3650 之间');
+            $min = \App\Services\SubscribeAuditRetentionService::MIN_RETENTION_DAYS;
+            if ($days !== 0 && ($days < $min || $days > 3650)) {
+                $fail('订阅审计保留天数必须为 0（不清理）或 ' . $min . ' 至 3650 之间');
             }
         };
         return $rules;

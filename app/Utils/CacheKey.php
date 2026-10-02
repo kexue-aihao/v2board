@@ -57,11 +57,8 @@ class CacheKey
         'LAST_SEND_TELEGRAM_FORGET_TIMESTAMP' => '最后一次发送 Telegram 找回密码验证码时间',
         'TELEGRAM_REGISTER_SESSION' => 'Telegram 注册会话（等待提交邮箱）',
         'TELEGRAM_REGISTER_THROTTLE' => 'Telegram 注册发码节流',
-        'RISK_RECOMPUTE_CURSOR' => '风险重算游标',
-        'RISK_MANUAL_LOCK' => '风险手动评估锁',
-        'RISK_MANUAL_CURSOR' => '风险手动评估游标',
-        'RISK_NOTIFY_LOCK' => '风险提醒锁',
         'TOKEN_HISTORY_STARTED_AT' => 'Token 历史起始时间',
+        'SUBSCRIBE_AUDIT_LAST_CLEANED_AT' => '订阅审计最后清理时间',
         'PASSWORD_RESET_ERROR_LIMIT' => '重置密码时原密码错误次数限制'
     ];
 

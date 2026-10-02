@@ -31,11 +31,6 @@ class Kernel extends ConsoleKernel
         $schedule->command('traffic:update')->everyMinute()->withoutOverlapping();
         // v2board
         $schedule->command('v2board:statistics')->dailyAt('0:10');
-        $schedule->command('subscription:risk')->dailyAt('0:20')->withoutOverlapping();
-        // 风险提醒的兜底：判定产出时（subscription:risk、手动评估、重算）各自会调一次，
-        // 这条只补漏 —— 崩溃、发送失败留在待发状态、判定发生在别的路径（如 GET /user/risk）。
-        // 台账唯一键保证重复跑不会重复提醒。
-        $schedule->command('risk:notify')->everyFifteenMinutes()->withoutOverlapping();
         // check
         $schedule->command('check:order')->everyMinute()->withoutOverlapping();
         $schedule->command('check:commission')->everyFifteenMinutes();
@@ -49,7 +44,10 @@ class Kernel extends ConsoleKernel
         // 一定已经进过累积表；② 与订阅拉取写路径完全无关 —— 聚合只读已落库的日志，拉取
         // 路径上没有为本功能增加任何查询。
         $schedule->command('audit:ip-link')->hourly()->withoutOverlapping();
-        // 必须排在 subscription:risk 之后：先让隔夜完成的周期被评估，其证据才可以清理。
+        // 清洗网关列表要按运营商/ASN 筛选，而归属地是 IP 库的派生结果，订阅拉取写路径上
+        // 不做这个查询。这里按 location_resolved_at 增量补：新出现的 IP 十分钟内补齐，
+        // 列表页自己也会把当页没解析过的行就地补上，所以这两个入口互为兜底。
+        $schedule->command('access:locations')->everyTenMinutes()->withoutOverlapping();
         $schedule->command('audit:clean')->dailyAt('0:40')->withoutOverlapping();
         // 排在清理之后：本命令只读活凭证列并补历史，与保留期清理无关，但排开可以避开
         // 同一时段的 I/O。稳态下它写 0 条，非零就是 token 观察者漏写的证据。
