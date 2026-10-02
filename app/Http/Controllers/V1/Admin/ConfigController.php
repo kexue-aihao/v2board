@@ -62,13 +62,18 @@ class ConfigController extends Controller
 
     public function setTelegramWebhook(Request $request)
     {
-        $token = $request->input('telegram_bot_token', config('v2board.telegram_bot_token'));
+        $token = trim((string)$request->input('telegram_bot_token', config('v2board.telegram_bot_token')));
         $secretToken = bin2hex(random_bytes(32));
         $hookUrl = secure_url('/api/v1/guest/telegram/webhook');
         $telegramService = new TelegramService($token);
         $telegramService->getMe();
         $telegramService->setWebhook($hookUrl, ['secret_token' => $secretToken]);
         $config = config('v2board');
+        // 必须把「这次真正用来注册 webhook 的 token」一并落盘：config('v2board') 是磁盘上
+        // 已经生效的那份配置，而管理员完全可能是在表单里改完 token、还没点保存就直接点
+        // 「一键设置 webhook」。不写回的话会出现：webhook 注册在新 token 上、应用读到的
+        // 却是旧 token（甚至为空）—— 表现就是「刷新后 token 变空、机器人不生效」。
+        $config['telegram_bot_token'] = $token;
         $config['telegram_webhook_secret'] = $secretToken;
         if (!\Illuminate\Support\Facades\File::put(base_path() . '/config/v2board.php', "<?php\n return " . var_export($config, true) . " ;", LOCK_EX)) {
             abort(500, '保存Webhook密钥失败');
