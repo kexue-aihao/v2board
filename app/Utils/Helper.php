@@ -195,6 +195,13 @@ class Helper
 
     public static function buildUri($uuid, $server)
     {
+        // 外部订阅导入的过渡节点：把它自己的链接原样吐回去。这些线路的凭据是对方机场的，
+        // 按我们的用户 uuid 现拼只会拼出一个连不上的节点。这一条同时覆盖了所有走
+        // buildUri 的渲染器（General / v2rayN / v2rayNG / SagerNet / PassWall / SSRPlus /
+        // Shadowrocket / v2RayTun），它们本来就是在拼接返回的字符串。
+        if (!empty($server['_external_uri'])) {
+            return $server['_external_uri'] . "\r\n";
+        }
         if ($server['type'] == 'v2node') {
             $server['type'] = $server['protocol'];
         } 

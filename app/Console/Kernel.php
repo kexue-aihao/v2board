@@ -32,6 +32,9 @@ class Kernel extends ConsoleKernel
         // 动态倍率：采样上一分钟的每用户带宽（原始字节）并推进峰值判定。必须也是每分钟 ——
         // 原始计数是按分钟 drain 的，间隔再稀就会丢样本，判定会失真。
         $schedule->command('rate:tick')->everyMinute()->withoutOverlapping();
+        // 外部订阅源：半小时抓一次。源通常几小时才变一次，抓太勤只是给别人添压力；
+        // 失败不影响已有节点，所以不需要重试逻辑，管理页也可以随时手动刷新。
+        $schedule->command('external:refresh')->everyThirtyMinutes()->withoutOverlapping();
         // v2board
         $schedule->command('v2board:statistics')->dailyAt('0:10');
         // 账号风险台账 + 超阈值提醒。节奏是需求定的：风险未处理就每 15 分钟重复一次，

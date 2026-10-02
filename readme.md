@@ -1209,3 +1209,48 @@ Redis 计数），所以这套东西默认关着也不改变任何现状。
 
 **`rate:tick` 必须每分钟跑**（`traffic:update` 的同频）：原始计数是按分钟 drain 的，间隔再稀就会丢样本。
 它由 `deploy_install_cron` 装的 `schedule:run` 条目驱动，不需要额外 cron。
+
+## 十六、外部订阅过渡节点
+
+把上游/合作方的订阅链接导入成「过渡节点」下发给用户：线路断了的备用选择。**这类线路不计流量** ——
+导入的节点存在 `v2_external_node`，不在 `v2_server_*` 里，节点永远不会向我们上报它们的流量，
+计费链路完全不经过它们（不扣量、不占 `transfer_enable`，也不参与动态倍率）。这一点不需要任何开关。
+
+### 16.1 抓取与解析
+
+命令 `external:refresh [--source=ID] [--dry-run]`（调度每 30 分钟一次，管理页可手动刷新）：
+
+- HTTP 用 Guzzle，10 秒超时；响应体上限 2MB；源必须是 http/https。
+- 只认「base64 或明文 URI 列表」这一种形态，支持 `vmess://` / `vless://` / `trojan://` / `ss://`
+  （含 SIP002 与旧式整串 base64）/ `hysteria2://`（含 `hy2://`）/ `tuic://` / `anytls://`。
+- **Clash YAML / sing-box JSON 暂不支持**，会记进源的 `last_error` 并保留上次成功的节点 ——
+  猜格式去解析只会把一份看不懂的配置变成一堆看起来正常的错节点。
+- 单源上限 500 个节点；重复节点按原始 URI 去重。
+- **抓取失败绝不动已有节点**：源临时抽风时用户订阅里少一批备用线路，比多一批连不上的更糟。
+
+### 16.2 下发规则
+
+注入点在 `ServerService::getAvailableServers()`（订阅链路的唯一拼装点）：
+
+| 规则 | 说明 |
+| --- | --- |
+| 归属 | 源挂在一个**现有权限组**上，用户的 `group_id` 命中才下发 —— 复用既有分发机制 |
+| 行的形状 | `type = 'external'`，id 取**负数**（真实节点 id 必为正，避免撞号影响客户端的节点缓存键） |
+| 显示 | 节点名统一加前缀 `【过渡】`；`rate` 显示 1（不参与计费，显示 0 容易被理解成「免费但计量」） |
+| 凭据 | 行里带 `_external_uri`（原始链接）—— 这些线路的凭据是对方机场的，按本用户的 uuid 现拼只会拼出连不上的节点 |
+
+**当前哪些客户端能看到**：走 `Helper::buildUri()` 的 v2ray 系渲染器（General、v2rayN、v2rayNG、
+SagerNet、PassWall、SSRPlus、Shadowrocket、v2RayTun）会原样拿到那条链接 —— 这一条改动覆盖 8 个
+客户端。Clash / ClashMeta / ClashVerge / ClashNyanpasu / Stash / sing-box / Surge / Loon /
+QuantumultX / Surfboard **暂时看不到**：这些渲染器从 `$user` 取凭据，需要逐个加「节点自带凭据」
+的覆盖点（B3-2，见技术设计）。它们遇到不认识的 `type` 会静默跳过，所以 Clash 用户不会拿到
+一批用自己 uuid 去连别人服务器的坏节点。
+
+### 16.3 表
+
+| 表 | 用途 |
+| --- | --- |
+| `v2_external_source` | 名称、URL、归属权限组、启停、上次抓取时间/状态/错误、节点数 |
+| `v2_external_node` | 解析后的节点（协议/主机/端口/JSON 载荷）+ 原始 URI |
+
+两者都由 `v2board:update` 的幂等迁移创建，`install.sql` 里同步维护。

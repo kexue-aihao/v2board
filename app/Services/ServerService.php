@@ -236,6 +236,14 @@ class ServerService
             $this->getAvailableAnyTLS($user),
             $this->getAvailableV2node($user)
         );
+        // 外部订阅导入的过渡节点：按权限组挂进来，形状与普通节点行一致（含 sort /
+        // last_check_at / updated_at），后面那段归一化会一视同仁地处理。
+        // 它们不在 v2_server_* 里，节点永远不会上报它们的流量 —— 不参与计费、不占额度。
+        // 只挂订阅这条链路：后台节点列表（getAllServers）不该冒出过渡节点。
+        foreach ((new ExternalSubscriptionService())->serverRowsForGroups($this->userGroupIds($user)) as $external) {
+            $servers[] = $external;
+        }
+
         $tmp = array_column($servers, 'sort');
         array_multisort($tmp, SORT_ASC, $servers);
         return array_map(function ($server) {
@@ -248,6 +256,23 @@ class ServerService
             $server['cache_key'] = "{$server['type']}-{$server['id']}-{$server['updated_at']}-{$server['is_online']}";
             return $server;
         }, $servers);
+    }
+
+    /**
+     * 用户的权限组。订阅体系下 v2_user.group_id 是数组 cast，legacy 表里可能是逗号串。
+     *
+     * @return array<int, int>
+     */
+    private function userGroupIds(User $user): array
+    {
+        $groups = $user->group_id;
+        if (!is_array($groups)) {
+            $groups = explode(',', (string) $groups);
+        }
+
+        return array_values(array_filter(array_map('intval', $groups), function (int $id) {
+            return $id > 0;
+        }));
     }
 
     public function getAvailableUsers($groupId)
