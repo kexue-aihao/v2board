@@ -319,3 +319,157 @@ test('both dialogs render without touching the network', () => {
     assert.equal(h.component.renderBatchOperations(), null);
     assert.equal(h.requests.length, 0, 'rendering must never issue requests');
 });
+
+// ---- 批量删除 与 批量下发协议配置 ----
+
+const SELECTED = [{ type: 'v2node', id: 1, name: 'reality-a' }, { type: 'vmess', id: 1, name: 'vmess-a' }];
+const deletion = (nodes = [
+    { id: 1, type: 'v2node', name: 'reality-a', host: 'a.example', published: true, child_count: 2 },
+    { id: 1, type: 'vmess', name: 'vmess-a', host: 'b.example', published: false, child_count: 0 },
+]) => ({ body: { data: { requested_count: nodes.length, deleted_count: nodes.length, nodes } } });
+
+const protocolPreview = (overrides = {}) => ({ body: { data: Object.assign({
+    network: 'ws', network_settings: '{"path":"/ws"}', matched_count: 2, applicable_count: 1, changed_count: 1,
+    nodes: [
+        { id: 1, type: 'v2node', name: 'reality-a', applicable: true, network: 'tcp', network_settings: '', new_network: 'ws', new_network_settings: '{"path":"/ws"}', changes: ['network', 'network_settings'] },
+        { id: 1, type: 'vmess', name: 'vmess-a', applicable: false, network: null, network_settings: null, new_network: null, new_network_settings: null, changes: [] },
+    ],
+}, overrides) } });
+const protocolApplied = (overrides = {}) => ({ body: { data: Object.assign({
+    requested_count: 2, updated_count: 1,
+    nodes: [{ id: 1, type: 'v2node', name: 'reality-a', network: 'ws', network_settings: '{"path":"/ws"}', changes: ['network', 'network_settings'] }],
+}, overrides) } });
+
+/** 把渲染出来的元素树摊平成文本，用来断言对话框里到底写了什么。 */
+function flatten(node) {
+    if (node === null || node === undefined || node === false || node === true) return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(flatten).join('');
+    if (node.children) return node.children.map(flatten).join('');
+    return '';
+}
+
+test('batch delete sends the selection with confirmation, then verifies it is gone', async () => {
+    const h = seeded({ responses: [deletion(), listing([NODES[2]])] });
+    h.component.openBatchDialog('delete');
+    await h.component.runBatchDelete();
+
+    assert.equal(h.requests.length, 2);
+    assert.equal(h.requests[0].url, '/api/v1/test-admin/server/manage/nodes/delete');
+    assert.deepEqual(h.requests[0].body, { nodes: SELECTED, confirm: true });
+    assert.match(h.requests[1].url, /\/getNodes\?_batch_delete=\d+/);
+    assert.deepEqual(plain(h.component.state.batchSelection), [], '删除后勾选要清空');
+    assert.equal(successful(h), true);
+});
+
+test('batch delete double click issues only one delete request', async () => {
+    const h = seeded({ responses: [deletion(), listing([NODES[2]])] });
+    await Promise.all([h.component.runBatchDelete(), h.component.runBatchDelete()]);
+    assert.equal(h.requests.filter(request => request.url.endsWith('/nodes/delete')).length, 1);
+});
+
+test('a delete whose refresh still lists the node is reported, not claimed as success', async () => {
+    const h = seeded({ responses: [deletion(), listing(NODES)] });
+    await h.component.runBatchDelete();
+    assert.equal(successful(h), false);
+    assert.match(h.component.state.batchError, /仍然存在/);
+    // 服务端已经确认删除，重开对话框也不该再允许提交一次
+    assert.equal(h.component.state.batchDeleteConfirmed, true);
+    h.component.openBatchDialog('delete');
+    assert.equal(h.component.state.batchDeleteConfirmed, false);
+});
+
+test('batch delete dialog lists children and published nodes before confirming', () => {
+    const h = harness({ responses: [], servers: [
+        { type: 'v2node', id: 1, name: 'reality-a', show: 1, host: 'a.example', port: 443, parent_id: null },
+        { type: 'v2node', id: 2, name: 'child-a', show: 0, host: 'a.example', port: 8443, parent_id: 1 },
+        { type: 'vmess', id: 1, name: 'vmess-a', show: 0, host: 'b.example', port: 80, parent_id: null },
+    ] });
+    h.component.changeBatchSelection(['v2node:1', 'vmess:1']);
+    h.component.openBatchDialog('delete');
+    const text = flatten(h.component.renderBatchOperations());
+
+    assert.match(text, /还有子节点/, '有子节点时必须提示父子关系');
+    assert.match(text, /v2node #1/);
+    assert.match(text, /各发一条「节点下架」Telegram 通知/);
+    assert.equal(h.requests.length, 0, '渲染对话框不该发请求');
+});
+
+test('batch protocol previews then applies the parsed JSON object', async () => {
+    const h = seeded({ responses: [protocolPreview(), protocolApplied(), listing(NODES)] });
+    h.component.changeBatchField('batchNetwork', 'ws');
+    h.component.changeBatchField('batchNetworkSettings', '{ "path": "/ws" }');
+    await h.component.previewBatchProtocol();
+
+    assert.equal(h.requests.length, 1, 'preview must not submit an update');
+    assert.equal(h.requests[0].url, '/api/v1/test-admin/server/manage/protocol/preview');
+    assert.deepEqual(h.requests[0].body, { nodes: SELECTED, network: 'ws', network_settings: { path: '/ws' } });
+    assert.equal(successful(h), false);
+
+    await h.component.applyBatchProtocol();
+    assert.equal(h.requests[1].url, '/api/v1/test-admin/server/manage/protocol/apply');
+    assert.deepEqual(h.requests[1].body, { nodes: SELECTED, network: 'ws', network_settings: { path: '/ws' }, confirm: true });
+    assert.match(h.requests[2].url, /\/getNodes\?_batch_protocol=\d+/);
+    assert.equal(h.component.state.batchPreview, null);
+    assert.equal(successful(h), true);
+});
+
+test('protocol payload omits the field the admin left blank', async () => {
+    const h = seeded({ responses: [protocolPreview({ network_settings: null, changed_count: 1 }), protocolApplied(), listing(NODES)] });
+    h.component.changeBatchField('batchNetwork', 'ws');
+    await h.component.previewBatchProtocol();
+    await h.component.applyBatchProtocol();
+    assert.equal('network_settings' in h.requests[0].body, false, '留空的一项不能发出去');
+    assert.equal('network_settings' in h.requests[1].body, false);
+    assert.equal(h.requests[1].body.network, 'ws');
+});
+
+test('invalid JSON is rejected before any request', async () => {
+    const h = seeded({ responses: [] });
+    h.component.changeBatchField('batchNetwork', 'ws');
+    h.component.changeBatchField('batchNetworkSettings', '{ not json');
+    await h.component.previewBatchProtocol();
+    assert.equal(h.requests.length, 0);
+    assert.match(h.component.state.batchError, /不是合法的 JSON/);
+});
+
+test('a JSON array or scalar is rejected: the column stores an object', async () => {
+    const h = seeded({ responses: [] });
+    h.component.changeBatchField('batchNetworkSettings', '[1,2,3]');
+    await h.component.previewBatchProtocol();
+    assert.equal(h.requests.length, 0);
+    assert.match(h.component.state.batchError, /必须是一个 JSON 对象/);
+});
+
+test('both fields blank is rejected before any request', async () => {
+    const h = seeded({ responses: [] });
+    await h.component.previewBatchProtocol();
+    assert.equal(h.requests.length, 0);
+    assert.match(h.component.state.batchError, /请至少/);
+});
+
+test('the template button fills a JSON body matching the chosen transport', () => {
+    const h = seeded({ responses: [] });
+    assert.equal(h.component.batchProtocolTemplate(''), '');
+    assert.equal(h.component.batchProtocolTemplate('nope'), '');
+
+    h.component.changeBatchField('batchNetwork', 'ws');
+    h.component.changeBatchField('batchNetworkSettings', h.component.batchProtocolTemplate('ws'));
+    const filled = JSON.parse(h.component.state.batchNetworkSettings);
+    assert.equal(filled.path, '/');
+    assert.equal(filled.headers.Host, 'xtls.github.io');
+    assert.equal(JSON.parse(h.component.batchProtocolTemplate('grpc')).serviceName, 'GunService');
+});
+
+test('the protocol dialog marks types without those columns as 不适用', () => {
+    const h = harness({ responses: [], servers: [
+        { type: 'v2node', id: 1, name: 'reality-a', show: 1, network: 'tcp' },
+        { type: 'tuic', id: 9, name: 'tuic-a', show: 1, network: 'tcp' },
+    ] });
+    h.component.changeBatchSelection(['v2node:1', 'tuic:9']);
+    h.component.openBatchDialog('protocol');
+    const text = flatten(h.component.renderBatchOperations());
+    assert.match(text, /tuic #9/);
+    assert.match(text, /没有这两列/);
+    assert.equal(h.requests.length, 0);
+});

@@ -108307,7 +108307,10 @@
                     batchCopyRegenerate: !0,
                     batchServerName: "",
                     batchDest: "",
-                    batchPreview: null
+                    batchPreview: null,
+                    batchDeleteConfirmed: !1,
+                    batchNetwork: "",
+                    batchNetworkSettings: ""
                 }
             }
             componentDidMount() {
@@ -108506,10 +108509,10 @@
             }
             openBatchDialog(dialog) {
                 if (this.batchBusy) return;
-                this.setState({batchDialog: dialog, batchPreview: null, batchError: "", batchResult: "", batchStage: "", batchCopyConfirmed: !1})
+                this.setState({batchDialog: dialog, batchPreview: null, batchError: "", batchResult: "", batchStage: "", batchCopyConfirmed: !1, batchDeleteConfirmed: !1})
             }
             closeBatchDialog() {
-                if (!this.batchBusy) this.setState({batchDialog: "", batchPreview: null, batchError: "", batchResult: "", batchStage: "", batchCopyConfirmed: !1})
+                if (!this.batchBusy) this.setState({batchDialog: "", batchPreview: null, batchError: "", batchResult: "", batchStage: "", batchCopyConfirmed: !1, batchDeleteConfirmed: !1})
             }
             changeBatchField(field, value) {
                 if (!this.batchBusy) this.setState({
@@ -108636,6 +108639,167 @@
                     this.setState({batchLoading: !1, batchStage: "", batchPreview: null});
                 }
             }
+            // 勾选的是 key（type:id），要拿 host / show / parent_id 这些字段就得回原始列表里取：
+            // 不同类型之间 id 会重复，不能用 id 直接匹配。
+            selectedBatchServers() {
+                var keys = this.state.batchSelection || []
+                  , servers = this.props.serverManage.servers || []
+                  , selected = [];
+                for (var i = 0; i < servers.length; i++) {
+                    if (keys.indexOf(this.batchKey(servers[i])) >= 0) {
+                        selected.push(servers[i]);
+                    }
+                }
+                return selected;
+            }
+            childCountOf(server) {
+                var servers = this.props.serverManage.servers || []
+                  , count = 0;
+                for (var i = 0; i < servers.length; i++) {
+                    if (servers[i].type === server.type && String(servers[i].parent_id || "") === String(server.id)) {
+                        count++;
+                    }
+                }
+                return count;
+            }
+            truncateText(value, max) {
+                var text = value === null || value === void 0 ? "" : String(value);
+                return text.length > max ? text.slice(0, max) + "…" : text;
+            }
+            // 与编辑节点里「编辑协议配置」抽屉的默认值保持一致，省得手写一份 JSON。
+            batchProtocolTemplate(network) {
+                var templates = {
+                    tcp: {acceptProxyProtocol: !1, header: {type: "none"}},
+                    ws: {acceptProxyProtocol: !1, path: "/", headers: {Host: "xtls.github.io"}},
+                    grpc: {serviceName: "GunService"},
+                    httpupgrade: {acceptProxyProtocol: !1, path: "/", host: "xtls.github.io"},
+                    xhttp: {path: "/", host: "xtls.github.io", mode: "auto", extra: {}},
+                    http: {acceptProxyProtocol: !1, path: "/", Host: "xtls.github.io"}
+                };
+                return templates[network] ? JSON.stringify(templates[network], null, 4) : "";
+            }
+            batchProtocolPayload() {
+                var nodes = this.selectedBatchNodes();
+                if (!nodes.length) {
+                    throw new Error("请先在列表中勾选要下发的节点");
+                }
+                var payload = {nodes: nodes}
+                  , network = (this.state.batchNetwork || "").trim()
+                  , text = (this.state.batchNetworkSettings || "").trim();
+                if (network) payload.network = network;
+                if (text) {
+                    var parsed;
+                    try {
+                        parsed = JSON.parse(text);
+                    } catch (error) {
+                        throw new Error("协议配置不是合法的 JSON：" + (error.message || "解析失败"));
+                    }
+                    // 只收对象：数组和标量在这个字段上没有意义，编辑节点那边也是这么存的。
+                    if (!parsed || "object" !== typeof parsed || Array.isArray(parsed)) {
+                        throw new Error('协议配置必须是一个 JSON 对象，例如 {"path": "/"}');
+                    }
+                    payload.network_settings = parsed;
+                }
+                if (!payload.network && !payload.network_settings) {
+                    throw new Error("请至少选择传输协议或填写协议配置中的一项");
+                }
+                return payload;
+            }
+            async previewBatchProtocol() {
+                if (this.batchBusy) return;
+                var params;
+                try {
+                    params = this.batchProtocolPayload();
+                } catch (error) {
+                    this.setState({batchError: error.message, batchPreview: null});
+                    return;
+                }
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在预览", batchPreview: null, batchError: "", batchResult: ""});
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/protocol/preview", params, !0));
+                    if (!Array.isArray(data.nodes) || !Number.isInteger(data.matched_count) || data.nodes.length !== data.matched_count) {
+                        throw new Error("预览结果不完整，请重新预览");
+                    }
+                    this.setState({
+                        batchPreview: Object.assign({}, data, {params: params}),
+                        batchResult: data.changed_count ? "" : "所选节点的传输配置与目标值一致，未执行任何修改"
+                    });
+                } catch (error) {
+                    this.setState({batchError: error.message || "预览失败，请稍后重试"});
+                } finally {
+                    this.batchBusy = !1;
+                    this.setState({batchLoading: !1, batchStage: ""});
+                }
+            }
+            async applyBatchProtocol() {
+                if (this.batchBusy) return;
+                var preview = this.state.batchPreview;
+                if (!preview || !preview.changed_count) return;
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在保存", batchError: "", batchResult: ""});
+                var saved = !1;
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/protocol/apply", Object.assign({}, preview.params, {confirm: !0}), !0));
+                    if (!Number.isInteger(data.updated_count) || data.updated_count < 0 || !Array.isArray(data.nodes) || data.nodes.length !== data.updated_count) {
+                        throw new Error("接口返回结果不完整，请刷新列表核对后重新预览");
+                    }
+                    if (!data.updated_count) {
+                        this.setState({batchError: "没有更新任何节点，节点可能已变更，请重新预览"});
+                        return;
+                    }
+                    saved = !0;
+                    this.setState({batchStage: "正在重新读取并核对"});
+                    var servers = await this.refreshBatchNodeList({_batch_protocol: Date.now()});
+                    var verified = data.nodes.every(node=>servers.some(server=>server.type === node.type && String(server.id) === String(node.id)));
+                    if (!verified) throw new Error("重新读取的节点列表与保存结果不一致");
+                    var result = "已下发到 " + data.updated_count + " 个节点，列表已刷新";
+                    this.setState({batchPreview: null, batchResult: result});
+                    c["a"].success(result);
+                } catch (error) {
+                    this.setState({batchError: (saved ? "接口已返回保存成功，但列表核对失败。请刷新列表检查，勿重复提交：" : "保存未确认完成，请核对列表后重新预览：") + (error.message || "网络请求失败")});
+                } finally {
+                    this.batchBusy = !1;
+                    // 无论成功失败都作废本次预览，避免失败后带着旧预览再确认一次
+                    this.setState({batchLoading: !1, batchStage: "", batchPreview: null});
+                }
+            }
+            async runBatchDelete() {
+                // 服务端一旦确认删除，本次对话框会话就不再允许重提：列表核对失败时再点一次
+                // 只会撞上「节点已不存在」，但那时管理员已经分不清到底删没删干净。
+                if (this.batchBusy || this.state.batchDeleteConfirmed) return;
+                var nodes = this.selectedBatchNodes();
+                if (!nodes.length) {
+                    this.setState({batchError: "请先在列表中勾选要删除的节点"});
+                    return
+                }
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在删除", batchError: "", batchResult: ""});
+                var deleted = !1;
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/nodes/delete", {
+                        nodes: nodes, confirm: !0
+                    }, !0));
+                    if (!Number.isInteger(data.deleted_count) || data.deleted_count < 0 || !Array.isArray(data.nodes) || data.nodes.length !== data.deleted_count) {
+                        throw new Error("删除接口返回结果不完整，请刷新列表核对")
+                    }
+                    deleted = !0;
+                    this.setState({batchDeleteConfirmed: !0, batchStage: "正在重新读取并核对"});
+                    var servers = await this.refreshBatchNodeList({_batch_delete: Date.now()});
+                    var remaining = nodes.filter(node=>servers.some(server=>server.type === node.type && String(server.id) === String(node.id)));
+                    if (remaining.length) {
+                        throw new Error("这些节点在重新读取后仍然存在：" + remaining.map(node=>node.type + " #" + node.id).join("、"))
+                    }
+                    var result = "已删除 " + data.deleted_count + " 个节点，列表已刷新";
+                    this.setState({batchSelection: [], batchResult: result});
+                    c["a"].success(result);
+                } catch (error) {
+                    this.setState({batchError: (deleted ? "接口已返回删除成功，但列表核对失败。请刷新列表检查，勿重复提交：" : "删除未确认完成，请核对列表后重试：") + (error.message || "网络请求失败")});
+                } finally {
+                    this.batchBusy = !1;
+                    this.setState({batchLoading: !1, batchStage: ""});
+                }
+            }
             renderBatchOperations() {
                 var state = this.state, preview = state.batchPreview, busy = state.batchLoading;
                 var el = y.a.createElement;
@@ -108663,6 +108827,83 @@
                         el("div", {className: "v2board-drawer-action"},
                             el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
                             el(l["a"], {type: "primary", loading: busy, disabled: busy || !nodes.length, onClick: ()=>this.runBatchCopy()}, "确认复制")
+                        )
+                    ))
+                }
+                if (state.batchDialog === "delete") {
+                    var deleteTargets = this.selectedBatchServers()
+                      , withChildren = deleteTargets.filter(server=>this.childCountOf(server) > 0)
+                      , publishedTargets = deleteTargets.filter(server=>parseInt(server.show) === 1);
+                    return el(R["a"], {
+                        title: "批量删除节点", width: "min(760px, 100vw)", visible: !0,
+                        maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeBatchDialog()
+                    }, el("div", {style: {paddingBottom: 70}},
+                        el("p", null, "将删除选中的 " + deleteTargets.length + " 个节点，此操作不可撤销。"),
+                        el("div", {style: {maxHeight: 280, overflow: "auto"}}, el("table", {className: "table", style: {wordBreak: "break-all"}},
+                            el("thead", null, el("tr", null, el("th", null, "协议 / 节点"), el("th", null, "地址"), el("th", null, "状态"), el("th", null, "子节点"))),
+                            el("tbody", null, deleteTargets.map(server=>el("tr", {key: this.batchKey(server)},
+                                el("td", null, server.type + " #" + server.id + " " + server.name),
+                                el("td", null, (server.host || "") + (server.port ? ":" + server.port : "")),
+                                el("td", null, parseInt(server.show) === 1 ? "已上架" : "隐藏"),
+                                el("td", null, this.childCountOf(server) || "—")
+                            )))
+                        )),
+                        withChildren.length > 0 && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap"}},
+                            "⚠ " + withChildren.map(server=>server.type + " #" + server.id).join("、") + " 下还有子节点，删除后这些子节点会失去父节点（不会被一起删除）。"),
+                        publishedTargets.length > 0 && el("p", null, "其中 " + publishedTargets.length + " 个是已上架节点，删除后各发一条「节点下架」Telegram 通知。"),
+                        state.batchError && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap"}}, state.batchError),
+                        state.batchResult && el("p", {role: "status"}, state.batchResult),
+                        state.batchStage && el("p", {role: "status"}, state.batchStage),
+                        el("div", {className: "v2board-drawer-action"},
+                            el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
+                            el(l["a"], {type: "danger", loading: busy, disabled: busy || !deleteTargets.length || !!state.batchDeleteConfirmed, onClick: ()=>this.runBatchDelete()}, "确认删除")
+                        )
+                    ))
+                }
+                if (state.batchDialog === "protocol") {
+                    var protocolTargets = this.selectedBatchServers()
+                      , inapplicable = protocolTargets.filter(server=>["v2node", "vmess", "vless", "trojan"].indexOf(server.type) < 0);
+                    return el(R["a"], {
+                        title: "批量下发协议配置", width: "min(860px, 100vw)", visible: !0,
+                        maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeBatchDialog()
+                    }, el("div", {style: {paddingBottom: 70}},
+                        el("p", null, "对选中的 " + protocolTargets.length + " 个节点下发同一份传输配置，留空的一项保持原样不动。"),
+                        el("div", {className: "form-group"}, el("label", null, "传输协议"), el(N["a"], {
+                            value: state.batchNetwork || void 0, disabled: busy, allowClear: !0, style: {width: "100%"},
+                            placeholder: "不修改",
+                            onChange: value=>this.changeBatchField("batchNetwork", value || "")
+                        }, el(N["a"].Option, {value: "tcp"}, "TCP"), el(N["a"].Option, {value: "ws"}, "WebSocket"), el(N["a"].Option, {value: "grpc"}, "gRPC"), el(N["a"].Option, {value: "http"}, "HTTP伪装"), el(N["a"].Option, {value: "httpupgrade"}, "HTTPUpgrade"), el(N["a"].Option, {value: "xhttp"}, "XHTTP"))),
+                        el("div", {className: "form-group"}, el("label", null, "协议配置（JSON）", el("a", {
+                            href: "javascript:void(0);", style: {marginLeft: 8},
+                            onClick: ()=>this.changeBatchField("batchNetworkSettings", this.batchProtocolTemplate(state.batchNetwork))
+                        }, "填入所选传输的默认模板")), el(F.a, {
+                            mode: "json", theme: "github", fontSize: 14, width: "100%", height: "260px",
+                            showPrintMargin: !1, showGutter: !0, highlightActiveLine: !0,
+                            value: state.batchNetworkSettings || "",
+                            onChange: value=>this.changeBatchField("batchNetworkSettings", value),
+                            setOptions: {enableBasicAutocompletion: !1, enableLiveAutocompletion: !1, enableSnippets: !1, showLineNumbers: !0, tabSize: 2}
+                        })),
+                        el("p", null, "只改传输协议、协议配置留空时，节点上原有的 JSON 保持不动 —— 从 TCP 切到 WebSocket 时请一并填写协议配置，或点上面的「填入所选传输的默认模板」。"),
+                        el("p", null, "协议配置只有 v2node、vmess、vless、trojan 四类节点有地方存（vmess 的列名是 networkSettings，其余三类是 network_settings）。" + (inapplicable.length ? "本次勾选里 " + inapplicable.map(server=>server.type + " #" + server.id).join("、") + " 没有这两列，会被标「不适用」并跳过。" : "")),
+                        state.batchError && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap"}}, state.batchError),
+                        state.batchResult && el("p", {role: "status"}, state.batchResult),
+                        state.batchStage && el("p", {role: "status"}, state.batchStage),
+                        preview && el("div", null, el("strong", null, "预计改动 " + preview.changed_count + " / " + preview.matched_count + " 个节点（" + preview.applicable_count + " 个有这两列），请核对后确认应用"),
+                            el("div", {style: {maxHeight: 320, overflow: "auto", marginTop: 12}}, el("table", {className: "table", style: {wordBreak: "break-all"}},
+                                el("thead", null, el("tr", null, el("th", null, "协议 / 节点"), el("th", null, "当前传输"), el("th", null, "新传输"), el("th", null, "当前协议配置"), el("th", null, "新协议配置"))),
+                                el("tbody", null, preview.nodes.map(node=>el("tr", {key: node.type + ":" + node.id},
+                                    el("td", null, node.type + " #" + node.id + " " + node.name),
+                                    el("td", null, node.applicable ? (node.network || "（空）") : "不适用"),
+                                    el("td", null, node.new_network === null ? "不修改" : node.new_network),
+                                    el("td", {title: node.network_settings || ""}, node.applicable ? this.truncateText(node.network_settings, 60) || "（空）" : "不适用"),
+                                    el("td", {title: node.new_network_settings || ""}, node.new_network_settings === null ? "不修改" : (this.truncateText(node.new_network_settings, 60) || "（空）"))
+                                )))
+                            ))
+                        ),
+                        el("div", {className: "v2board-drawer-action"},
+                            el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
+                            el(l["a"], {loading: busy, onClick: ()=>this.previewBatchProtocol(), style: {marginRight: 8}}, "预览改动"),
+                            el(l["a"], {type: "primary", disabled: busy || !preview || !preview.changed_count, onClick: ()=>this.applyBatchProtocol()}, "确认应用")
                         )
                     ))
                 }
@@ -109000,7 +109241,20 @@
                     loading: this.state.batchLoading && this.state.batchDialog === "tls",
                     disabled: A || !this.selectedBatchNodes().length,
                     onClick: ()=>this.openBatchDialog("tls")
-                }, "批量填写 SNI/地址"), !Object(L["f"])() && y.a.createElement(l["a"], {
+                }, "批量填写 SNI/地址"), y.a.createElement(l["a"], {
+                    style: {
+                        marginLeft: 8
+                    },
+                    disabled: A || !this.selectedBatchNodes().length,
+                    onClick: ()=>this.openBatchDialog("protocol")
+                }, "批量下发协议配置"), y.a.createElement(l["a"], {
+                    style: {
+                        marginLeft: 8
+                    },
+                    type: "danger",
+                    disabled: A || !this.selectedBatchNodes().length,
+                    onClick: ()=>this.openBatchDialog("delete")
+                }, "批量删除"), !Object(L["f"])() && y.a.createElement(l["a"], {
                     style: {
                         float: "right"
                     },

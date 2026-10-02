@@ -116,6 +116,85 @@ class ManageController extends Controller
     }
 
     /**
+     * 批量删除选中的节点。
+     *
+     * 不级联删除子节点 —— 单个删除本来就不级联，批量操作更不该悄悄扩大删除范围。
+     * 每个节点下还挂着几个子节点随结果返回，前端在确认框里提示。
+     */
+    public function deleteNodes(Request $request)
+    {
+        $params = $this->validateSelection($request, true);
+        return response([
+            'data' => (new ServerBatchOperationService())->deleteNodes($params['nodes'])
+        ]);
+    }
+
+    public function previewProtocolSettings(Request $request)
+    {
+        $params = $this->validateProtocolSettings($request, false);
+        return response([
+            'data' => (new ServerBatchOperationService())->previewProtocolSettings(
+                $params['nodes'],
+                $params['network'] ?? null,
+                $params['network_settings'] ?? null
+            )
+        ]);
+    }
+
+    public function applyProtocolSettings(Request $request)
+    {
+        $params = $this->validateProtocolSettings($request, true);
+        return response([
+            'data' => (new ServerBatchOperationService())->applyProtocolSettings(
+                $params['nodes'],
+                $params['network'] ?? null,
+                $params['network_settings'] ?? null
+            )
+        ]);
+    }
+
+    /**
+     * 传输协议与协议配置都可以缺省，缺省表示「这一项不动」（与批量填写 SNI 同一套语义）；
+     * 两项都缺省没有意义，直接拒掉。
+     */
+    private function validateProtocolSettings(Request $request, bool $requireConfirmation): array
+    {
+        // 空串按「不动」处理；协议配置允许直接发 JSON 文本（编辑节点的表单是解析成对象
+        // 再发的，两种都收），只有 {} 才表示「明确清空」。
+        $request->merge(['network' => $this->blankToNull($request->input('network'))]);
+        $this->normalizeNetworkSettings($request);
+
+        $params = $this->validateSelection($request, $requireConfirmation, [
+            'network' => 'nullable|in:' . implode(',', ServerBatchOperationService::NETWORKS),
+            'network_settings' => 'nullable|array',
+        ]);
+
+        if (($params['network'] ?? null) === null && ($params['network_settings'] ?? null) === null) {
+            abort(422, __('请至少选择传输协议或填写协议配置中的一项'));
+        }
+
+        return $params;
+    }
+
+    private function normalizeNetworkSettings(Request $request): void
+    {
+        $value = $request->input('network_settings');
+        if (!is_string($value)) {
+            return;
+        }
+        $value = trim($value);
+        if ($value === '') {
+            $request->merge(['network_settings' => null]);
+            return;
+        }
+        $decoded = json_decode($value, true);
+        if (!is_array($decoded)) {
+            abort(422, __('协议配置不是合法的 JSON 对象'));
+        }
+        $request->merge(['network_settings' => $decoded]);
+    }
+
+    /**
      * @param array<string, string> $extraRules
      */
     private function validateSelection(Request $request, bool $requireConfirmation, array $extraRules = []): array

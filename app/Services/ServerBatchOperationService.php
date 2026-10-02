@@ -57,6 +57,30 @@ class ServerBatchOperationService
     private const DEST_STORAGE = ['column' => 'tls_settings', 'key' => 'dest'];
 
     /**
+     * 「传输协议」的取值，与 V2nodeController::save() 里 network 的校验保持一致。
+     */
+    public const NETWORKS = ['tcp', 'ws', 'grpc', 'http', 'httpupgrade', 'xhttp'];
+
+    /**
+     * 传输协议与「协议配置」(network_settings) 在各类型节点里的存放位置。
+     *
+     * null 表示该类型的表里根本没有这两列：shadowsocks / tuic / hysteria / anytls 只有
+     * 协议自己的字段。vmess 的列名是驼峰 networkSettings，其余三类都是下划线写法。
+     * 批量下发时遇到这类节点标「不适用」并跳过，而不是整批拒绝 —— 一次勾选里混着几种
+     * 类型是常态。
+     */
+    private const NETWORK_STORAGE = [
+        'shadowsocks' => null,
+        'vmess' => ['network' => 'network', 'settings' => 'networkSettings'],
+        'vless' => ['network' => 'network', 'settings' => 'network_settings'],
+        'trojan' => ['network' => 'network', 'settings' => 'network_settings'],
+        'tuic' => null,
+        'hysteria' => null,
+        'anytls' => null,
+        'v2node' => ['network' => 'network', 'settings' => 'network_settings'],
+    ];
+
+    /**
      * 批量复制。副本一律先置为隐藏（show=0），避免复制出来就直接对外下发。
      *
      * @param array<int, array{type: string, id: int}> $selection
@@ -187,6 +211,211 @@ class ServerBatchOperationService
                 'nodes' => $updated,
             ];
         });
+    }
+
+    /**
+     * 批量删除选中的节点。
+     *
+     * 与单个删除（各 Controller::drop()）保持同一套副作用：已上架的节点发一条「节点下架」
+     * 通知。通知放在事务提交之后 —— 在事务里派发的话一旦回滚，消息已经进了队列。
+     *
+     * 刻意不级联删除子节点：单个删除本来就不级联，批量操作更不该悄悄扩大删除范围。
+     * 子节点数量随结果返回，由前端在确认框里提示「这些子节点会失去父节点」。
+     *
+     * @param array<int, array{type: string, id: int}> $selection
+     */
+    public function deleteNodes(array $selection): array
+    {
+        $notifications = [];
+        $deleted = DB::transaction(function () use ($selection, &$notifications) {
+            $deleted = [];
+
+            foreach ($this->resolve($selection) as $entry) {
+                $type = $entry['type'];
+                $server = $entry['server'];
+
+                $deleted[] = [
+                    'id' => (int) $server->id,
+                    'type' => $type,
+                    'name' => (string) $server->name,
+                    'host' => (string) $server->host,
+                    'published' => (int) $server->show === 1,
+                    'child_count' => (int) self::MODELS[$type]::where('parent_id', $server->id)->count(),
+                ];
+
+                // 通知要的是模型本身（它自己读 original 里的 show / name），删除之后这些
+                // 原值仍然读得到，所以先存下来、提交后再发。
+                $notifications[] = [
+                    'server' => $server,
+                    // 与各 Controller::drop() 传的协议名一致；只有 v2node 的协议名在它自己的列里
+                    'protocol' => $type === 'v2node' ? (string) $server->protocol : $type,
+                ];
+
+                if (!$server->delete()) {
+                    abort(500, __('节点删除失败，本次操作已回滚'));
+                }
+            }
+
+            return $deleted;
+        });
+
+        foreach ($notifications as $notification) {
+            TelegramAdminOperationService::nodeDeleted($notification['server'], $notification['protocol']);
+        }
+
+        return [
+            'requested_count' => count($selection),
+            'deleted_count' => count($deleted),
+            'nodes' => $deleted,
+        ];
+    }
+
+    /**
+     * 批量下发「传输协议 + 协议配置」的预演：只读，不落库。
+     *
+     * 两个参数都可以为 null，表示「这一项不动」—— 与批量填写 SNI 同一套语义：管理员
+     * 只会填自己确实要改的那一项，留空的项保持原样比强行清空安全。
+     */
+    public function previewProtocolSettings(array $selection, ?string $network, ?array $networkSettings): array
+    {
+        $nodes = [];
+        $changed = 0;
+        foreach ($this->load($selection) as $entry) {
+            $described = $this->describeProtocol($entry, $network, $networkSettings);
+            if ($described['changes']) {
+                $changed++;
+            }
+            $nodes[] = $described;
+        }
+
+        return [
+            'network' => $network,
+            'network_settings' => $networkSettings === null ? null : $this->encodeSettings($networkSettings),
+            'matched_count' => count($nodes),
+            'applicable_count' => count(array_filter($nodes, function (array $node) {
+                return $node['applicable'];
+            })),
+            'changed_count' => $changed,
+            'nodes' => $nodes,
+        ];
+    }
+
+    /**
+     * 批量下发「传输协议 + 协议配置」。
+     *
+     * 只写传进来的项；表里没有这两列的类型直接跳过（见 NETWORK_STORAGE），不因此回滚
+     * 整批 —— 那会让「勾了一批 v2node 顺带勾了一个 tuic」变成没法用。
+     *
+     * @param array<int, array{type: string, id: int}> $selection
+     */
+    public function applyProtocolSettings(array $selection, ?string $network, ?array $networkSettings): array
+    {
+        if ($network === null && $networkSettings === null) {
+            abort(422, __('请至少选择传输协议或填写协议配置中的一项'));
+        }
+
+        return DB::transaction(function () use ($selection, $network, $networkSettings) {
+            $updated = [];
+
+            foreach ($this->resolve($selection) as $entry) {
+                $type = $entry['type'];
+                $server = $entry['server'];
+                $storage = self::NETWORK_STORAGE[$type];
+                if ($storage === null) {
+                    continue;
+                }
+
+                $before = $this->describeProtocol($entry, $network, $networkSettings);
+                if (!$before['changes']) {
+                    continue;
+                }
+
+                if ($network !== null) {
+                    $server->{$storage['network']} = $network;
+                }
+                if ($networkSettings !== null) {
+                    $server->{$storage['settings']} = $networkSettings;
+                }
+
+                if (!$server->save()) {
+                    abort(500, __('节点保存失败，本次操作已回滚'));
+                }
+                $persisted = $server->fresh();
+                if (!$persisted) {
+                    abort(500, __('节点保存失败，本次操作已回滚'));
+                }
+                $after = $this->describeProtocol(['type' => $type, 'server' => $persisted], $network, $networkSettings);
+                if ($after['changes']) {
+                    abort(500, __('节点保存后复核不一致，本次操作已回滚'));
+                }
+
+                $updated[] = [
+                    'id' => (int) $persisted->id,
+                    'type' => $type,
+                    'name' => (string) $persisted->name,
+                    'network' => $after['network'],
+                    'network_settings' => $after['network_settings'],
+                    'changes' => $before['changes'],
+                ];
+            }
+
+            return [
+                'requested_count' => count($selection),
+                'updated_count' => count($updated),
+                'nodes' => $updated,
+            ];
+        });
+    }
+
+    /**
+     * 描述单个节点在这次入参下会产生哪些传输配置改动。readonly，不修改模型。
+     */
+    private function describeProtocol(array $entry, ?string $network, ?array $networkSettings): array
+    {
+        $type = $entry['type'];
+        $server = $entry['server'];
+        $storage = self::NETWORK_STORAGE[$type];
+
+        $currentNetwork = $storage === null ? null : (string) ($server->{$storage['network']} ?? '');
+        $currentSettings = $storage === null ? [] : (array) ($server->{$storage['settings']} ?? []);
+
+        $changes = [];
+        if ($storage !== null && $network !== null && $currentNetwork !== $network) {
+            $changes[] = 'network';
+        }
+        if ($storage !== null && $networkSettings !== null
+            && $this->encodeSettings($currentSettings) !== $this->encodeSettings($networkSettings)) {
+            $changes[] = 'network_settings';
+        }
+
+        return [
+            'id' => (int) $server->id,
+            'type' => $type,
+            'name' => (string) $server->name,
+            // 该类型没有这两列时说明原因，前端据此提示「不适用」而不是静默跳过
+            'applicable' => $storage !== null,
+            'network' => $currentNetwork,
+            'network_settings' => $storage === null ? null : $this->encodeSettings($currentSettings),
+            'new_network' => $storage !== null && $network !== null ? $network : null,
+            'new_network_settings' => $storage !== null && $networkSettings !== null
+                ? $this->encodeSettings($networkSettings)
+                : null,
+            'changes' => $changes,
+        ];
+    }
+
+    /**
+     * 把传输配置编码成可比较、可展示的字符串：比较与展示都走这一份输出，落库仍是数组
+     * （由模型的 array cast 编码）。这四列都是 text 而不是 MySQL 的 JSON 类型，键顺序不会被
+     * 数据库改写，所以写进去的和读回来的编码结果一致，落库后的复核才靠得住。
+     */
+    private function encodeSettings(array $settings): string
+    {
+        if (!$settings) {
+            return '';
+        }
+
+        return (string) json_encode($settings, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     /**

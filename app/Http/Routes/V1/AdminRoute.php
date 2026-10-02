@@ -43,6 +43,9 @@ class AdminRoute
             $router->post('/server/manage/nodes/copy', 'V1\\Admin\\Server\\ManageController@copyNodes');
             $router->post('/server/manage/tls-fields/preview', 'V1\\Admin\\Server\\ManageController@previewTlsFields');
             $router->post('/server/manage/tls-fields/apply', 'V1\\Admin\\Server\\ManageController@applyTlsFields');
+            $router->post('/server/manage/nodes/delete', 'V1\\Admin\\Server\\ManageController@deleteNodes');
+            $router->post('/server/manage/protocol/preview', 'V1\\Admin\\Server\\ManageController@previewProtocolSettings');
+            $router->post('/server/manage/protocol/apply', 'V1\\Admin\\Server\\ManageController@applyProtocolSettings');
             $router->group([
                 'prefix' => 'server/trojan'
             ], function ($router) {

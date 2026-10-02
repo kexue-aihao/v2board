@@ -42,6 +42,10 @@ class ServerBatchOperationTest extends TestCase
                 $table->integer('tls')->nullable();
                 $table->text('tls_settings')->nullable();
                 $table->text('tlsSettings')->nullable();
+                $table->integer('parent_id')->nullable();
+                $table->string('network')->nullable();
+                $table->text('network_settings')->nullable();
+                $table->text('networkSettings')->nullable();
                 $table->integer('created_at')->nullable();
                 $table->integer('updated_at')->nullable();
             });
@@ -414,5 +418,227 @@ class ServerBatchOperationTest extends TestCase
         $this->assertSame($copy->tls_settings['private_key'], $this->tlsSettings('v2node')['private_key']);
         $this->assertArrayHasKey('public_key', $copy->tls_settings);
         $this->assertArrayHasKey('short_id', $copy->tls_settings);
+    }
+
+    // ---- 批量删除 ----
+
+    public function testBatchDeleteRemovesOnlyTheSelectionAndReportsChildren(): void
+    {
+        $this->seed('v2node', 1, 'parent-node');
+        $this->seed('v2node', 2, 'child-node', ['parent_id' => 1]);
+        $this->seed('vmess', 1, 'vmess-node');
+
+        $this->postJson($this->url . '/nodes/delete', [
+            'nodes' => [['type' => 'v2node', 'id' => 1]],
+            'confirm' => true,
+        ])->assertOk()
+            ->assertJsonPath('data.deleted_count', 1)
+            ->assertJsonPath('data.nodes.0.name', 'parent-node')
+            ->assertJsonPath('data.nodes.0.published', true)
+            ->assertJsonPath('data.nodes.0.child_count', 1);
+
+        $this->assertNull(DB::table('v2_server_v2node')->where('id', 1)->first());
+        // 子节点不跟着删，只是失去父节点；没勾选的类型更不该被碰
+        $this->assertNotNull(DB::table('v2_server_v2node')->where('id', 2)->first());
+        $this->assertNotNull(DB::table('v2_server_vmess')->where('id', 1)->first());
+        $this->assertSame(0, DB::transactionLevel());
+    }
+
+    public function testBatchDeleteReportsHiddenNodesAsNotPublished(): void
+    {
+        $this->seed('v2node', 1, 'hidden-node', ['show' => 0]);
+
+        $this->postJson($this->url . '/nodes/delete', [
+            'nodes' => [['type' => 'v2node', 'id' => 1]],
+            'confirm' => true,
+        ])->assertOk()->assertJsonPath('data.nodes.0.published', false);
+    }
+
+    public function testBatchDeleteRequiresConfirmationAndRejectsUnknownNodes(): void
+    {
+        $this->seed('trojan', 1, 'trojan-node');
+
+        $this->postJson($this->url . '/nodes/delete', ['nodes' => [['type' => 'trojan', 'id' => 1]]])
+            ->assertStatus(422)->assertJsonValidationErrors('confirm');
+        $this->postJson($this->url . '/nodes/delete', ['nodes' => [], 'confirm' => true])
+            ->assertStatus(422)->assertJsonValidationErrors('nodes');
+        $this->postJson($this->url . '/nodes/delete', [
+            'nodes' => [['type' => 'trojan', 'id' => 99]], 'confirm' => true,
+        ])->assertStatus(422)->assertJsonPath('message', '选中的节点已不存在：trojan #99');
+
+        $this->assertNotNull(DB::table('v2_server_trojan')->where('id', 1)->first());
+    }
+
+    public function testBatchDeleteRollsBackEverythingWhenOneNodeFailsToDelete(): void
+    {
+        $this->seed('v2node', 1, 'v2node-node');
+        $this->seed('trojan', 1, 'trojan-node');
+
+        $dispatcher = \App\Models\ServerTrojan::getEventDispatcher();
+        \App\Models\ServerTrojan::setEventDispatcher(clone $dispatcher);
+        \App\Models\ServerTrojan::deleting(function () { return false; });
+        try {
+            $this->postJson($this->url . '/nodes/delete', [
+                'nodes' => [['type' => 'v2node', 'id' => 1], ['type' => 'trojan', 'id' => 1]],
+                'confirm' => true,
+            ])->assertStatus(500)->assertJsonPath('message', '节点删除失败，本次操作已回滚');
+
+            $this->assertNotNull(DB::table('v2_server_v2node')->where('id', 1)->first());
+            $this->assertNotNull(DB::table('v2_server_trojan')->where('id', 1)->first());
+            $this->assertSame(0, DB::transactionLevel());
+        } finally {
+            \App\Models\ServerTrojan::setEventDispatcher($dispatcher);
+        }
+    }
+
+    // ---- 批量下发协议配置（传输协议 + 协议配置 JSON） ----
+
+    public function testProtocolPreviewReportsPerTypeStorageWithoutWriting(): void
+    {
+        $this->seed('v2node', 1, 'v2node-node', ['network' => 'tcp']);
+        $this->seed('vmess', 1, 'vmess-node', ['network' => 'tcp']);
+        $this->seed('tuic', 1, 'tuic-node');
+
+        $this->postJson($this->url . '/protocol/preview', [
+            'nodes' => [
+                ['type' => 'v2node', 'id' => 1],
+                ['type' => 'vmess', 'id' => 1],
+                ['type' => 'tuic', 'id' => 1],
+            ],
+            'network' => 'ws',
+            'network_settings' => ['path' => '/ws'],
+        ])->assertOk()
+            ->assertJsonPath('data.matched_count', 3)
+            ->assertJsonPath('data.applicable_count', 2)
+            ->assertJsonPath('data.changed_count', 2)
+            ->assertJsonPath('data.nodes.0.network', 'tcp')
+            ->assertJsonPath('data.nodes.0.new_network', 'ws')
+            ->assertJsonPath('data.nodes.1.applicable', true)
+            // tuic 的表里没有这两列：标不适用，而不是报错或静默当成已改
+            ->assertJsonPath('data.nodes.2.applicable', false)
+            ->assertJsonPath('data.nodes.2.new_network', null);
+
+        $this->assertSame('tcp', (string) DB::table('v2_server_v2node')->where('id', 1)->value('network'));
+        $this->assertNull(DB::table('v2_server_v2node')->where('id', 1)->value('network_settings'));
+    }
+
+    public function testProtocolApplyWritesEachTypeIntoItsOwnColumn(): void
+    {
+        foreach (['v2node', 'vmess', 'vless', 'trojan', 'tuic'] as $type) {
+            $this->seed($type, 1, $type . '-node');
+        }
+
+        $this->postJson($this->url . '/protocol/apply', [
+            'nodes' => [
+                ['type' => 'v2node', 'id' => 1],
+                ['type' => 'vmess', 'id' => 1],
+                ['type' => 'vless', 'id' => 1],
+                ['type' => 'trojan', 'id' => 1],
+                ['type' => 'tuic', 'id' => 1],
+            ],
+            'network' => 'ws',
+            'network_settings' => ['path' => '/ws', 'headers' => ['Host' => 'a.example']],
+            'confirm' => true,
+        ])->assertOk()
+            ->assertJsonPath('data.requested_count', 5)
+            ->assertJsonPath('data.updated_count', 4);
+
+        // vmess 的列名是驼峰，其余三类是下划线
+        $storages = [
+            'v2node' => 'network_settings',
+            'vmess' => 'networkSettings',
+            'vless' => 'network_settings',
+            'trojan' => 'network_settings',
+        ];
+        foreach ($storages as $type => $column) {
+            $this->assertSame('ws', (string) DB::table('v2_server_' . $type)->where('id', 1)->value('network'), $type);
+            $this->assertSame(
+                ['path' => '/ws', 'headers' => ['Host' => 'a.example']],
+                json_decode((string) DB::table('v2_server_' . $type)->where('id', 1)->value($column), true),
+                $type
+            );
+        }
+        $this->assertNull(DB::table('v2_server_tuic')->where('id', 1)->value('network'));
+        $this->assertSame(0, DB::transactionLevel());
+    }
+
+    public function testProtocolApplyLeavesTheBlankFieldAlone(): void
+    {
+        $this->seed('v2node', 1, 'v2node-node', ['network' => 'tcp']);
+        DB::table('v2_server_v2node')->where('id', 1)->update(['network_settings' => json_encode(['path' => '/old'])]);
+
+        $this->postJson($this->url . '/protocol/apply', [
+            'nodes' => [['type' => 'v2node', 'id' => 1]],
+            'network' => 'ws',
+            'confirm' => true,
+        ])->assertOk()->assertJsonPath('data.updated_count', 1);
+
+        $this->assertSame('ws', (string) DB::table('v2_server_v2node')->where('id', 1)->value('network'));
+        // 只填了传输协议时，原有的协议配置必须原样留着
+        $this->assertSame(
+            ['path' => '/old'],
+            json_decode((string) DB::table('v2_server_v2node')->where('id', 1)->value('network_settings'), true)
+        );
+    }
+
+    public function testProtocolApplyAcceptsRawJsonText(): void
+    {
+        $this->seed('v2node', 1, 'v2node-node');
+
+        $this->postJson($this->url . '/protocol/apply', [
+            'nodes' => [['type' => 'v2node', 'id' => 1]],
+            'network_settings' => '{"path":"/raw"}',
+            'confirm' => true,
+        ])->assertOk()->assertJsonPath('data.updated_count', 1);
+
+        $this->assertSame(
+            ['path' => '/raw'],
+            json_decode((string) DB::table('v2_server_v2node')->where('id', 1)->value('network_settings'), true)
+        );
+    }
+
+    public function testProtocolApplyRejectsBlankInputBadJsonAndUnknownNetwork(): void
+    {
+        $this->seed('v2node', 1, 'v2node-node');
+        $base = ['nodes' => [['type' => 'v2node', 'id' => 1]]];
+
+        $this->postJson($this->url . '/protocol/apply', $base + ['network' => '', 'network_settings' => '', 'confirm' => true])
+            ->assertStatus(422)->assertJsonPath('message', '请至少选择传输协议或填写协议配置中的一项');
+        $this->postJson($this->url . '/protocol/preview', $base)->assertStatus(422);
+
+        $this->postJson($this->url . '/protocol/apply', $base + ['network_settings' => '{ not json', 'confirm' => true])
+            ->assertStatus(422)->assertJsonPath('message', '协议配置不是合法的 JSON 对象');
+        $this->postJson($this->url . '/protocol/apply', $base + ['network' => 'quic', 'confirm' => true])
+            ->assertStatus(422)->assertJsonValidationErrors('network');
+        $this->postJson($this->url . '/protocol/apply', $base + ['network' => 'ws'])
+            ->assertStatus(422)->assertJsonValidationErrors('confirm');
+        $this->postJson($this->url . '/protocol/apply', [
+            'nodes' => [['type' => 'v2node', 'id' => 99]], 'network' => 'ws', 'confirm' => true,
+        ])->assertStatus(422)->assertJsonPath('message', '选中的节点已不存在：v2node #99');
+
+        $this->assertNull(DB::table('v2_server_v2node')->where('id', 1)->value('network'));
+    }
+
+    public function testProtocolApplyRollsBackEverythingWhenOneNodeFailsToPersist(): void
+    {
+        $this->seed('v2node', 1, 'v2node-node', ['network' => 'tcp']);
+        $this->seed('vmess', 1, 'vmess-node', ['network' => 'tcp']);
+
+        $dispatcher = \App\Models\ServerVmess::getEventDispatcher();
+        \App\Models\ServerVmess::setEventDispatcher(clone $dispatcher);
+        \App\Models\ServerVmess::saving(function () { return false; });
+        try {
+            $this->postJson($this->url . '/protocol/apply', [
+                'nodes' => [['type' => 'v2node', 'id' => 1], ['type' => 'vmess', 'id' => 1]],
+                'network' => 'ws',
+                'confirm' => true,
+            ])->assertStatus(500)->assertJsonPath('message', '节点保存失败，本次操作已回滚');
+
+            $this->assertSame('tcp', (string) DB::table('v2_server_v2node')->where('id', 1)->value('network'));
+            $this->assertSame('tcp', (string) DB::table('v2_server_vmess')->where('id', 1)->value('network'));
+            $this->assertSame(0, DB::transactionLevel());
+        } finally {
+            \App\Models\ServerVmess::setEventDispatcher($dispatcher);
+        }
     }
 }
