@@ -29,6 +29,7 @@ workerman.log
 /Telegram注册体系改造-技术设计.md
 /Telegram注册体系改造-需求文档.md
 /订阅清洗网关-技术设计.md
+/管理端玻璃拟态主题-技术设计.md
 # 审计材料只保留在本地：代码审计上下文与注入审计 PoC
 /audit-context/
 /security-audit/
