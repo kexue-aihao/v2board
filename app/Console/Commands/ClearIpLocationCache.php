@@ -48,7 +48,7 @@ class ClearIpLocationCache extends Command
                 'updated_at' => time()
             ];
             if (Schema::hasColumn($table, 'country_name')) {
-                $reset['country_code'] = null;
+                // country_code 不在这里重置：它已经不参与了（列还在，但代码不再写它）。
                 $reset['country_name'] = null;
                 $reset['region'] = null;
                 $reset['city'] = null;

@@ -467,7 +467,6 @@ class SchemaUpgradeService
             `isp` varchar(255) DEFAULT NULL,
             `organization` varchar(255) DEFAULT NULL,
             `asn` int(10) unsigned DEFAULT NULL,
-            `country_code` varchar(8) DEFAULT NULL,
             `country_name` varchar(64) DEFAULT NULL,
             `region` varchar(64) DEFAULT NULL,
             `city` varchar(64) DEFAULT NULL,
@@ -494,7 +493,6 @@ class SchemaUpgradeService
             'asn' => 'int(10) unsigned DEFAULT NULL',
             // 国家/省/市：运营商字段在海外 IP 上经常是空的（全球库很多只给地理不给 ISP），
             // 列表里那格就会写成「未知」，对排查没有帮助。这四列是兜底显示用的。
-            'country_code' => 'varchar(8) DEFAULT NULL',
             'country_name' => 'varchar(64) DEFAULT NULL',
             'region' => 'varchar(64) DEFAULT NULL',
             'city' => 'varchar(64) DEFAULT NULL',
@@ -858,6 +856,37 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_ip_location_cache', 'location_status', ['status']);
         $this->ensureIndex('v2_ip_location_cache', 'location_key', ['location_key']);
         $this->ensureIndex('v2_ip_location_cache', 'expires_at', ['expires_at']);
+
+        $this->widenIpLocationCountryCode();
+    }
+
+    /**
+     * 把 v2_ip_location_cache.country_code 从 varchar(8) 放宽到 varchar(64)。
+     *
+     * 这一列建窄了：全球 IP 库里 country_code 字段装的是一级行政区名
+     * （CALIFORNIA / Bavaria / Guangdong，见 IpLocationService::normalize 里的注释），
+     * 8 个字符装不下，写入报 1406。IpLocationService::cache() 把它 catch 掉只记一条
+     * warning，所以症状不是报错而是「这些 IP 永远进不了缓存，每次解析都重查 MMDB、
+     * 每查一次写一条 warning」——静默的性能与日志问题。
+     *
+     * ensureColumn 只建不改，所以这里必须显式 MODIFY；只在当前确实更窄时才执行，
+     * 避免每次 v2board:update 都做一次无谓的 DDL。
+     */
+    private function widenIpLocationCountryCode(): void
+    {
+        if (!Schema::hasColumn('v2_ip_location_cache', 'country_code')) {
+            return;
+        }
+        $column = DB::selectOne("SHOW COLUMNS FROM `v2_ip_location_cache` WHERE `Field` = 'country_code'");
+        if ($column === null) {
+            return;
+        }
+        if (preg_match('/^varchar\((\d+)\)$/i', (string)$column->Type, $matches)
+            && (int)$matches[1] >= 64) {
+            return;
+        }
+
+        DB::statement("ALTER TABLE `v2_ip_location_cache` MODIFY `country_code` varchar(64) NOT NULL DEFAULT ''");
     }
 
     private function applyIpLocationEnrichmentSchema(): void

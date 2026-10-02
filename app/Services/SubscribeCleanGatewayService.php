@@ -30,6 +30,8 @@ class SubscribeCleanGatewayService
     public const MAX_EXPORT_ROWS = 200000;
     public const SORT_COLUMNS = ['last_seen_at', 'first_seen_at', 'hit_count', 'user_id'];
     public const BEIJING_OFFSET = 8 * 3600;
+    // 国家 / 省 / 市三列的宽度（varchar(64)）。值来自第三方 IP 库，落库前一律按它截断。
+    public const GEO_TEXT_MAX = 64;
 
     private $availability;
 
@@ -146,6 +148,24 @@ class SubscribeCleanGatewayService
         }
 
         return (int)$value;
+    }
+
+    /**
+     * 归属地文本的落库形式：空串归 NULL，并按列宽截断。
+     *
+     * 截断是必要的防御，不是洁癖：国家/省/市是 varchar(64)，值来自第三方 IP 库，
+     * 而这两条写入路径（列表页的就地回填、access:locations 的批量回填）都是「一批
+     * 一条 UPDATE 语句」—— 库里冒出一条超长记录，代价不该是整批回填失败、进而让
+     * 整次部署中断。截断只影响极端长名的显示，不会丢记录。
+     */
+    public function geoText($value, int $max = self::GEO_TEXT_MAX): ?string
+    {
+        $text = trim((string)$value);
+        if ($text === '') {
+            return null;
+        }
+
+        return function_exists('mb_substr') ? mb_substr($text, 0, $max) : substr($text, 0, $max);
     }
 
     // ---------------------------------------------------------------- 查询
@@ -594,11 +614,14 @@ class SubscribeCleanGatewayService
                     'updated_at' => $now
                 ];
                 if ($hasGeo) {
-                    $update['country_code'] = ($location['country_code'] ?? '') === ''
-                        ? null : (string)$location['country_code'];
-                    $update['country_name'] = $countryName === '' ? null : $countryName;
-                    $update['region'] = $locations[$ip]['region'] === '' ? null : $locations[$ip]['region'];
-                    $update['city'] = $locations[$ip]['city'] === '' ? null : $locations[$ip]['city'];
+                    // 刻意不存 country_code：全球 IP 库里那个字段存的是一级行政区名
+                    // （CALIFORNIA / Bavaria / Guangdong，见 IpLocationService::normalize），
+                    // 不是国家代码，varchar(8) 装不下就是 1406；而这列在本表里只写不读
+                    // （展示与 CSV 用的都是 country_name / region / city），存它没有收益。
+                    // 只在 country_name 为空时拿它兜个底，那一层已经在上面做完了。
+                    $update['country_name'] = $this->geoText($countryName);
+                    $update['region'] = $this->geoText($locations[$ip]['region']);
+                    $update['city'] = $this->geoText($locations[$ip]['city']);
                 }
                 DB::table(self::TABLE)
                     ->where('request_ip', $ip)

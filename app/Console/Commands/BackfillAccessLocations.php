@@ -92,11 +92,13 @@ class BackfillAccessLocations extends Command
             $locations = $service->lookupMany(array_keys($batchIps));
             $now = time();
             $hasGeo = Schema::hasColumn($table, 'country_name');
+            $gateway = new SubscribeCleanGatewayService();
             foreach ($idsByIp as $ip => $ids) {
                 $location = $locations[$ip] ?? [];
                 $countryName = (string)($location['country_name'] ?? '');
                 if ($countryName === '') {
-                    // 全球库偶尔只给两字母代码，拿它兜底总好过留空。
+                    // 全球库里 country_name 偶尔为空，而 country_code 那一位其实是
+                    // 一级行政区名（CALIFORNIA），拿它兜底总好过留空。
                     $countryName = (string)($location['country_code'] ?? '');
                 }
                 $update = [
@@ -109,10 +111,12 @@ class BackfillAccessLocations extends Command
                     'updated_at' => $now
                 ];
                 if ($hasGeo) {
-                    $update['country_code'] = $this->nullable($location['country_code'] ?? '');
-                    $update['country_name'] = $this->nullable($countryName);
-                    $update['region'] = $this->nullable($location['region'] ?? '');
-                    $update['city'] = $this->nullable($location['city'] ?? '');
+                    // 不写 country_code（那列在本表里只写不读，且全球库的值装不下，
+                    // 见 SubscribeCleanGatewayService::geoText 的说明）；文本一律按列宽截断，
+                    // 免得一条超长记录让整批 UPDATE 失败、把整次部署带下去。
+                    $update['country_name'] = $gateway->geoText($countryName);
+                    $update['region'] = $gateway->geoText($location['region'] ?? '');
+                    $update['city'] = $gateway->geoText($location['city'] ?? '');
                 }
                 DB::table($table)->whereIn('id', $ids)->update($update);
                 $processed += count($ids);

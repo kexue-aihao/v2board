@@ -603,7 +603,7 @@ token 必须等于配置 server_token，node_id 定位 v2node；支持 If-None-M
 
 ### 10.3 归属地
 
-`isp` / `organization` / `asn` / `country_code` / `country_name` / `region` / `city` 都是 IP 库的派生结果，**不在订阅拉取写路径上查**（那条路径是全站最高频的写）。它们由两处补齐，互为兜底：
+`isp` / `organization` / `asn` / `country_name` / `region` / `city` 都是 IP 库的派生结果，**不在订阅拉取写路径上查**（那条路径是全站最高频的写）。它们由两处补齐，互为兜底：
 
 - 列表页打开时，把当前这一页里 `location_resolved_at` 仍为空的行就地查一次并回写；
 - `php artisan access:locations` 按 `location_resolved_at` 增量补齐其余的（调度每 10 分钟跑一次）。
