@@ -724,6 +724,42 @@ CREATE TABLE `v2_subscribe_account_risk` (
     KEY `pending` (`handled_at`,`risk_percent`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+DROP TABLE IF EXISTS `v2_external_source`;
+CREATE TABLE `v2_external_source` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `name` varchar(64) NOT NULL,
+    `url` varchar(512) NOT NULL,
+    `group_id` int(11) NOT NULL DEFAULT '0',
+    `enabled` tinyint(1) NOT NULL DEFAULT '1',
+    `remark` varchar(255) DEFAULT NULL,
+    `last_fetch_at` bigint(20) NOT NULL DEFAULT '0',
+    `last_status` varchar(16) NOT NULL DEFAULT 'never',
+    `last_error` varchar(500) DEFAULT NULL,
+    `node_count` int(11) NOT NULL DEFAULT '0',
+    `created_at` int(11) NOT NULL,
+    `updated_at` int(11) NOT NULL,
+    PRIMARY KEY (`id`),
+    KEY `group_id` (`group_id`),
+    KEY `enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+DROP TABLE IF EXISTS `v2_external_node`;
+CREATE TABLE `v2_external_node` (
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `source_id` int(11) NOT NULL,
+    `name` varchar(255) NOT NULL,
+    `protocol` varchar(24) NOT NULL,
+    `host` varchar(255) NOT NULL,
+    `port` int(11) NOT NULL DEFAULT '0',
+    `payload` text,
+    `enabled` tinyint(1) NOT NULL DEFAULT '1',
+    `sort` int(11) NOT NULL DEFAULT '0',
+    `fetched_at` bigint(20) NOT NULL DEFAULT '0',
+    PRIMARY KEY (`id`),
+    KEY `source` (`source_id`,`enabled`),
+    KEY `protocol` (`protocol`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 DROP TABLE IF EXISTS `v2_rate_rule`;
 CREATE TABLE `v2_rate_rule` (
     `id` int(11) NOT NULL AUTO_INCREMENT,

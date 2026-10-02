@@ -36,7 +36,8 @@ class SchemaUpgradeService
         'telegram_registration_invite_schema' => 'telegram_registration_invite_schema_v1',
         'two_factor_schema' => 'two_factor_schema_v1',
         'server_tls_pin_schema' => 'server_tls_pin_schema_v1',
-        'dynamic_rate_schema' => 'dynamic_rate_schema_v1'
+        'dynamic_rate_schema' => 'dynamic_rate_schema_v1',
+        'external_subscription_schema' => 'external_subscription_schema_v1'
     ];
 
     public function run(): array
@@ -163,6 +164,9 @@ class SchemaUpgradeService
             case 'dynamic_rate_schema':
                 $this->applyDynamicRateSchema();
                 return;
+            case 'external_subscription_schema':
+                $this->applyExternalSubscriptionSchema();
+                return;
         }
 
         throw new RuntimeException("Unknown schema migration: {$version}");
@@ -257,6 +261,83 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_rate_state', 'multiplier', ['multiplier']);
         $this->ensureIndex('v2_rate_state', 'computed_at', ['computed_at']);
     }
+
+    /**
+     * 外部订阅源与导入的节点。
+     *
+     * 导入的节点刻意不进 v2_server_*：那样会被节点列表、统计、getAvailableUsers、
+     * 安装指令这些既有逻辑当成「自己的节点」。它们只在订阅组装时按权限组混进去，
+     * 也正因为不在节点表里，它们的流量永远不会经过我们的计费链路 —— 天然不计流量。
+     */
+    private function applyExternalSubscriptionSchema(): void
+    {
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_external_source` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `name` varchar(64) NOT NULL,
+            `url` varchar(512) NOT NULL,
+            `group_id` int(11) NOT NULL DEFAULT '0',
+            `enabled` tinyint(1) NOT NULL DEFAULT '1',
+            `remark` varchar(255) DEFAULT NULL,
+            `last_fetch_at` bigint(20) NOT NULL DEFAULT '0',
+            `last_status` varchar(16) NOT NULL DEFAULT 'never',
+            `last_error` varchar(500) DEFAULT NULL,
+            `node_count` int(11) NOT NULL DEFAULT '0',
+            `created_at` int(11) NOT NULL,
+            `updated_at` int(11) NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `group_id` (`group_id`),
+            KEY `enabled` (`enabled`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'name' => 'varchar(64) NOT NULL',
+            'url' => 'varchar(512) NOT NULL',
+            'group_id' => "int(11) NOT NULL DEFAULT '0'",
+            'enabled' => "tinyint(1) NOT NULL DEFAULT '1'",
+            'remark' => 'varchar(255) DEFAULT NULL',
+            'last_fetch_at' => "bigint(20) NOT NULL DEFAULT '0'",
+            'last_status' => "varchar(16) NOT NULL DEFAULT 'never'",
+            'last_error' => 'varchar(500) DEFAULT NULL',
+            'node_count' => "int(11) NOT NULL DEFAULT '0'",
+            'created_at' => 'int(11) NOT NULL',
+            'updated_at' => 'int(11) NOT NULL'
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_external_source', $column, $definition);
+        }
+        // 订阅组装时按 group_id 过滤源，再按 source_id 取节点。
+        $this->ensureIndex('v2_external_source', 'group_id', ['group_id']);
+        $this->ensureIndex('v2_external_source', 'enabled', ['enabled']);
+
+        DB::statement("CREATE TABLE IF NOT EXISTS `v2_external_node` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `source_id` int(11) NOT NULL,
+            `name` varchar(255) NOT NULL,
+            `protocol` varchar(24) NOT NULL,
+            `host` varchar(255) NOT NULL,
+            `port` int(11) NOT NULL DEFAULT '0',
+            `payload` text,
+            `enabled` tinyint(1) NOT NULL DEFAULT '1',
+            `sort` int(11) NOT NULL DEFAULT '0',
+            `fetched_at` bigint(20) NOT NULL DEFAULT '0',
+            PRIMARY KEY (`id`),
+            KEY `source` (`source_id`,`enabled`),
+            KEY `protocol` (`protocol`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        foreach ([
+            'source_id' => 'int(11) NOT NULL',
+            'name' => 'varchar(255) NOT NULL',
+            'protocol' => 'varchar(24) NOT NULL',
+            'host' => 'varchar(255) NOT NULL',
+            'port' => "int(11) NOT NULL DEFAULT '0'",
+            'payload' => 'text',
+            'enabled' => "tinyint(1) NOT NULL DEFAULT '1'",
+            'sort' => "int(11) NOT NULL DEFAULT '0'",
+            'fetched_at' => "bigint(20) NOT NULL DEFAULT '0'"
+        ] as $column => $definition) {
+            $this->ensureColumn('v2_external_node', $column, $definition);
+        }
+        $this->ensureIndex('v2_external_node', 'source', ['source_id', 'enabled']);
+    }
+
 
     private function ensureMigrationTable(): void
     {
