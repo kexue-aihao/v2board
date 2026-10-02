@@ -209,9 +209,17 @@ class SubscribeCleanGatewayService
             }
         }
 
-        $userAgent = $this->text($request, 'user_agent');
-        if ($userAgent !== '') {
-            $query->where('user_agent', 'like', '%' . $this->escapeLike($userAgent) . '%');
+        // UA 有两个入口：下拉选的 ua_hash（精确）与手输的 user_agent（子串）。
+        // hash 优先 —— 两个都给的话按 hash 走，免得变成「选了某条还叠加一个子串」
+        // 这种自相矛盾的条件。
+        $uaHash = $this->text($request, 'ua_hash');
+        if ($uaHash !== '') {
+            $query->where('ua_hash', $uaHash);
+        } else {
+            $userAgent = $this->text($request, 'user_agent');
+            if ($userAgent !== '') {
+                $query->where('user_agent', 'like', '%' . $this->escapeLike($userAgent) . '%');
+            }
         }
 
         $this->applyHitCountFilter($query, $request);
@@ -316,6 +324,50 @@ class SubscribeCleanGatewayService
             . " AND {$alias}.subscription_id = {$rowAlias}.subscription_id)"
             . " OR ({$alias}.scope = 'ip' AND {$alias}.ip = {$rowAlias}.request_ip)"
             . " OR ({$alias}.scope = 'user_agent' AND {$alias}.user_agent_hash = {$rowAlias}.ua_hash))";
+    }
+
+    /**
+     * User-Agent 筛选的下拉选项：按 ua_hash 去重、按累计拉取次数倒序。
+     *
+     * 为什么用 ua_hash 而不是 UA 原文：
+     *   1. ua_hash 是 sha256(lowercase(UA))，同一个客户端的大小写变体算同一条 ——
+     *      按原文列会出现两个长得一样的选项，选其中一个又只筛出部分行；
+     *   2. 它是这张表上 UA 的规范身份（唯一键里用的就是它）。
+     *
+     * 返回里多取一行用来判断有没有被截断，调用方据此提示「只列了前 N 个」。
+     *
+     * @return array{options:array,truncated:bool}
+     */
+    public function userAgentOptions(int $limit = 500): array
+    {
+        $empty = ['options' => [], 'truncated' => false];
+        if (!$this->available()) {
+            return $empty;
+        }
+        $limit = max(1, min(2000, $limit));
+
+        try {
+            $rows = DB::table(self::TABLE)
+                ->selectRaw('`ua_hash`, MAX(`user_agent`) AS `user_agent`, SUM(`hit_count`) AS `hits`')
+                ->groupBy('ua_hash')
+                ->orderByDesc('hits')
+                ->limit($limit + 1)
+                ->get();
+        } catch (\Throwable $e) {
+            return $empty;
+        }
+
+        $truncated = $rows->count() > $limit;
+        $options = [];
+        foreach ($rows->take($limit) as $row) {
+            $options[] = [
+                'value' => (string)$row->ua_hash,
+                'user_agent' => (string)$row->user_agent,
+                'hits' => (int)$row->hits
+            ];
+        }
+
+        return ['options' => $options, 'truncated' => $truncated];
     }
 
     public function sort(Request $request): array

@@ -4,6 +4,7 @@
 window.__v2AdminI18nApply && window.__v2AdminI18nApply({
     locale: "vi-VN",
     rules: {
+        "clean_ua_option": "$1 ($2 lần)",
         "clean_times": "$1 lần",
         "clean_retention_min": "Số ngày lưu phải là 0 (vĩnh viễn) hoặc tối thiểu $1 ngày",
         "total_items": "Tổng cộng $1 mục",
@@ -27,6 +28,8 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "Phiếu hỗ trợ #$1 · Người dùng #$2",
     },
     dict: {
+        "选择或输入关键字搜索": "Chọn hoặc nhập để tìm",
+        "User-Agent 候选过多，下拉只列出拉取次数最多的那些": "Có quá nhiều User-Agent; danh sách chỉ hiển thị những cái dùng nhiều nhất",
         "风险程度": "Mức rủi ro",
         "风险程度（%）": "Mức rủi ro (%)",
         "待处理风险账号": "Tài khoản rủi ro chờ xử lý",

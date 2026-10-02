@@ -70,10 +70,15 @@ class SubscribeCleanGatewayController extends Controller
     public function options()
     {
         $retention = new SubscribeAuditRetentionService();
+        // UA 选项放在这里而不是单开一个接口：它就是「筛选器的可选项」，与套餐列表
+        // 同类；页面挂载时本来就要拉这个接口，省一次往返。
+        $userAgents = (new SubscribeCleanGatewayService())->userAgentOptions();
 
         return response([
             'data' => [
                 'plans' => Plan::orderBy('id')->get(['id', 'name']),
+                'user_agents' => $userAgents['options'],
+                'user_agents_truncated' => $userAgents['truncated'],
                 'scopes' => [
                     ['key' => 'ip', 'label' => __('IP 地址')],
                     ['key' => 'user_agent', 'label' => __('User-Agent')],

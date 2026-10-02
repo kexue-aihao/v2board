@@ -4,6 +4,7 @@
 window.__v2AdminI18nApply && window.__v2AdminI18nApply({
     locale: "zh-TW",
     rules: {
+        "clean_ua_option": "$1（$2 次）",
         "clean_times": "$1 次",
         "clean_retention_min": "留存天數必須為 0（永久保留）或至少 $1 天",
         "total_items": "共 $1 筆",
@@ -27,6 +28,8 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "工單 #$1 · 使用者 #$2",
     },
     dict: {
+        "选择或输入关键字搜索": "選擇或輸入關鍵字搜尋",
+        "User-Agent 候选过多，下拉只列出拉取次数最多的那些": "User-Agent 候選過多，下拉只列出拉取次數最多的那些",
         "风险程度": "風險程度",
         "风险程度（%）": "風險程度（%）",
         "待处理风险账号": "待處理風險帳號",

@@ -700,7 +700,8 @@ CREATE TABLE `v2_subscribe_access_summary` (
     KEY `subscription_id` (`subscription_id`),
     KEY `request_ip` (`request_ip`),
     KEY `asn` (`asn`),
-    KEY `location_resolved_at` (`location_resolved_at`)
+    KEY `location_resolved_at` (`location_resolved_at`),
+    KEY `ua_hash` (`ua_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 DROP TABLE IF EXISTS `v2_subscribe_account_risk`;

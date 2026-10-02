@@ -4,6 +4,7 @@
 window.__v2AdminI18nApply && window.__v2AdminI18nApply({
     locale: "en-US",
     rules: {
+        "clean_ua_option": "$1 ($2 uses)",
         "clean_times": "$1 times",
         "clean_retention_min": "Retention must be 0 (keep forever) or at least $1 days",
         "total_items": "Total $1 items",
@@ -27,6 +28,8 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "Ticket #$1 · User #$2",
     },
     dict: {
+        "选择或输入关键字搜索": "Pick one or type to search",
+        "User-Agent 候选过多，下拉只列出拉取次数最多的那些": "Too many User-Agents to list; the dropdown shows only the most frequently used ones",
         "风险程度": "Risk level",
         "风险程度（%）": "Risk level (%)",
         "待处理风险账号": "Accounts awaiting handling",

@@ -4,6 +4,7 @@
 window.__v2AdminI18nApply && window.__v2AdminI18nApply({
     locale: "fa-IR",
     rules: {
+        "clean_ua_option": "$1 ($2 بار)",
         "clean_times": "$1 بار",
         "clean_retention_min": "مدت نگهداری باید ۰ (دائمی) یا دست‌کم $1 روز باشد",
         "total_items": "مجموع $1 مورد",
@@ -27,6 +28,8 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "تیکت #$1 · کاربر #$2",
     },
     dict: {
+        "选择或输入关键字搜索": "انتخاب کنید یا برای جست‌وجو تایپ کنید",
+        "User-Agent 候选过多，下拉只列出拉取次数最多的那些": "تعداد User-Agent بیش از حد است؛ فهرست فقط پرکاربردترین‌ها را نشان می‌دهد",
         "风险程度": "سطح ریسک",
         "风险程度（%）": "سطح ریسک (%)",
         "待处理风险账号": "حساب‌های در انتظار بررسی",

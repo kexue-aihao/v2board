@@ -4,6 +4,7 @@
 window.__v2AdminI18nApply && window.__v2AdminI18nApply({
     locale: "ru-RU",
     rules: {
+        "clean_ua_option": "$1 ($2 раз)",
         "clean_times": "$1 раз",
         "clean_retention_min": "Срок хранения: 0 (вечно) или не менее $1 дней",
         "total_items": "Всего: $1",
@@ -27,6 +28,8 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "Тикет #$1 · Пользователь #$2",
     },
     dict: {
+        "选择或输入关键字搜索": "Выберите или введите для поиска",
+        "User-Agent 候选过多，下拉只列出拉取次数最多的那些": "Слишком много User-Agent; в списке показаны только самые частые",
         "风险程度": "Уровень риска",
         "风险程度（%）": "Уровень риска (%)",
         "待处理风险账号": "Аккаунты, ожидающие обработки",

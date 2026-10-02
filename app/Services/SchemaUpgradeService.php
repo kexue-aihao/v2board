@@ -520,6 +520,12 @@ class SchemaUpgradeService
         $this->ensureIndex('v2_subscribe_access_summary', 'asn', ['asn']);
         // 归属地回填命令的取数顺序：WHERE location_resolved_at IS NULL ORDER BY id。
         $this->ensureIndex('v2_subscribe_access_summary', 'location_resolved_at', ['location_resolved_at']);
+        // UA 下拉筛选是精确匹配（按 ua_hash），给它一条索引，不然一次 UA 筛选就是全表扫。
+        // 这笔开销是明确的：这张表是订阅拉取每次都要写的热路径，多一条二级索引就是每行
+        // 多一次索引维护。加它的理由是 UA 筛选在同一个请求里可能被反复用（筛完看、换个
+        // UA 再看），而 char(64) 在 utf8mb4 下每条索引项 256 字节 —— 表真的长到几百万行
+        // 时值得再评估一次。
+        $this->ensureIndex('v2_subscribe_access_summary', 'ua_hash', ['ua_hash']);
     }
 
     /**

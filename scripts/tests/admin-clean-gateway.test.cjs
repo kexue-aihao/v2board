@@ -443,6 +443,44 @@ test('标记已处理走 POST /risk/gateway/risk/handle', async () => {
     assert.equal(call.params.user_id, 9);
 });
 
+test('User-Agent 筛选是下拉，选项带原文与累计拉取次数', () => {
+    const { Page } = harness(respondFor([]));
+    const page = new Page({});
+    page.setState({
+        options: {
+            plans: [],
+            scopes: [],
+            user_agents: [
+                { value: 'hash-a', user_agent: 'Clash/1.0', hits: 1234 },
+                { value: 'hash-b', user_agent: 'sing-box/1.12', hits: 7 },
+            ],
+        },
+    });
+    // 筛选栏里还有别的 Select（套餐、次数条件、阻断状态…），只挑 UA 那两条
+    const options = nodes(page.renderFilterBar())
+        .filter(node => node.type === 'Option' && String(node.props.value).indexOf('hash-') === 0);
+    assert.equal(options.length, 2, '两条候选都要渲染成选项');
+    // 值必须是 ua_hash：同一个客户端的大小写变体在库里共用同一个 hash，
+    // 按原文当值会只筛出一部分行。
+    assert.equal(options[0].props.value, 'hash-a');
+    const label = flatten(options[0]).join('');
+    assert.ok(label.includes('Clash/1.0'), '选项要显示 UA 原文');
+    assert.ok(label.includes('1234'), '选项要带累计拉取次数');
+});
+
+test('选中 User-Agent 后按 ua_hash 精确筛选，不再叠发子串条件', async () => {
+    const { Page, requests } = harness(respondFor([sampleRow()]));
+    const page = new Page({});
+    await page.componentDidMount();
+    page.setFilter('ua_hash', 'hash-a');
+    requests.length = 0;
+    await page.fetch(1);
+    const call = requests.find(r => endpoint(r.url) === '/risk/gateway/fetch');
+    assert.ok(call, 'fetch must be called');
+    assert.equal(call.params.ua_hash, 'hash-a');
+    assert.equal('user_agent' in call.params, false, '两个 UA 条件不能同时发出去');
+});
+
 test('留存设置保存到 /risk/gateway/config/save', async () => {
     const { Page, requests } = harness(respondFor([]));
     const page = new Page({});

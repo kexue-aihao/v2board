@@ -4,6 +4,7 @@
 window.__v2AdminI18nApply && window.__v2AdminI18nApply({
     locale: "ja-JP",
     rules: {
+        "clean_ua_option": "$1（$2 回）",
         "clean_times": "$1 回",
         "clean_retention_min": "保持日数は 0（無期限）または $1 日以上にしてください",
         "total_items": "全 $1 件",
@@ -27,6 +28,8 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "チケット #$1 · ユーザー #$2",
     },
     dict: {
+        "选择或输入关键字搜索": "選択、またはキーワードで検索",
+        "User-Agent 候选过多，下拉只列出拉取次数最多的那些": "User-Agent が多すぎるため、ドロップダウンには取得回数の多いものだけを表示します",
         "风险程度": "リスク度",
         "风险程度（%）": "リスク度（%）",
         "待处理风险账号": "対応待ちのリスクアカウント",

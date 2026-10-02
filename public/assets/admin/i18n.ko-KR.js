@@ -4,6 +4,7 @@
 window.__v2AdminI18nApply && window.__v2AdminI18nApply({
     locale: "ko-KR",
     rules: {
+        "clean_ua_option": "$1 ($2회)",
         "clean_times": "$1회",
         "clean_retention_min": "보관 일수는 0(영구 보관) 또는 $1일 이상이어야 합니다",
         "total_items": "총 $1건",
@@ -27,6 +28,8 @@ window.__v2AdminI18nApply && window.__v2AdminI18nApply({
         "ticket_hdr": "티켓 #$1 · 사용자 #$2",
     },
     dict: {
+        "选择或输入关键字搜索": "선택하거나 입력해 검색",
+        "User-Agent 候选过多，下拉只列出拉取次数最多的那些": "User-Agent 후보가 너무 많아, 드롭다운에는 가져오기 횟수가 많은 것만 표시합니다",
         "风险程度": "위험도",
         "风险程度（%）": "위험도(%)",
         "待处理风险账号": "처리 대기 위험 계정",

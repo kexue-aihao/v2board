@@ -118976,7 +118976,7 @@
         var SPIN_OFF = {
             loading: !1
         };
-        var CLEAN_FILTER_KEYS = ["email", "user_id", "plan_id", "subscription_id", "ip", "carrier", "asn", "user_agent", "hit_condition", "hit_count", "risk_condition", "risk_percent", "blocked", "start_time", "end_time"];
+        var CLEAN_FILTER_KEYS = ["email", "user_id", "plan_id", "subscription_id", "ip", "carrier", "asn", "ua_hash", "user_agent", "hit_condition", "hit_count", "risk_condition", "risk_percent", "blocked", "start_time", "end_time"];
         var CLEAN_EMPTY_FILTERS = {
             email: "",
             user_id: "",
@@ -118985,6 +118985,7 @@
             ip: "",
             carrier: "",
             asn: "",
+            ua_hash: void 0,
             user_agent: "",
             hit_condition: ">=",
             hit_count: "",
@@ -119024,10 +119025,13 @@
                     options: {
                         plans: [],
                         scopes: [],
+                        // UA 下拉的候选：后端按 ua_hash 去重、按累计拉取次数倒序，最多 500 条。
+                        user_agents: [],
                         retention_days: 180,
                         retention_min: 1,
                         retention_default: 180
                     },
+                    uaTruncated: !1,
                     stats: {
                         records: 0,
                         raw_logs: 0,
@@ -119121,6 +119125,7 @@
                     ip: params.ip,
                     carrier: params.carrier,
                     asn: params.asn,
+                    ua_hash: params.ua_hash,
                     user_agent: params.user_agent,
                     hit_condition: params.hit_condition,
                     hit_count: params.hit_count,
@@ -119141,11 +119146,13 @@
                         options: {
                             plans: data.plans || [],
                             scopes: data.scopes || [],
+                            user_agents: data.user_agents || [],
                             retention_days: Number(data.retention_days || 0),
                             retention_min: Number(data.retention_min || 1),
                             retention_default: Number(data.retention_default || 180),
                             risk_threshold: Number(null === data.risk_threshold || void 0 === data.risk_threshold ? 60 : data.risk_threshold)
                         },
+                        uaTruncated: !0 === data.user_agents_truncated,
                         retentionInput: String(Number(data.retention_days || 0)),
                         riskThreshold: Number(null === data.risk_threshold || void 0 === data.risk_threshold ? 60 : data.risk_threshold)
                     })
@@ -119621,13 +119628,25 @@
                         onChange: e=>this.setFilter("asn", e.target.value),
                         onPressEnter: ()=>this.fetch(1)
                     })),
-                    field("User-Agent", p.a.createElement(s["a"], {
+                    // 下拉选择而不是手输。值走 ua_hash —— 同一个客户端的大小写变体在库里
+                    // 是同一个 hash，按原文列会出现两个长得一样的选项、选一个又只筛出
+                    // 一部分行。showSearch 让候选多时能直接打字缩小范围。
+                    field("User-Agent", p.a.createElement(u["a"], {
                         allowClear: !0,
-                        placeholder: "支持模糊匹配",
-                        value: filters.user_agent,
-                        onChange: e=>this.setFilter("user_agent", e.target.value),
-                        onPressEnter: ()=>this.fetch(1)
-                    })),
+                        showSearch: !0,
+                        optionFilterProp: "children",
+                        placeholder: "选择或输入关键字搜索",
+                        style: {
+                            width: "100%"
+                        },
+                        value: filters.ua_hash || void 0,
+                        onChange: e=>this.setFilter("ua_hash", e)
+                    }, (this.state.options.user_agents || []).map(function(option) {
+                        return p.a.createElement(u["a"].Option, {
+                            key: option.value,
+                            value: option.value
+                        }, String(option.user_agent) + "（" + Number(option.hits || 0) + " 次）")
+                    }))),
                     field("拉取次数", p.a.createElement(s["a"].Group, {
                         compact: !0,
                         style: {
@@ -120189,7 +120208,9 @@
                     onClick: ()=>this.fetch()
                 }, p.a.createElement(l["a"], {
                     type: "reload"
-                }), " 刷新"), this.renderRetention()), this.section("筛选", null, this.renderFilterBar()), this.section("拉取记录", p.a.createElement("span", {
+                }), " 刷新"), this.renderRetention()), this.section("筛选", this.state.uaTruncated ? p.a.createElement("span", {
+                    className: "text-muted small"
+                }, "User-Agent 候选过多，下拉只列出拉取次数最多的那些") : null, this.renderFilterBar()), this.section("拉取记录", p.a.createElement("span", {
                     className: "text-muted small"
                 }, "共 " + Number(this.state.total || 0) + " 条"), this.renderTable()), this.section("待处理风险账号", p.a.createElement("span", {
                     className: "text-muted small"
