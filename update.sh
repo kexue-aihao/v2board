@@ -21,10 +21,18 @@ trap 'if [ "$WEBMAN_STOPPED" = 1 ] && [ "$WEBMAN_RESTARTED" = 0 ] && [ "$WEBMAN_
 # 报 1146 才暴露（AuthController → TwoFactorService 每次登录都查这张表，
 # APP_DEBUG=false 时前端只有一句裸 500，日志里也未必有）。
 #
+# 「前置检查没过」和「部署做到一半失败」的处置完全不同，所以用 DEPLOY_MUTATED 分开：
+# 前者服务器上什么都没变，后者才是半成品。
+#
 # 处理函数只摘掉自己的 trap：万一输出过程中哪条命令也失败，直接让 shell 退出，
 # 不会递归刷屏。**刻意不写 `set +e`** —— trap 里的 set 是会留下来的，那会让
 # `set -e` 在后面全程失效：失败一次之后脚本继续往下跑，最后还以退出码 0 结束，
 # 比现在这种静默掐断更糟（这个坑是实测出来的，不是想出来的）。
+#
+# 也刻意不报「失败在哪个函数里」：ERR trap 触发时 FUNCNAME 里只有处理函数自己，
+# 在 bash 5.2 上是空的、在别的版本上会给出「main」这种没有信息量的名字 ——
+# 行号 + 失败的命令已经够定位，多那一句只会误导（这是实测出来的第二处）。
+DEPLOY_MUTATED=0
 deploy_report_failure() {
     trap - ERR
     local line="$1" command="$2"
@@ -32,23 +40,32 @@ deploy_report_failure() {
         echo
         echo "=============================================================="
         echo "部署失败：脚本在第 ${line} 行中断，后面的步骤都没有执行。"
-        if [ -n "${FUNCNAME[1]:-}" ]; then
-            echo "失败位置：update.sh:${line}（${FUNCNAME[1]}() 内）"
-            echo "失败的命令：${command}"
+        case "$command" in
+            return\ *)
+                # 检查类函数失败时会走到这里，$BASH_COMMAND 只剩一句 "return 1"，
+                # 真正的原因在它自己刚打印的输出里。
+                echo "失败的命令：（这一步返回了失败，原因见它上面刚打印的内容）"
+                ;;
+            *)
+                echo "失败的命令：${command}"
+                ;;
+        esac
+        echo
+        if [ "$DEPLOY_MUTATED" = 0 ]; then
+            echo "前置检查未通过：脚本在动任何东西之前就退出了，"
+            echo "本次没有拉代码、没有写数据库、没有停服务、没有改 cron。"
+            echo
+            echo "按上面那条报错改环境，然后重跑：bash ./update.sh"
         else
-            echo "失败的命令：${command}"
+            echo "本次部署是半成品 —— 拉代码 / 装依赖 / 数据库迁移 / 缓存清理 /"
+            echo "计划任务 / 文件属主 里至少有一项没做。"
+            echo
+            echo "恢复步骤："
+            echo "  1. 确认代码与数据库是否同步（幂等，可反复跑）："
+            echo "       ${PHP_CMD[*]:-php} artisan v2board:update"
+            echo "     全部 already applied 才算同步；出现 applied 就是没跑完。"
+            echo "  2. 修掉根因后重跑：bash ./update.sh"
         fi
-        echo
-        echo "本次部署是半成品 —— 拉代码 / 装依赖 / 数据库迁移 / 缓存清理 /"
-        echo "计划任务 / 文件属主 里至少有一项没做。"
-        echo
-        echo "恢复步骤："
-        echo "  1. 先读上面那条命令自己的报错。自检类错误在动任何东西之前就退出了，"
-        echo "     没有留下半成品，按它说的改环境即可。"
-        echo "  2. 确认代码与数据库是否同步（幂等，可反复跑）："
-        echo "       ${PHP_CMD[*]:-php} artisan v2board:update"
-        echo "     全部 already applied 才算同步；出现 applied 就是没跑完。"
-        echo "  3. 修掉根因后重跑：bash ./update.sh"
         echo "=============================================================="
     } >&2
 }
@@ -83,6 +100,9 @@ DEPLOY_BRANCH="${DEPLOY_BRANCH:-$(git symbolic-ref --quiet --short HEAD || true)
 }
 
 echo "Deploying branch: $DEPLOY_BRANCH"
+# 从这里开始真的会改东西（停服务、reset --hard、装依赖、迁移……）。之前失败都是
+# 「什么都没动」，之后失败就是半成品 —— ERR trap 按这个标记分开措辞。
+DEPLOY_MUTATED=1
 deploy_stop_webman
 git config --global --add safe.directory "$ROOT_DIR"
 UPDATE_SCRIPT_BEFORE="$(git rev-parse --verify HEAD:update.sh 2>/dev/null || true)"
