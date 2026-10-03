@@ -13,11 +13,13 @@
 (function () {
     'use strict';
 
-    var STATUS_API = '/api/v1/user/telegram/account/status';
-    var PREPARE_API = '/api/v1/user/telegram/account/prepare';
-    var SEND_CODE_API = '/api/v1/passport/comm/sendTelegramForgetCode';
-    var RESET_API = '/api/v1/passport/auth/forget/telegram';
-    var GUEST_CONFIG_API = '/api/v1/guest/comm/config';
+    // 下面这些路径都是相对「API 根」（即 https://后端域名/api/v1），不含 /api/v1 前缀 ——
+    // 根由 apiBase() 提供。写成 /api/v1/... 的话，跨域时会被拼成 /api/v1/api/v1/...。
+    var STATUS_API = '/user/telegram/account/status';
+    var PREPARE_API = '/user/telegram/account/prepare';
+    var SEND_CODE_API = '/passport/comm/sendTelegramForgetCode';
+    var RESET_API = '/passport/auth/forget/telegram';
+    var GUEST_CONFIG_API = '/guest/comm/config';
 
     var POLL_INTERVAL = 4000;
     var modal = null;
@@ -41,27 +43,32 @@
     }
 
     /**
-     * 接口基址：必须和主题的 getApiBaseUrl() 取同一个来源（window.EZ_CONFIG.API_CONFIG）。
+     * 接口基址（API 根，含 /api/v1）：必须和主题的 getApiBaseUrl() 取同一个来源
+     * （window.EZ_CONFIG.API_CONFIG）。
      *
      * 前后分离部署时前台域名不是后端域名。前台若是独立静态站、没有 /api 反代，这里再用
      * 相对路径就等于打到前台自己的 /api 上，全部 404 —— 表现是「主界面一切正常，只有
      * Telegram 相关的功能全打不开」：绑定弹窗、强制绑定轮询、Telegram 验证码找回密码一起
      * 失效。主题自己从 EZ_CONFIG 读到了正确地址，widget 也必须读同一个。
      *
-     * 取不到时（例如后端同域渲染的页面、老主题没有这段配置）返回空串，退回相对路径，
-     * 行为与改动前逐字一致。
+     * 返回值是「API 根」，路径常量因此都不含 /api/v1 前缀。曾经把常量写成 /api/v1/... 再
+     * 拼这里的基址，跨域时就变成 /api/v1/api/v1/... —— 一样是 404，而且在 mxp 上 404 比在
+     * myp 上更难看出问题。改常量前先想清楚前缀归谁管。
+     *
+     * 取不到配置时（后端同域渲染的页面）退回同源的 '/api/v1'，行为与改动前一致。
      */
     function apiBase() {
         try {
             var apiConfig = window.EZ_CONFIG && window.EZ_CONFIG.API_CONFIG;
-            if (!apiConfig || apiConfig.urlMode !== 'static') return '';
-            var base = apiConfig.staticBaseUrl;
-            if (Array.isArray(base)) base = base.length ? base[0] : '';
-            base = String(base == null ? '' : base).trim();
-            return base ? base.replace(/\/+$/, '') : '';
-        } catch (e) {
-            return '';
-        }
+            if (apiConfig && apiConfig.urlMode === 'static') {
+                var base = apiConfig.staticBaseUrl;
+                if (Array.isArray(base)) base = base.length ? base[0] : '';
+                base = String(base == null ? '' : base).trim();
+                if (base) return base.replace(/\/+$/, '');
+            }
+        } catch (e) {}
+        // 取不到配置（后端同域渲染的页面）时退回同源相对路径
+        return '/api/v1';
     }
 
     function request(path, options) {

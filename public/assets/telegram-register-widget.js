@@ -15,8 +15,10 @@
 (function () {
     'use strict';
 
-    var CONFIG_API = '/api/v1/guest/comm/config';
-    var REGISTER_API = '/api/v1/passport/auth/register/telegram';
+    // 相对「API 根」（含 /api/v1，由 apiBase() 提供），不要在这里写 /api/v1 前缀 ——
+    // 跨域时会被拼成 /api/v1/api/v1/...。详见 telegram-bind-widget.js 里的同名函数。
+    var CONFIG_API = '/guest/comm/config';
+    var REGISTER_API = '/passport/auth/register/telegram';
 
     var config = null;
     var modal = null;
@@ -29,22 +31,23 @@
     }
 
     /**
-     * 接口基址：必须和主题的 getApiBaseUrl() 取同一个来源（window.EZ_CONFIG.API_CONFIG）。
-     * 前后分离部署时前台域名不是后端域名，前台若是独立静态站、没有 /api 反代，再用相对
-     * 路径就会全部 404 —— 注册页的 Telegram 引导会整个打不开。
-     * 取不到时返回空串，退回相对路径，行为与改动前一致。详见 telegram-bind-widget.js 里的同名函数。
+     * 接口基址（API 根，含 /api/v1）：必须和主题的 getApiBaseUrl() 取同一个来源
+     * （window.EZ_CONFIG.API_CONFIG）。前后分离部署时前台域名不是后端域名，前台若是独立
+     * 静态站、没有 /api 反代，再用相对路径就会全部 404 —— 注册页的 Telegram 引导会整个
+     * 打不开，连带着 hideLegacyForm() 不执行，页面上留着一个后端早已不存在的邮箱注册表单。
+     * 取不到配置时退回同源的 '/api/v1'。详见 telegram-bind-widget.js 里的同名函数。
      */
     function apiBase() {
         try {
             var apiConfig = window.EZ_CONFIG && window.EZ_CONFIG.API_CONFIG;
-            if (!apiConfig || apiConfig.urlMode !== 'static') return '';
-            var base = apiConfig.staticBaseUrl;
-            if (Array.isArray(base)) base = base.length ? base[0] : '';
-            base = String(base == null ? '' : base).trim();
-            return base ? base.replace(/\/+$/, '') : '';
-        } catch (e) {
-            return '';
-        }
+            if (apiConfig && apiConfig.urlMode === 'static') {
+                var base = apiConfig.staticBaseUrl;
+                if (Array.isArray(base)) base = base.length ? base[0] : '';
+                base = String(base == null ? '' : base).trim();
+                if (base) return base.replace(/\/+$/, '');
+            }
+        } catch (e) {}
+        return '/api/v1';
     }
 
     function request(path, options) {
