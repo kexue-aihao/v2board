@@ -28,6 +28,25 @@
         });
     }
 
+    /**
+     * 接口基址：必须和主题的 getApiBaseUrl() 取同一个来源（window.EZ_CONFIG.API_CONFIG）。
+     * 前后分离部署时前台域名不是后端域名，前台若是独立静态站、没有 /api 反代，再用相对
+     * 路径就会全部 404 —— 注册页的 Telegram 引导会整个打不开。
+     * 取不到时返回空串，退回相对路径，行为与改动前一致。详见 telegram-bind-widget.js 里的同名函数。
+     */
+    function apiBase() {
+        try {
+            var apiConfig = window.EZ_CONFIG && window.EZ_CONFIG.API_CONFIG;
+            if (!apiConfig || apiConfig.urlMode !== 'static') return '';
+            var base = apiConfig.staticBaseUrl;
+            if (Array.isArray(base)) base = base.length ? base[0] : '';
+            base = String(base == null ? '' : base).trim();
+            return base ? base.replace(/\/+$/, '') : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
     function request(path, options) {
         options = options || {};
         var headers = { Accept: 'application/json' };
@@ -36,7 +55,7 @@
             headers['Content-Type'] = 'application/json';
             body = JSON.stringify(options.body);
         }
-        return fetch(path, {
+        return fetch(apiBase() + path, {
             method: options.method || 'GET',
             headers: headers,
             body: body

@@ -40,6 +40,30 @@
         });
     }
 
+    /**
+     * 接口基址：必须和主题的 getApiBaseUrl() 取同一个来源（window.EZ_CONFIG.API_CONFIG）。
+     *
+     * 前后分离部署时前台域名不是后端域名。前台若是独立静态站、没有 /api 反代，这里再用
+     * 相对路径就等于打到前台自己的 /api 上，全部 404 —— 表现是「主界面一切正常，只有
+     * Telegram 相关的功能全打不开」：绑定弹窗、强制绑定轮询、Telegram 验证码找回密码一起
+     * 失效。主题自己从 EZ_CONFIG 读到了正确地址，widget 也必须读同一个。
+     *
+     * 取不到时（例如后端同域渲染的页面、老主题没有这段配置）返回空串，退回相对路径，
+     * 行为与改动前逐字一致。
+     */
+    function apiBase() {
+        try {
+            var apiConfig = window.EZ_CONFIG && window.EZ_CONFIG.API_CONFIG;
+            if (!apiConfig || apiConfig.urlMode !== 'static') return '';
+            var base = apiConfig.staticBaseUrl;
+            if (Array.isArray(base)) base = base.length ? base[0] : '';
+            base = String(base == null ? '' : base).trim();
+            return base ? base.replace(/\/+$/, '') : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
     function request(path, options) {
         options = options || {};
         var headers = { Accept: 'application/json' };
@@ -50,7 +74,7 @@
             headers['Content-Type'] = 'application/json';
             body = JSON.stringify(options.body);
         }
-        return fetch(path, {
+        return fetch(apiBase() + path, {
             method: options.method || 'GET',
             headers: headers,
             body: body
