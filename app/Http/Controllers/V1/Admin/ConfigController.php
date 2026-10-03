@@ -64,16 +64,23 @@ class ConfigController extends Controller
     {
         $token = trim((string)$request->input('telegram_bot_token', config('v2board.telegram_bot_token')));
         $secretToken = bin2hex(random_bytes(32));
-        // 前后分离部署时，后台域名与前台域名往往不是同一个，而 secure_url() 用的是「当前请求的
-        // host」—— 从哪个域名点「一键设置」就会把 webhook 注册到哪个域名。曾经出现过 webhook
-        // 被注册到后台域名、之后那个域名只对内开放，机器人整条链路悄无声息地死掉的情况
-        // （投递失败但 Telegram 侧 pending 为 0、无 last_error_message，极难定位）。
-        // 这里改为优先用后台设置里的「网站地址」(app_url)：只要它指向的域名下 /api 能到后端即可。
-        // 没配 app_url 时才回退到原来的行为，保持向后兼容。
-        $appUrl = trim((string)config('v2board.app_url', ''));
-        $hookUrl = $appUrl !== ''
-            ? rtrim($appUrl, '/') . '/api/v1/guest/telegram/webhook'
-            : secure_url('/api/v1/guest/telegram/webhook');
+        // 注册到「当前请求的域名」，也就是管理员此刻打开后台用的那个域名 —— 上游 v2board 的
+        // 原始行为（backup / master / release 三个分支都是这一行）。
+        //
+        // 这个域名从哪个来、要不要改成固定值，为它来回翻过两次，结论记在这里：
+        //
+        // 前台域名与后端域名指向同一个 vhost（同一个 root、同一套 webman）时，注册到其中
+        // 任何一个功能上等价，都能收到投递。那次真正的故障是配置缓存里的 webhook secret
+        // 落后一代导致的全量 401（见本方法结尾），跟域名无关 —— 别再把「机器人不回话」
+        // 往域名上归因。
+        //
+        // 唯一的实际约束：这个按钮必须在「对外可达、且 /api 能落到后端」的域名下点。若后台
+        // 域名只对内开放，从它注册上去才会真的静默失效。
+        //
+        // 若哪天要求 webhook 必须固定落在某个域名（不随点击位置变），把这一行换成
+        // `rtrim(config('v2board.app_url'), '/') . '/api/v1/guest/telegram/webhook'` 即可。
+        // 注意：那样一旦 app_url 指向的不是后端域名，就会重演「注册到一个到不了后端的域名」。
+        $hookUrl = secure_url('/api/v1/guest/telegram/webhook');
         $telegramService = new TelegramService($token);
         $telegramService->getMe();
         $telegramService->setWebhook($hookUrl, ['secret_token' => $secretToken]);
@@ -84,8 +91,38 @@ class ConfigController extends Controller
         // 却是旧 token（甚至为空）—— 表现就是「刷新后 token 变空、机器人不生效」。
         $config['telegram_bot_token'] = $token;
         $config['telegram_webhook_secret'] = $secretToken;
-        if (!\Illuminate\Support\Facades\File::put(base_path() . '/config/v2board.php', "<?php\n return " . var_export($config, true) . " ;", LOCK_EX)) {
+
+        // 写盘手法与 ConfigController::save / SubscribeCleanGatewayController::saveConfig 一致：
+        // 临时文件 + 原子 rename。直接覆写有写到一半留下语法错误文件的风险，那会把整站打死。
+        $path = base_path() . '/config/v2board.php';
+        $tempPath = $path . '.tmp.' . bin2hex(random_bytes(8));
+        if (!File::put($tempPath, "<?php\n return " . var_export($config, true) . " ;", LOCK_EX)) {
             abort(500, '保存Webhook密钥失败');
+        }
+        @chmod($tempPath, 0644);
+        if (!@rename($tempPath, $path)) {
+            @unlink($tempPath);
+            abort(500, '保存Webhook密钥失败');
+        }
+        if (function_exists('opcache_invalidate')) {
+            @opcache_invalidate($path, true);
+        }
+        Artisan::call('config:cache');
+
+        // 下面这段不能省，删了就是线上事故：webman 是常驻进程，config() 取的是启动快照。
+        // 把新 secret 写进 config/v2board.php 并重建 bootstrap/cache/config.php 之后，**已经
+        // 在服务的 worker 仍然拿着旧 secret**（TrafficRewardService::reloadWebman 的注释里
+        // 写过同一件事）。于是 Telegram 用 setWebhook 时登记的新 secret 投递、worker 用旧
+        // secret 比对 —— 每一条更新都 401，而 setWebhook 返回成功、getWebhookInfo 也只给一句
+        // "Wrong response from the webhook: 401 Unauthorized"，看上去像域名/网络问题，极难定位。
+        // 2026-10-03 的事故就是这里：配置缓存里的 secret 比文件里落后一代，投递连续 401、
+        // 积压 11 条，而 webhook 地址本身完全可达。
+        if (Cache::has('WEBMANPID')) {
+            $pid = Cache::get('WEBMANPID');
+            Cache::forget('WEBMANPID');
+            return response([
+                'data' => posix_kill($pid, 15)
+            ]);
         }
         return response([
             'data' => true
