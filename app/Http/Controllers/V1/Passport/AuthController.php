@@ -15,6 +15,24 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use ReCaptcha\ReCaptcha;
 
+/**
+ * 登录 / 注册 / 找回密码 / 二步验证的入口。
+ *
+ * 失败响应的状态码按语义定档。上游 v2board 对这些一律 abort(500)，那会把「用户输错密码」
+ * 和「服务端炸了」混成同一件事：监控里全是 500，前端也无法区分该提示什么。约定如下：
+ *
+ *   400  请求本身不合法（比如参数传成了数组）
+ *   401  凭据或一次性令牌不对/已过期 —— 登录密码、免密登录 token、二步验证 challenge
+ *   403  账号被封、权限不足、功能关闭（停注册、要求管理员）
+ *   404  目标资源不存在（邮箱未注册）
+ *   409  请求与账号当前状态冲突（例如该账号没绑 Telegram，走不了这条路）
+ *   422  提交的值没通过校验（邮箱格式、验证码格式或对不上、密码长度）
+ *   429  频率限制（密码错误次数、找回次数、注册次数）
+ *   500  只有真正的服务端故障才留 500（整个文件仅剩 Reset failed 一处）
+ *
+ * 前端据此判断「会话失效」时必须排除 /passport/* —— 这里本来就是未登录入口区，
+ * 401 只代表「这次没通过」，不代表会话没了。详见 scripts/patch-signature-auth-logout.js。
+ */
 class AuthController extends Controller
 {
     public function login(AuthLogin $request)
@@ -130,7 +148,7 @@ class AuthController extends Controller
         $service = new TwoFactorService();
         $setupToken = $request->input('setup_token');
         $challenge = $service->getChallenge($setupToken, 'setup');
-        if (!$challenge || empty($challenge['user_id'])) abort(500, '二步验证设置请求已过期，请重新登录');
+        if (!$challenge || empty($challenge['user_id'])) abort(401, '二步验证设置请求已过期，请重新登录');
         $user = User::find($challenge['user_id']);
         if (!$user || !($user->is_admin || $user->is_staff) || !$service->requiresSetup($user)) abort(403, '无权执行二步验证设置');
         $data = $service->beginSetup($user);
@@ -143,7 +161,7 @@ class AuthController extends Controller
         $service = new TwoFactorService();
         $setupToken = $request->input('setup_token');
         $challenge = $service->getChallenge($setupToken, 'setup');
-        if (!$challenge || empty($challenge['user_id'])) abort(500, '二步验证设置请求已过期，请重新登录');
+        if (!$challenge || empty($challenge['user_id'])) abort(401, '二步验证设置请求已过期，请重新登录');
         $user = User::find($challenge['user_id']);
         if (!$user || !($user->is_admin || $user->is_staff) || !$service->requiresSetup($user)) abort(403, '无权执行二步验证设置');
         $codes = $service->confirmSetup($user, $request->input('code'), $request, $setupToken);
@@ -168,12 +186,13 @@ class AuthController extends Controller
         if ($request->input('verify')) {
             $verify = $request->input('verify');
             if (!is_string($verify)) {
-                abort(500, __('Token error'));
+                // verify 传成数组之类属于请求本身就不合法，不是「凭据不对」
+                abort(400, __('Token error'));
             }
             if (TelegramLoginLinkService::isLoginToken($verify)) {
                 $user = (new TelegramLoginLinkService())->consume($verify);
                 if (!$user) {
-                    abort(500, __('Token error'));
+                    abort(401, __('Token error'));
                 }
                 return $this->quickLoginResponse($user, $request);
             }
@@ -181,14 +200,14 @@ class AuthController extends Controller
             $key =  CacheKey::get('TEMP_TOKEN', $verify);
             $userId = Cache::get($key);
             if (!$userId) {
-                abort(500, __('Token error'));
+                abort(401, __('Token error'));
             }
             $user = User::find($userId);
             if (!$user) {
-                abort(500, __('The user does not exist'));
+                abort(401, __('The user does not exist'));
             }
             if ($user->banned) {
-                abort(500, __('Your account has been suspended'));
+                abort(403, __('Your account has been suspended'));
             }
             Cache::forget($key);
             return $this->quickLoginResponse($user, $request);
@@ -237,37 +256,39 @@ class AuthController extends Controller
         $password = (string)$request->input('password');
 
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            abort(500, __('Email format is incorrect'));
+            abort(422, __('Email format is incorrect'));
         }
         if (!preg_match('/^\d{6}$/', $inputCode)) {
-            abort(500, __('Incorrect verification code'));
+            abort(422, __('Incorrect verification code'));
         }
         if (strlen($password) < 8 || strlen($password) > 64) {
-            abort(500, __('Password must be greater than 8 digits'));
+            abort(422, __('Password must be greater than 8 digits'));
         }
 
         $forgetRequestLimitKey = CacheKey::get('FORGET_REQUEST_LIMIT', $email);
         $forgetRequestLimit    = (int)Cache::get($forgetRequestLimitKey);
         if ($forgetRequestLimit >= 3) {
-            abort(500, __('Reset failed, Please try again later'));
+            abort(429, __('Reset failed, Please try again later'));
         }
 
         $cachedCode = Cache::get(CacheKey::get('TELEGRAM_FORGET_CODE', $email));
         if ($cachedCode === null || $cachedCode === '' || !hash_equals((string)$cachedCode, $inputCode)) {
             Cache::put($forgetRequestLimitKey, $forgetRequestLimit + 1, 300);
-            abort(500, __('Incorrect verification code'));
+            abort(422, __('Incorrect verification code'));
         }
         $user = User::where('email', $email)->first();
         if (!$user) {
-            abort(500, __('This email is not registered in the system'));
+            abort(404, __('This email is not registered in the system'));
         }
         if ((string)($user->telegram_id ?? '') === '') {
-            abort(500, __('This account has not bound Telegram, please use the email verification code'));
+            abort(409, __('This account has not bound Telegram, please use the email verification code'));
         }
         $user->password      = password_hash($password, PASSWORD_DEFAULT);
         $user->password_algo = null;
         $user->password_salt = null;
         if (!$user->save()) {
+            // 这一处刻意保持 500：save() 返回 false 意味着服务端没能落库，是真正的服务端故障，
+            // 不是客户端错误。全文件的 abort(500) 都已按语义改档，只有这里该留。
             abort(500, __('Reset failed'));
         }
         // 与邮箱那条路一致：用户自选密码按策略要重新提醒。
@@ -285,12 +306,12 @@ class AuthController extends Controller
     public function registerByTelegram(Request $request)
     {
         if ((int)config('v2board.stop_register', 0)) {
-            abort(500, __('Registration has closed'));
+            abort(403, __('Registration has closed'));
         }
         if ((int)config('v2board.register_limit_by_ip_enable', 0)) {
             $registerCountByIP = (int)Cache::get(CacheKey::get('REGISTER_IP_RATE_LIMIT', $request->ip()));
             if ($registerCountByIP >= (int)config('v2board.register_limit_count', 3)) {
-                abort(500, __('Register frequently, please try again after :minute minute', [
+                abort(429, __('Register frequently, please try again after :minute minute', [
                     'minute' => config('v2board.register_limit_expire', 60)
                 ]));
             }
