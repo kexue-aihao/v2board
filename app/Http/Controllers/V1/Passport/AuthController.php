@@ -35,7 +35,7 @@ class AuthController extends Controller
         if ((int)config('v2board.password_limit_enable', 1)) {
             $passwordErrorCount = (int)Cache::get(CacheKey::get('PASSWORD_ERROR_LIMIT', $email), 0);
             if ($passwordErrorCount >= (int)config('v2board.password_limit_count', 5)) {
-                abort(500, __('There are too many password errors, please try again after :minute minutes.', [
+                abort(429, __('There are too many password errors, please try again after :minute minutes.', [
                     'minute' => config('v2board.password_limit_expire', 60)
                 ]));
             }
@@ -43,7 +43,11 @@ class AuthController extends Controller
 
         $user = User::where('email', $email)->first();
         if (!$user) {
-            abort(500, __('Incorrect email or password'));
+            // 登录失败是客户端错误，上游用的 abort(500) 既污染监控、也会让前端把它当成
+            // 「服务端炸了」。这里按语义定档：凭据不对 → 401，账号被封 → 403，尝试过频 → 429。
+            // 前端据此判断会话是否失效时必须排除 /passport/* —— 那一片本来就是未登录入口，
+            // 401 只代表「这次没通过」，不代表会话没了，见 signature 产物的响应拦截器。
+            abort(401, __('Incorrect email or password'));
         }
         if (!Helper::multiPasswordVerify(
             $user->password_algo,
@@ -58,11 +62,11 @@ class AuthController extends Controller
                     60 * (int)config('v2board.password_limit_expire', 60)
                 );
             }
-            abort(500, __('Incorrect email or password'));
+            abort(401, __('Incorrect email or password'));
         }
 
         if ($user->banned) {
-            abort(500, __('Your account has been suspended'));
+            abort(403, __('Your account has been suspended'));
         }
         if ($adminOnly && !(bool)$user->is_admin) {
             abort(403, __('Administrator access required'));
