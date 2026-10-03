@@ -28,7 +28,8 @@ class TelegramController extends Controller
     /** 同一个原因 5 分钟内只记一条，避免 Telegram 的重试把日志刷满 */
     private function logWebhookRejection(string $reason): void
     {
-        $throttleKey = CacheKey::get('TELEGRAM_WEBHOOK_REJECT_LOG', md5($reason));
+        // 不能走 CacheKey::get：它按白名单校验，未登记的 key 会抛「key is not in cache key list」
+        $throttleKey = 'telegram_webhook_reject_' . md5($reason);
         if (Cache::has($throttleKey)) {
             return;
         }
