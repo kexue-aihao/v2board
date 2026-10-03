@@ -12,6 +12,7 @@ use App\Services\TelegramShopService;
 use App\Utils\CacheKey;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class TelegramController extends Controller
 {
@@ -24,15 +25,41 @@ class TelegramController extends Controller
         $this->telegramService = new TelegramService();
     }
 
+    /** 同一个原因 5 分钟内只记一条，避免 Telegram 的重试把日志刷满 */
+    private function logWebhookRejection(string $reason): void
+    {
+        $throttleKey = CacheKey::get('TELEGRAM_WEBHOOK_REJECT_LOG', md5($reason));
+        if (Cache::has($throttleKey)) {
+            return;
+        }
+        Cache::put($throttleKey, true, 300);
+        Log::warning('Telegram webhook 请求被拒：' . $reason, ['ip' => request()->ip()]);
+    }
+
     public function webhook(Request $request)
     {
         $secret = config('v2board.telegram_webhook_secret');
         if ($secret !== null && $secret !== '') {
             $headerSecret = (string)$request->header('X-Telegram-Bot-Api-Secret-Token', '');
             if (!hash_equals($secret, $headerSecret)) {
+                // 这里以前是静默 401：Telegram 的投递全是 401，但 setWebhook 当时是成功的、
+                // getWebhookInfo 也不一定报错，排查时没有任何线索。现在把「是没带头还是头不对」
+                // 明确写进日志（5 分钟一条，避免 Telegram 重试刷屏）。
+                $this->logWebhookRejection(
+                    $headerSecret === ''
+                        ? 'webhook 请求没带 X-Telegram-Bot-Api-Secret-Token 头（注册 webhook 时可能没带 secret_token）'
+                        : 'webhook 的 secret 头与配置里的 telegram_webhook_secret 不一致'
+                );
                 abort(401);
             }
         } elseif ($request->input('access_token') !== md5(config('v2board.telegram_bot_token'))) {
+            // 没配置 secret 时才会走到这里：兜底要求 URL 上带 ?access_token=md5(bot_token)，
+            // 而 Telegram 从来不带这个参数 —— 也就是说这条路上 Telegram 的投递必然全 401。
+            // 保留这段是为了兼容自己拼 URL 调用的老集成，但要把原因说清楚。
+            $this->logWebhookRejection(
+                '未配置 telegram_webhook_secret，且请求没带正确的 access_token；'
+                . 'Telegram 官方投递不会带它 —— 请到后台点一次「一键设置 Webhook」写入 secret'
+            );
             abort(401);
         }
         $data = $request->input();
