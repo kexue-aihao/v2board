@@ -64,7 +64,16 @@ class ConfigController extends Controller
     {
         $token = trim((string)$request->input('telegram_bot_token', config('v2board.telegram_bot_token')));
         $secretToken = bin2hex(random_bytes(32));
-        $hookUrl = secure_url('/api/v1/guest/telegram/webhook');
+        // 前后分离部署时，后台域名与前台域名往往不是同一个，而 secure_url() 用的是「当前请求的
+        // host」—— 从哪个域名点「一键设置」就会把 webhook 注册到哪个域名。曾经出现过 webhook
+        // 被注册到后台域名、之后那个域名只对内开放，机器人整条链路悄无声息地死掉的情况
+        // （投递失败但 Telegram 侧 pending 为 0、无 last_error_message，极难定位）。
+        // 这里改为优先用后台设置里的「网站地址」(app_url)：只要它指向的域名下 /api 能到后端即可。
+        // 没配 app_url 时才回退到原来的行为，保持向后兼容。
+        $appUrl = trim((string)config('v2board.app_url', ''));
+        $hookUrl = $appUrl !== ''
+            ? rtrim($appUrl, '/') . '/api/v1/guest/telegram/webhook'
+            : secure_url('/api/v1/guest/telegram/webhook');
         $telegramService = new TelegramService($token);
         $telegramService->getMe();
         $telegramService->setWebhook($hookUrl, ['secret_token' => $secretToken]);
