@@ -246,6 +246,34 @@
         if (codeInput) codeInput.focus();
     }
 
+    /**
+     * 落盘登录态。键名必须和主题自己用的对齐，而主题不同版本用的键不一样：
+     *   signature 产物：读 authorization（其次 auth_data）
+     *   EZ 产物：      读 auth_data，并在登录成功时一并写 is_admin / token
+     * 这里全都写上（值相同，多余的键会被忽略）—— 幂等、无副作用。
+     *
+     * 写错键的后果非常隐蔽：注册接口明明 200 了，刷新后前端仍当未登录，用户被弹回登录页；
+     * 而这个账号的密码是后端随机生成的、谁都不知道，于是他连登录都做不到 —— 表现就是
+     * 「注册完了却进不去，而且不知道密码」。
+     */
+    function persistSession(data) {
+        var pairs = {
+            auth_data: data.auth_data,
+            authorization: data.auth_data
+        };
+        if (data.token) pairs.token = data.token;
+        if (data.is_admin !== undefined && data.is_admin !== null) pairs.is_admin = data.is_admin;
+        for (var key in pairs) {
+            if (!Object.prototype.hasOwnProperty.call(pairs, key)) continue;
+            try {
+                localStorage.setItem(key, pairs[key]);
+            } catch (e) {
+                // 隐私模式等写不进去：仍让他跳转，不把人卡在弹窗里
+            }
+        }
+        try { window.authDataInStorage = data.auth_data; } catch (e) {}
+    }
+
     function submitCode(button) {
         var email = modal.querySelector('[name="email"]').value.trim();
         var code = modal.querySelector('[name="code"]').value.trim();
@@ -254,11 +282,7 @@
         button.disabled = true;
         request(REGISTER_API, { method: 'POST', body: { email: email, code: code } }).then(function (data) {
             if (!data || !data.auth_data) throw new Error('注册失败，请稍后重试');
-            try {
-                localStorage.setItem('authorization', data.auth_data);
-            } catch (e) {
-                // 存不进 localStorage（隐私模式等）时仍给一条可点的跳转，不把用户卡死
-            }
+            persistSession(data);
             showOk('注册成功，正在进入面板…');
             closeModal();
             window.location.hash = '#/dashboard';

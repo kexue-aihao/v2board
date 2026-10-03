@@ -28,9 +28,19 @@
     var observer = null;
     var lastCheck = 0;
 
+    /**
+     * 取登录态。键名随主题版本不同：signature 产物先读 authorization，EZ 产物读 auth_data
+     * （并在登录时另写 is_admin）。只认一个键的后果是请求全部匿名发出——前端看着「已登录」，
+     * 接口却按未登录处理。全部试一遍，谁在用哪个键都无所谓。
+     */
     function authToken() {
         try {
-            return localStorage.getItem('authorization') || '';
+            return localStorage.getItem('authorization')
+                || localStorage.getItem('auth_data')
+                || sessionStorage.getItem('authorization')
+                || sessionStorage.getItem('auth_data')
+                || window.authDataInStorage
+                || '';
         } catch (e) {
             return '';
         }
