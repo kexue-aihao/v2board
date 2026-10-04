@@ -91,6 +91,14 @@ class ManageController extends Controller
         ]);
     }
 
+    public function inspectTlsFields(Request $request)
+    {
+        $params = $this->validateSelection($request, false);
+        return response([
+            'data' => (new ServerBatchOperationService())->inspectTlsFields($params['nodes'])
+        ])->header('Cache-Control', 'no-store, private');
+    }
+
     public function previewTlsFields(Request $request)
     {
         $params = $this->validateTlsFields($request, false);

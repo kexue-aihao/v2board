@@ -52,7 +52,7 @@ class ServerBatchOperationTest extends TestCase
         }
     }
 
-    private function seed(string $type, int $id, string $name, array $attributes = []): void
+    private function seedNode(string $type, int $id, string $name, array $attributes = []): void
     {
         DB::table('v2_server_' . $type)->insert(array_merge([
             'id' => $id,
@@ -62,6 +62,8 @@ class ServerBatchOperationTest extends TestCase
             'show' => 1,
             'sort' => 0,
             'server_name' => $type . '-sni.example',
+            'tls_settings' => json_encode(['server_name' => $type . '-sni.example']),
+            'tlsSettings' => json_encode(['server_name' => $type . '-sni.example']),
             'created_at' => time(),
             'updated_at' => time(),
         ], $attributes));
@@ -69,7 +71,7 @@ class ServerBatchOperationTest extends TestCase
 
     private function seedRealityV2node(): void
     {
-        $this->seed('v2node', 1, 'reality-node', [
+        $this->seedNode('v2node', 1, 'reality-node', [
             'host' => 'v2node.example',
             'protocol' => 'vless',
             'tls' => 2,
@@ -83,15 +85,15 @@ class ServerBatchOperationTest extends TestCase
         ]);
     }
 
-    private function tlsSettings(string $type): array
+    private function tlsSettings(string $type, int $id = 1): array
     {
-        return json_decode((string) DB::table('v2_server_' . $type)->where('id', 1)->value('tls_settings'), true) ?? [];
+        return json_decode((string) DB::table('v2_server_' . $type)->where('id', $id)->value('tls_settings'), true) ?? [];
     }
 
     public function testBatchCopyCreatesHiddenCopiesForEverySelectedType(): void
     {
         foreach (self::TYPES as $type) {
-            $this->seed($type, 1, $type . '-node');
+            $this->seedNode($type, 1, $type . '-node');
         }
         $nodes = array_map(fn ($type) => ['type' => $type, 'id' => 1], self::TYPES);
 
@@ -113,13 +115,13 @@ class ServerBatchOperationTest extends TestCase
     {
         $this->seedRealityV2node();
 
-        $this->postJson($this->url . '/nodes/copy', [
+        $response = $this->postJson($this->url . '/nodes/copy', [
             'nodes' => [['type' => 'v2node', 'id' => 1]],
             'regenerate_reality_keys' => true,
             'confirm' => true,
         ])->assertOk()->assertJsonPath('data.created_count', 1);
 
-        $settings = $this->tlsSettings('v2node');
+        $settings = $this->tlsSettings('v2node', $response->json('data.nodes.0.id'));
         $this->assertNotSame(self::REALITY_PRIVATE_KEY, $settings['private_key']);
         $this->assertNotSame(self::REALITY_PUBLIC_KEY, $settings['public_key']);
         // short_id 的推导规则必须与 V2nodeController::save() 一致，副本不能沿用原值
@@ -152,7 +154,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testBatchCopyLeavesNonRealityNodesUntouchedByTheKeyOption(): void
     {
-        $this->seed('v2node', 1, 'plain-node', [
+        $this->seedNode('v2node', 1, 'plain-node', [
             'protocol' => 'vless',
             'tls' => 1,
             'tls_settings' => json_encode(['server_name' => 'plain-sni.example']),
@@ -176,8 +178,8 @@ class ServerBatchOperationTest extends TestCase
             'short_id' => self::REALITY_SHORT_ID,
         ]);
         // 同样是 REALITY，但一个是 v2node 下的别的协议，一个是独立的 vless 节点类型
-        $this->seed('v2node', 1, 'vmess-reality', ['protocol' => 'vmess', 'tls' => 2, 'tls_settings' => $keys]);
-        $this->seed('vless', 1, 'standalone-vless', ['tls' => 2, 'tls_settings' => $keys]);
+        $this->seedNode('v2node', 1, 'vmess-reality', ['protocol' => 'vmess', 'tls' => 2, 'tls_settings' => $keys]);
+        $this->seedNode('vless', 1, 'standalone-vless', ['tls' => 2, 'tls_settings' => $keys]);
 
         $this->postJson($this->url . '/nodes/copy', [
             'nodes' => [['type' => 'v2node', 'id' => 1], ['type' => 'vless', 'id' => 1]],
@@ -195,7 +197,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testBatchCopyRequiresConfirmationAndRejectsEmptySelection(): void
     {
-        $this->seed('vmess', 1, 'vmess-node');
+        $this->seedNode('vmess', 1, 'vmess-node');
         $this->postJson($this->url . '/nodes/copy', ['nodes' => [['type' => 'vmess', 'id' => 1]]])
             ->assertStatus(422)->assertJsonValidationErrors('confirm');
         $this->assertSame(1, DB::table('v2_server_vmess')->count());
@@ -210,7 +212,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testDuplicatedSelectionProducesASingleCopy(): void
     {
-        $this->seed('vmess', 1, 'vmess-node');
+        $this->seedNode('vmess', 1, 'vmess-node');
         $this->postJson($this->url . '/nodes/copy', [
             'nodes' => [['type' => 'vmess', 'id' => 1], ['type' => 'vmess', 'id' => 1]],
             'confirm' => true,
@@ -220,8 +222,8 @@ class ServerBatchOperationTest extends TestCase
 
     public function testRejectedCopyRollsBackPreviouslyCreatedNodes(): void
     {
-        $this->seed('shadowsocks', 1, 'ss-node');
-        $this->seed('vmess', 1, 'vmess-node');
+        $this->seedNode('shadowsocks', 1, 'ss-node');
+        $this->seedNode('vmess', 1, 'vmess-node');
 
         $dispatcher = \App\Models\ServerVmess::getEventDispatcher();
         \App\Models\ServerVmess::setEventDispatcher(clone $dispatcher);
@@ -239,10 +241,116 @@ class ServerBatchOperationTest extends TestCase
         }
     }
 
+    public function testInspectionReadsAllTypesWithoutWritingOrExposingTlsSecrets(): void
+    {
+        $before = [];
+        foreach (self::TYPES as $type) {
+            $this->seedNode($type, 1, $type . '-node', [
+                'protocol' => 'vless',
+                'tls' => $type === 'v2node' ? 2 : 1,
+                'tlsSettings' => json_encode(['serverName' => 'vmess-sni.example']),
+                'tls_settings' => json_encode([
+                    'server_name' => $type . '-sni.example', 'dest' => 'target.example',
+                    'private_key' => 'SECRET-PRIVATE-KEY', 'tls_key' => 'SECRET-TLS-KEY',
+                    'dns_env' => 'SECRET-DNS-TOKEN',
+                ]),
+            ]);
+            $before[$type] = DB::table('v2_server_' . $type)->get()->toArray();
+        }
+        $selection = array_map(fn ($type) => ['type' => $type, 'id' => 1], self::TYPES);
+        $response = $this->postJson($this->url . '/tls-fields/inspect', [
+            'nodes' => $selection,
+            // 查询接口不能把额外提交的值当作写入请求。
+            'server_name' => 'overwrite.example', 'dest' => 'overwrite.example', 'confirm' => true,
+        ])->assertOk()->assertHeader('Cache-Control', 'no-store, private')->assertJsonPath('data.matched_count', 8);
+
+        foreach ($response->json('data.nodes') as $node) {
+            $type = $node['type'];
+            $this->assertSame($type === 'shadowsocks' ? null : $type . '-sni.example', $node['server_name']);
+            $this->assertSame($type !== 'shadowsocks', $node['server_name_applicable']);
+            $this->assertSame($type === 'v2node', $node['dest_applicable']);
+            $this->assertSame($type === 'v2node' ? 'target.example' : null, $node['dest']);
+            $this->assertSame($type === 'v2node' ? 'vless' : $type, $node['protocol']);
+            $this->assertFalse($node['server_name_conflict']);
+            $this->assertArrayNotHasKey('tls_settings', $node);
+            $this->assertEquals($before[$type], DB::table('v2_server_' . $type)->get()->toArray());
+        }
+        $this->assertStringNotContainsString('SECRET-', $response->getContent());
+        $this->assertSame(0, DB::transactionLevel());
+    }
+
+    public function testInspectionDistinguishesSavedValuesFromTlsAndRealityApplicability(): void
+    {
+        $this->seedNode('vmess', 1, 'tls-disabled', [
+            'tls' => 0, 'tlsSettings' => json_encode(['serverName' => 'saved.example']),
+        ]);
+        $this->seedNode('vless', 1, 'standalone-reality', ['tls' => 2]);
+        $this->seedNode('v2node', 1, 'ordinary-tls', [
+            'tls' => 1, 'protocol' => 'vmess', 'tls_settings' => json_encode(['dest' => 'saved-target.example']),
+        ]);
+        $this->seedNode('v2node', 2, 'reality-empty', ['tls' => 2, 'protocol' => 'vless', 'tls_settings' => null]);
+        $selection = [['type' => 'vmess', 'id' => 1], ['type' => 'vless', 'id' => 1],
+            ['type' => 'v2node', 'id' => 1], ['type' => 'v2node', 'id' => 2]];
+        $response = $this->postJson($this->url . '/tls-fields/inspect', ['nodes' => $selection])->assertOk();
+        $response->assertJsonPath('data.nodes.0.tls_mode', 'none')
+            ->assertJsonPath('data.nodes.0.server_name', 'saved.example')
+            ->assertJsonPath('data.nodes.1.tls_mode', 'reality')
+            ->assertJsonPath('data.nodes.1.dest_applicable', false)
+            ->assertJsonPath('data.nodes.2.tls_mode', 'tls')
+            ->assertJsonPath('data.nodes.2.dest_applicable', false)
+            ->assertJsonPath('data.nodes.3.dest_applicable', true)
+            ->assertJsonPath('data.nodes.3.dest', '')
+            ->assertJsonPath('data.nodes.3.server_name', '');
+    }
+
+    /** @dataProvider vmessInspectionSettings */
+    public function testInspectionSupportsBothVmessSniKeysAndReportsConflicts(array $settings, string $sni, bool $conflict): void
+    {
+        $this->seedNode('vmess', 1, 'vmess-node', ['tls' => 1, 'tlsSettings' => json_encode($settings)]);
+        $response = $this->postJson($this->url . '/tls-fields/inspect', [
+            'nodes' => [['type' => 'vmess', 'id' => 1]],
+        ])->assertOk()->assertJsonPath('data.nodes.0.server_name', $sni)
+            ->assertJsonPath('data.nodes.0.server_name_conflict', $conflict);
+        $this->assertSame($conflict ? $settings : [], $response->json('data.nodes.0.server_name_values'));
+    }
+
+    public static function vmessInspectionSettings(): array
+    {
+        return [
+            'legacy' => [['serverName' => 'legacy.example'], 'legacy.example', false],
+            'batch' => [['server_name' => 'batch.example'], 'batch.example', false],
+            'matching' => [['serverName' => 'same.example', 'server_name' => 'same.example'], 'same.example', false],
+            'conflicting' => [['serverName' => 'legacy.example', 'server_name' => 'batch.example'], 'legacy.example', true],
+            'blank legacy' => [['serverName' => '', 'server_name' => 'batch.example'], 'batch.example', false],
+        ];
+    }
+
+    public function testInspectionRereadsCurrentValuesAndDeduplicatesWithinEachType(): void
+    {
+        $this->seedNode('trojan', 1, 'trojan-node');
+        $params = ['nodes' => [['type' => 'trojan', 'id' => 1], ['type' => 'trojan', 'id' => 1]]];
+        $this->postJson($this->url . '/tls-fields/inspect', $params)->assertOk()
+            ->assertJsonPath('data.matched_count', 1)->assertJsonPath('data.nodes.0.server_name', 'trojan-sni.example');
+        DB::table('v2_server_trojan')->where('id', 1)->update(['server_name' => 'updated.example']);
+        $this->postJson($this->url . '/tls-fields/inspect', $params)->assertOk()
+            ->assertJsonPath('data.nodes.0.server_name', 'updated.example');
+    }
+
+    public function testInspectionValidatesSelectionAndRequiresAdminAuthentication(): void
+    {
+        foreach ([[], [['type' => 'unknown', 'id' => 1]], [['type' => 'vmess', 'id' => 0]],
+            [['type' => 'vmess', 'id' => 999]], array_fill(0, 201, ['type' => 'vmess', 'id' => 1])] as $selection) {
+            $this->postJson($this->url . '/tls-fields/inspect', ['nodes' => $selection])->assertStatus(422);
+        }
+        $this->withMiddleware(Admin::class);
+        $this->postJson($this->url . '/tls-fields/inspect', ['nodes' => [['type' => 'vmess', 'id' => 1]]])
+            ->assertStatus(403);
+    }
+
     public function testPreviewReportsPerTypeStorageWithoutWriting(): void
     {
         foreach (self::TYPES as $type) {
-            $this->seed($type, 1, $type . '-node');
+            $this->seedNode($type, 1, $type . '-node');
         }
         $nodes = array_map(fn ($type) => ['type' => $type, 'id' => 1], self::TYPES);
 
@@ -280,7 +388,7 @@ class ServerBatchOperationTest extends TestCase
     public function testApplyWritesSniIntoTheRightPlaceForEachType(): void
     {
         foreach (self::TYPES as $type) {
-            $this->seed($type, 1, $type . '-node');
+            $this->seedNode($type, 1, $type . '-node');
         }
         $nodes = array_map(fn ($type) => ['type' => $type, 'id' => 1], self::TYPES);
 
@@ -308,7 +416,7 @@ class ServerBatchOperationTest extends TestCase
             if ($type === 'v2node') {
                 continue;
             }
-            $this->seed($type, 1, $type . '-node');
+            $this->seedNode($type, 1, $type . '-node');
         }
         $this->seedRealityV2node();
         $nodes = array_map(fn ($type) => ['type' => $type, 'id' => 1], self::TYPES);
@@ -329,7 +437,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testApplyRejectsEmptyInputAndMissingConfirmation(): void
     {
-        $this->seed('trojan', 1, 'trojan-node');
+        $this->seedNode('trojan', 1, 'trojan-node');
         $payload = ['nodes' => [['type' => 'trojan', 'id' => 1]], 'server_name' => '', 'dest' => ''];
         $this->postJson($this->url . '/tls-fields/apply', $payload + ['confirm' => true])
             ->assertStatus(422)->assertJsonPath('message', '请至少填写 Server Name(SNI) 或 Server Address 中的一项');
@@ -343,7 +451,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testApplyRejectsWhitespaceAndUnknownNodes(): void
     {
-        $this->seed('trojan', 1, 'trojan-node');
+        $this->seedNode('trojan', 1, 'trojan-node');
         $this->postJson($this->url . '/tls-fields/apply', [
             'nodes' => [['type' => 'trojan', 'id' => 1]], 'server_name' => 'bad sni', 'confirm' => true,
         ])->assertStatus(422)->assertJsonValidationErrors('server_name');
@@ -356,8 +464,8 @@ class ServerBatchOperationTest extends TestCase
 
     public function testApplyRollsBackEverythingWhenOneNodeFailsToPersist(): void
     {
-        $this->seed('trojan', 1, 'trojan-node');
-        $this->seed('tuic', 1, 'tuic-node');
+        $this->seedNode('trojan', 1, 'trojan-node');
+        $this->seedNode('tuic', 1, 'tuic-node');
 
         $dispatcher = \App\Models\ServerTuic::getEventDispatcher();
         \App\Models\ServerTuic::setEventDispatcher(clone $dispatcher);
@@ -378,8 +486,8 @@ class ServerBatchOperationTest extends TestCase
 
     public function testUnpersistedSniIsDetectedAndEntireApplyRollsBack(): void
     {
-        $this->seed('trojan', 1, 'trojan-node');
-        $this->seed('tuic', 1, 'tuic-node');
+        $this->seedNode('trojan', 1, 'trojan-node');
+        $this->seedNode('tuic', 1, 'tuic-node');
         DB::statement('CREATE TRIGGER restore_tuic_sni AFTER UPDATE OF server_name ON v2_server_tuic
             BEGIN UPDATE v2_server_tuic SET server_name = OLD.server_name WHERE id = NEW.id; END');
 
@@ -415,7 +523,7 @@ class ServerBatchOperationTest extends TestCase
         $copy = ServerV2node::where('id', '!=', 1)->first();
         $this->assertNotNull($copy);
         // 副本必须能被订阅构建链路直接读出来，键名与 save() 写入的一致
-        $this->assertSame($copy->tls_settings['private_key'], $this->tlsSettings('v2node')['private_key']);
+        $this->assertSame($copy->tls_settings['private_key'], $this->tlsSettings('v2node', (int) $copy->id)['private_key']);
         $this->assertArrayHasKey('public_key', $copy->tls_settings);
         $this->assertArrayHasKey('short_id', $copy->tls_settings);
     }
@@ -424,9 +532,9 @@ class ServerBatchOperationTest extends TestCase
 
     public function testBatchDeleteRemovesOnlyTheSelectionAndReportsChildren(): void
     {
-        $this->seed('v2node', 1, 'parent-node');
-        $this->seed('v2node', 2, 'child-node', ['parent_id' => 1]);
-        $this->seed('vmess', 1, 'vmess-node');
+        $this->seedNode('v2node', 1, 'parent-node');
+        $this->seedNode('v2node', 2, 'child-node', ['parent_id' => 1]);
+        $this->seedNode('vmess', 1, 'vmess-node');
 
         $this->postJson($this->url . '/nodes/delete', [
             'nodes' => [['type' => 'v2node', 'id' => 1]],
@@ -446,7 +554,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testBatchDeleteReportsHiddenNodesAsNotPublished(): void
     {
-        $this->seed('v2node', 1, 'hidden-node', ['show' => 0]);
+        $this->seedNode('v2node', 1, 'hidden-node', ['show' => 0]);
 
         $this->postJson($this->url . '/nodes/delete', [
             'nodes' => [['type' => 'v2node', 'id' => 1]],
@@ -456,7 +564,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testBatchDeleteRequiresConfirmationAndRejectsUnknownNodes(): void
     {
-        $this->seed('trojan', 1, 'trojan-node');
+        $this->seedNode('trojan', 1, 'trojan-node');
 
         $this->postJson($this->url . '/nodes/delete', ['nodes' => [['type' => 'trojan', 'id' => 1]]])
             ->assertStatus(422)->assertJsonValidationErrors('confirm');
@@ -471,8 +579,8 @@ class ServerBatchOperationTest extends TestCase
 
     public function testBatchDeleteRollsBackEverythingWhenOneNodeFailsToDelete(): void
     {
-        $this->seed('v2node', 1, 'v2node-node');
-        $this->seed('trojan', 1, 'trojan-node');
+        $this->seedNode('v2node', 1, 'v2node-node');
+        $this->seedNode('trojan', 1, 'trojan-node');
 
         $dispatcher = \App\Models\ServerTrojan::getEventDispatcher();
         \App\Models\ServerTrojan::setEventDispatcher(clone $dispatcher);
@@ -495,9 +603,9 @@ class ServerBatchOperationTest extends TestCase
 
     public function testProtocolPreviewReportsPerTypeStorageWithoutWriting(): void
     {
-        $this->seed('v2node', 1, 'v2node-node', ['network' => 'tcp']);
-        $this->seed('vmess', 1, 'vmess-node', ['network' => 'tcp']);
-        $this->seed('tuic', 1, 'tuic-node');
+        $this->seedNode('v2node', 1, 'v2node-node', ['network' => 'tcp']);
+        $this->seedNode('vmess', 1, 'vmess-node', ['network' => 'tcp']);
+        $this->seedNode('tuic', 1, 'tuic-node');
 
         $this->postJson($this->url . '/protocol/preview', [
             'nodes' => [
@@ -525,7 +633,7 @@ class ServerBatchOperationTest extends TestCase
     public function testProtocolApplyWritesEachTypeIntoItsOwnColumn(): void
     {
         foreach (['v2node', 'vmess', 'vless', 'trojan', 'tuic'] as $type) {
-            $this->seed($type, 1, $type . '-node');
+            $this->seedNode($type, 1, $type . '-node');
         }
 
         $this->postJson($this->url . '/protocol/apply', [
@@ -564,7 +672,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testProtocolApplyLeavesTheBlankFieldAlone(): void
     {
-        $this->seed('v2node', 1, 'v2node-node', ['network' => 'tcp']);
+        $this->seedNode('v2node', 1, 'v2node-node', ['network' => 'tcp']);
         DB::table('v2_server_v2node')->where('id', 1)->update(['network_settings' => json_encode(['path' => '/old'])]);
 
         $this->postJson($this->url . '/protocol/apply', [
@@ -583,7 +691,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testProtocolApplyAcceptsRawJsonText(): void
     {
-        $this->seed('v2node', 1, 'v2node-node');
+        $this->seedNode('v2node', 1, 'v2node-node');
 
         $this->postJson($this->url . '/protocol/apply', [
             'nodes' => [['type' => 'v2node', 'id' => 1]],
@@ -599,7 +707,7 @@ class ServerBatchOperationTest extends TestCase
 
     public function testProtocolApplyRejectsBlankInputBadJsonAndUnknownNetwork(): void
     {
-        $this->seed('v2node', 1, 'v2node-node');
+        $this->seedNode('v2node', 1, 'v2node-node');
         $base = ['nodes' => [['type' => 'v2node', 'id' => 1]]];
 
         $this->postJson($this->url . '/protocol/apply', $base + ['network' => '', 'network_settings' => '', 'confirm' => true])
@@ -621,8 +729,8 @@ class ServerBatchOperationTest extends TestCase
 
     public function testProtocolApplyRollsBackEverythingWhenOneNodeFailsToPersist(): void
     {
-        $this->seed('v2node', 1, 'v2node-node', ['network' => 'tcp']);
-        $this->seed('vmess', 1, 'vmess-node', ['network' => 'tcp']);
+        $this->seedNode('v2node', 1, 'v2node-node', ['network' => 'tcp']);
+        $this->seedNode('vmess', 1, 'vmess-node', ['network' => 'tcp']);
 
         $dispatcher = \App\Models\ServerVmess::getEventDispatcher();
         \App\Models\ServerVmess::setEventDispatcher(clone $dispatcher);

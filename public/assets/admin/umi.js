@@ -108689,6 +108689,88 @@
                 this.props.dispatch({type: "serverManage/setState", payload: {servers: servers, fetchLoading: !1}});
                 return servers
             }
+            async openBatchTlsInspection() {
+                if (this.batchBusy) return;
+                this.openBatchDialog("inspect");
+                await this.inspectBatchTls()
+            }
+            async inspectBatchTls() {
+                if (this.batchBusy) return;
+                var nodes = this.selectedBatchNodes();
+                this.setState({batchPreview: null, batchError: "", batchResult: ""});
+                if (!nodes.length || nodes.length > 200) {
+                    this.setState({batchError: nodes.length ? "一次最多查看 200 个节点" : "请先在列表中勾选要查看的节点"});
+                    return
+                }
+                var keys = nodes.map(node=>this.batchKey(node)).sort();
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在读取当前配置"});
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/tls-fields/inspect", {nodes: nodes}, !0));
+                    if (!Array.isArray(data.nodes) || data.matched_count !== nodes.length || data.nodes.length !== nodes.length ||
+                        JSON.stringify(data.nodes.map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys) ||
+                        !data.nodes.every(node=>typeof node.name === "string" && typeof node.protocol === "string" &&
+                            ["none", "tls", "reality"].indexOf(node.tls_mode) >= 0 &&
+                            (node.server_name === null || typeof node.server_name === "string") &&
+                            (node.dest === null || typeof node.dest === "string") &&
+                            typeof node.server_name_applicable === "boolean" && typeof node.dest_applicable === "boolean" &&
+                            typeof node.server_name_conflict === "boolean" && (!node.server_name_conflict ||
+                                node.server_name_values && typeof node.server_name_values.serverName === "string" && typeof node.server_name_values.server_name === "string"))) {
+                        throw new Error("查看结果不完整或与所选节点不一致，请重新读取")
+                    }
+                    if (this.state.batchDialog !== "inspect" || JSON.stringify(this.selectedBatchNodes().map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys)) {
+                        throw new Error("节点选择已变更，请重新读取")
+                    }
+                    this.setState({batchPreview: data});
+                } catch (error) {
+                    this.setState({batchError: error.message || "读取失败，请稍后重试"});
+                } finally {
+                    this.batchBusy = !1;
+                    this.setState({batchLoading: !1, batchStage: ""});
+                }
+            }
+            tlsInspectionMode(node) {
+                return node.tls_mode === "reality" ? "REALITY" : node.tls_mode === "tls" ? "TLS" : "未启用 TLS"
+            }
+            tlsInspectionField(node, field) {
+                if (!(field === "dest" ? node.dest_applicable : node.server_name_applicable)) return "不适用";
+                return node[field] || (field === "dest" ? "未填写（默认使用 SNI）" : "未填写")
+            }
+            tlsInspectionConflict(node) {
+                return node.server_name_conflict ? "两项 SNI 配置不一致：serverName = " + node.server_name_values.serverName + "；server_name = " + node.server_name_values.server_name : ""
+            }
+            async copyBatchTlsInspection() {
+                var preview = this.state.batchPreview;
+                if (this.batchBusy || this.state.batchDialog !== "inspect" || !preview) return;
+                var rows = [["节点", "协议", "TLS 模式", "Server Name (SNI)", "Server Address（REALITY 目标地址）"]];
+                preview.nodes.forEach(node=>rows.push([
+                    node.type + " #" + node.id + " " + node.name, node.protocol, this.tlsInspectionMode(node),
+                    this.tlsInspectionField(node, "server_name") + (node.server_name_conflict ? "（" + this.tlsInspectionConflict(node) + "）" : ""),
+                    this.tlsInspectionField(node, "dest")
+                ]));
+                var text = rows.map(row=>row.map(value=>String(value).replace(/[\t\r\n]+/g, " ")).join("\t")).join("\n");
+                try {
+                    if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(text);
+                    } else {
+                        var input = document.createElement("textarea");
+                        input.value = text;
+                        input.readOnly = !0;
+                        input.style.position = "fixed";
+                        input.style.top = "-9999px";
+                        document.body.appendChild(input);
+                        try {
+                            input.select();
+                            if (!document.execCommand("copy")) throw new Error("浏览器未允许复制");
+                        } finally {
+                            document.body.removeChild(input);
+                        }
+                    }
+                    this.setState({batchResult: "已复制 " + preview.matched_count + " 个节点的配置", batchError: ""});
+                } catch (error) {
+                    this.setState({batchError: "复制失败，请在表格中手动复制"});
+                }
+            }
             async runBatchCopy() {
                 // 服务端一旦确认创建，本次对话框会话就不再允许重提：列表核对失败时再点一次
                 // 会照着同一批选中节点重复建出副本，所以这里必须硬拦。
@@ -108959,6 +109041,40 @@
                 var state = this.state, preview = state.batchPreview, busy = state.batchLoading;
                 var el = y.a.createElement;
                 var nodes = this.selectedBatchNodes();
+                if (state.batchDialog === "inspect") {
+                    return el(R["a"], {
+                        title: "查看节点 SNI / Server Address", width: "min(980px, 100vw)", visible: !0,
+                        maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeBatchDialog()
+                    }, el("div", {style: {paddingBottom: 70}},
+                        el("p", null, "查看选中的 " + nodes.length + " 个节点当前保存的配置。未启用 TLS 时，保存的 SNI 不会生效。"),
+                        el("p", null, "Server Address 为 v2node REALITY 的目标地址，留空时默认使用 SNI。"),
+                        state.batchError && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap"}}, state.batchError),
+                        state.batchResult && el("p", {role: "status"}, state.batchResult),
+                        state.batchStage && el("p", {role: "status"}, state.batchStage),
+                        preview && el("div", {style: {maxHeight: "65vh", overflow: "auto", marginTop: 12}},
+                            el("table", {className: "table", style: {wordBreak: "break-all"}},
+                                el("thead", null, el("tr", null,
+                                    el("th", null, "节点"), el("th", null, "协议"), el("th", null, "TLS 模式"),
+                                    el("th", null, "Server Name (SNI)"), el("th", null, "Server Address（REALITY 目标地址）")
+                                )),
+                                el("tbody", null, preview.nodes.map(node=>el("tr", {key: this.batchKey(node)},
+                                    el("td", null, node.type + " #" + node.id + " " + node.name),
+                                    el("td", null, node.protocol),
+                                    el("td", null, this.tlsInspectionMode(node)),
+                                    el("td", null, this.tlsInspectionField(node, "server_name"),
+                                        node.server_name_conflict && el("div", {role: "alert", style: {color: "#c00000", marginTop: 4}}, this.tlsInspectionConflict(node))
+                                    ),
+                                    el("td", null, this.tlsInspectionField(node, "dest"))
+                                )))
+                            )
+                        ),
+                        el("div", {className: "v2board-drawer-action"},
+                            el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
+                            el(l["a"], {loading: busy, disabled: busy || !nodes.length, onClick: ()=>this.inspectBatchTls(), style: {marginRight: 8}}, "刷新"),
+                            el(l["a"], {disabled: busy || !preview, onClick: ()=>this.copyBatchTlsInspection()}, "复制结果")
+                        )
+                    ))
+                }
                 if (state.batchDialog === "copy") {
                     return el(R["a"], {
                         title: "批量复制节点", width: "min(760px, 100vw)", visible: !0,
@@ -109396,7 +109512,14 @@
                     loading: this.state.batchLoading && this.state.batchDialog === "tls",
                     disabled: A || !this.selectedBatchNodes().length,
                     onClick: ()=>this.openBatchDialog("tls")
-                }, "批量填写 SNI/地址"), y.a.createElement(l["a"], {
+                }, "批量填写 SNI/地址"), !Object(L["f"])() && y.a.createElement(l["a"], {
+                    style: {
+                        marginLeft: 8
+                    },
+                    loading: this.state.batchLoading && this.state.batchDialog === "inspect",
+                    disabled: A || !this.selectedBatchNodes().length,
+                    onClick: ()=>this.openBatchTlsInspection()
+                }, "查看 SNI/地址"), y.a.createElement(l["a"], {
                     style: {
                         marginLeft: 8
                     },

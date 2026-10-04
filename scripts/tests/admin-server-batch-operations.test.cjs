@@ -35,8 +35,8 @@ const NODES = [
     { type: 'trojan', id: 7, name: 'trojan-a', show: 1 },
 ];
 
-function harness({ responses = [], servers = NODES, contentType = 'application/json; charset=utf-8' } = {}) {
-    const requests = [], messages = [], actions = [];
+function harness({ responses = [], servers = NODES, contentType = 'application/json; charset=utf-8', mobile = false, clipboardAvailable = true, clipboardError = false } = {}) {
+    const requests = [], messages = [], actions = [], clipboardWrites = [];
     class Component {
         constructor(props) { this.props = props; }
         setState(update, callback) { this.state = Object.assign({}, this.state, update); if (callback) callback(); }
@@ -44,14 +44,16 @@ function harness({ responses = [], servers = NODES, contentType = 'application/j
     const modules = {
         q1tI: { Component, createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
         '/MKj': { c: () => ComponentClass => ComponentClass },
-        yWgo: { e: () => null, c: () => 'test-auth', g: () => {} },
+        yWgo: { e: () => null, c: () => 'test-auth', g: () => {}, f: () => mobile },
         p0pE: Object.assign,
+        jehZ: Object.assign,
         '1l/V': asyncToGenerator,
         '20nU': { a: { serviceHost: '/api/v1' } },
         TeRw: { a: { error: value => messages.push({ kind: 'error', text: value.description }) } },
         Hg0r: { b: async (url, options) => {
             requests.push({ url, options, body: options.body ? JSON.parse(options.body) : undefined });
-            const response = responses.shift();
+            let response = responses.shift();
+            if (typeof response === 'function') response = await response();
             if (response instanceof Error) throw response;
             assert.ok(response, 'unexpected request: ' + url);
             return new Response(JSON.stringify(response.body), { status: response.status || 200, headers: { 'Content-Type': response.contentType || contentType } });
@@ -62,7 +64,15 @@ function harness({ responses = [], servers = NODES, contentType = 'application/j
     requireModule.r = () => {};
     requireModule.d = (target, name, get) => Object.defineProperty(target, name, { get });
     requireModule.n = value => { const getter = () => value; getter.a = value; return getter; };
-    const context = vm.createContext({ window: {
+    let copyInput;
+    const context = vm.createContext({ navigator: { clipboard: clipboardAvailable ? { writeText: async text => {
+        if (clipboardError) throw new Error('clipboard denied');
+        clipboardWrites.push(text);
+    } } : undefined }, document: {
+        createElement: () => ({ style: {}, select() {} }),
+        body: { appendChild: input => { copyInput = input; }, removeChild: () => { copyInput = undefined; } },
+        execCommand: command => { assert.equal(command, 'copy'); clipboardWrites.push(copyInput.value); return true; },
+    }, window: {
         settings: { secure_path: 'test-admin' }, location: { origin: '', pathname: '' },
         prompt: () => assert.fail('native prompts must not be used'),
         confirm: () => assert.fail('confirmation must use the explicit panel button'),
@@ -75,8 +85,9 @@ function harness({ responses = [], servers = NODES, contentType = 'application/j
     const component = new exports.default({
         dispatch: action => actions.push(action),
         serverManage: { servers, fetchLoading: false, sortMode: false },
+        serverGroup: { groups: [] },
     });
-    return { component, requests, messages, actions, servers };
+    return { component, requests, messages, actions, servers, clipboardWrites };
 }
 
 function seeded(options, keys = ['v2node:1', 'vmess:1']) {
@@ -472,4 +483,166 @@ test('the protocol dialog marks types without those columns as 不适用', () =>
     assert.match(text, /tuic #9/);
     assert.match(text, /没有这两列/);
     assert.equal(h.requests.length, 0);
+});
+
+const tlsInspection = (overrides = {}) => ({ body: { data: Object.assign({
+    matched_count: 2,
+    nodes: [
+        { type: 'v2node', id: 1, name: 'reality-a', protocol: 'vless', tls_mode: 'reality', server_name: 'sni.example', dest: 'target.example', server_name_applicable: true, dest_applicable: true, server_name_conflict: false, server_name_values: [] },
+        { type: 'vmess', id: 1, name: 'vmess-a', protocol: 'vmess', tls_mode: 'none', server_name: '', dest: null, server_name_applicable: true, dest_applicable: false, server_name_conflict: false, server_name_values: [] },
+    ],
+}, overrides) } });
+
+function elements(tree) {
+    if (!tree || typeof tree !== 'object') return [];
+    if (Array.isArray(tree)) return tree.flatMap(elements);
+    return [tree, ...elements(tree.children)];
+}
+
+test('the inspection button is desktop only and needs a selection outside sort mode', () => {
+    const h = seeded({});
+    const button = () => elements(h.component.render()).find(element => flatten(element.children) === '查看 SNI/地址');
+    assert.equal(button().props.disabled, false);
+    h.component.props.serverManage.sortMode = true;
+    assert.equal(button().props.disabled, true);
+    h.component.props.serverManage.sortMode = false;
+    h.component.changeBatchSelection([]);
+    assert.equal(button().props.disabled, true);
+    const mobile = seeded({ mobile: true });
+    assert.doesNotMatch(flatten(mobile.component.render()), /查看 SNI\/地址/);
+    assert.equal(h.requests.length, 0);
+});
+
+test('opening inspection reads immediately and sends only the selected node identities', async () => {
+    const h = seeded({ responses: [tlsInspection()] });
+    await h.component.openBatchTlsInspection();
+    assert.equal(h.component.state.batchDialog, 'inspect');
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.requests[0].url, '/api/v1/test-admin/server/manage/tls-fields/inspect');
+    assert.equal(h.requests[0].options.headers.authorization, 'test-auth');
+    assert.deepEqual(h.requests[0].body, { nodes: [
+        { type: 'v2node', id: 1, name: 'reality-a' }, { type: 'vmess', id: 1, name: 'vmess-a' },
+    ] });
+    assert.equal(h.component.state.batchPreview.matched_count, 2);
+    assert.equal(h.actions.length, 0);
+    h.component.closeBatchDialog();
+    assert.equal(h.component.state.batchPreview, null);
+    assert.equal(h.requests.length, 1);
+});
+
+test('inspection refresh rereads saved values instead of reusing the node list', async () => {
+    const updated = tlsInspection();
+    updated.body.data.nodes[0].server_name = 'changed.example';
+    const h = seeded({ responses: [tlsInspection(), updated] });
+    await h.component.openBatchTlsInspection();
+    assert.equal(h.component.state.batchPreview.nodes[0].server_name, 'sni.example');
+    await h.component.inspectBatchTls();
+    assert.equal(h.component.state.batchPreview.nodes[0].server_name, 'changed.example');
+    assert.equal(h.requests.length, 2);
+    assert.ok(h.requests.every(request => request.url.endsWith('/tls-fields/inspect')));
+});
+
+test('inspection renders empty, inactive and inapplicable fields and both conflicting SNI values', async () => {
+    const response = tlsInspection();
+    Object.assign(response.body.data.nodes[1], {
+        server_name: 'legacy.example', server_name_conflict: true,
+        server_name_values: { serverName: 'legacy.example', server_name: 'batch.example' },
+    });
+    const h = seeded({ responses: [response] });
+    await h.component.openBatchTlsInspection();
+    const tree = h.component.renderBatchOperations();
+    const text = flatten(tree);
+    assert.match(text, /未启用 TLS/);
+    assert.match(text, /不适用/);
+    assert.match(text, /两项 SNI 配置不一致/);
+    assert.match(text, /legacy\.example/);
+    assert.match(text, /batch\.example/);
+    assert.match(text, /target\.example/);
+    assert.doesNotMatch(text, /确认应用|新 SNI|新 Server Address/);
+    assert.equal(elements(tree).filter(element => element.type === 'table').length, 1);
+    assert.equal(elements(tree).filter(element => element.type === 'tr').length, 3);
+    assert.equal(h.component.tlsInspectionField({ server_name_applicable: true, server_name: '' }, 'server_name'), '未填写');
+    assert.equal(h.component.tlsInspectionField({ dest_applicable: true, dest: '' }, 'dest'), '未填写（默认使用 SNI）');
+});
+
+test('inspection rejects missing and oversized selections before requesting', async () => {
+    const h = harness();
+    await h.component.openBatchTlsInspection();
+    assert.match(h.component.state.batchError, /勾选/);
+    assert.equal(h.requests.length, 0);
+    const servers = Array.from({ length: 201 }, (_, index) => ({ type: 'vmess', id: index + 1, name: 'node' }));
+    const oversized = seeded({ servers }, servers.map(node => 'vmess:' + node.id));
+    await oversized.component.openBatchTlsInspection();
+    assert.match(oversized.component.state.batchError, /最多查看 200/);
+    assert.equal(oversized.requests.length, 0);
+});
+
+test('inspection double clicks issue one query and keep closing disabled while loading', async () => {
+    let finish;
+    const h = seeded({ responses: [() => new Promise(resolve => { finish = resolve; })] });
+    const first = h.component.openBatchTlsInspection();
+    await h.component.openBatchTlsInspection();
+    h.component.closeBatchDialog();
+    assert.equal(h.component.state.batchDialog, 'inspect');
+    assert.equal(h.component.renderBatchOperations().props.closable, false);
+    assert.equal(h.requests.length, 1);
+    finish(tlsInspection());
+    await first;
+    assert.equal(h.component.state.batchLoading, false);
+});
+
+test('selection changes during a query cannot resurrect the previous inspection', async () => {
+    let finish;
+    const h = seeded({ responses: [() => new Promise(resolve => { finish = resolve; })] });
+    const reading = h.component.openBatchTlsInspection();
+    h.component.changeBatchSelection(['vmess:1']);
+    finish(tlsInspection());
+    await reading;
+    assert.equal(h.component.state.batchPreview, null);
+    assert.match(h.component.state.batchError, /选择已变更/);
+});
+
+test('failed or mismatched refreshes clear old results and allow retrying the read', async () => {
+    const duplicate = tlsInspection();
+    duplicate.body.data.nodes[1] = duplicate.body.data.nodes[0];
+    for (const failure of [new Error('offline'), { status: 422, body: { message: '节点不存在' } },
+        tlsInspection({ matched_count: 1 }), duplicate, { body: { data: { matched_count: 2, nodes: [{}, {}] } } }]) {
+        const h = seeded({ responses: [tlsInspection(), failure, tlsInspection()] });
+        await h.component.openBatchTlsInspection();
+        await h.component.inspectBatchTls();
+        assert.equal(h.component.state.batchPreview, null);
+        assert.ok(h.component.state.batchError);
+        assert.equal(h.component.state.batchLoading, false);
+        await h.component.inspectBatchTls();
+        assert.equal(h.component.state.batchPreview.matched_count, 2);
+        assert.equal(h.component.state.batchError, '');
+    }
+});
+
+test('inspection copies a tabular result through either clipboard path without write requests', async () => {
+    for (const clipboardAvailable of [true, false]) {
+        const response = tlsInspection();
+        response.body.data.nodes[0].name = 'name\nwith\ttabs';
+        Object.assign(response.body.data.nodes[1], { server_name: 'legacy.example', server_name_conflict: true,
+            server_name_values: { serverName: 'legacy.example', server_name: 'batch.example' } });
+        const h = seeded({ responses: [response], clipboardAvailable });
+        await h.component.openBatchTlsInspection();
+        await h.component.copyBatchTlsInspection();
+        assert.equal(h.clipboardWrites.length, 1);
+        const lines = h.clipboardWrites[0].split('\n');
+        assert.equal(lines.length, 3);
+        assert.ok(lines.every(line => line.split('\t').length === 5));
+        assert.match(h.clipboardWrites[0], /legacy\.example.*batch\.example/);
+        assert.match(h.component.state.batchResult, /已复制 2/);
+        assert.equal(h.requests.length, 1);
+    }
+});
+
+test('clipboard denial keeps inspected values visible and reports the failure', async () => {
+    const h = seeded({ responses: [tlsInspection()], clipboardError: true });
+    await h.component.openBatchTlsInspection();
+    await h.component.copyBatchTlsInspection();
+    assert.equal(h.component.state.batchPreview.matched_count, 2);
+    assert.match(h.component.state.batchError, /复制失败/);
+    assert.equal(h.component.state.batchResult, '');
 });

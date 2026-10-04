@@ -126,6 +126,55 @@ class ServerBatchOperationService
         });
     }
 
+    /** 查看选中节点当前保存的 TLS 字段，只返回展示所需的字段。 */
+    public function inspectTlsFields(array $selection): array
+    {
+        $nodes = [];
+        foreach ($this->load($selection) as $entry) {
+            $type = $entry['type'];
+            $server = $entry['server'];
+            $serverName = $this->readField($server, self::SNI_STORAGE[$type]);
+            $sniValues = [];
+            $sniConflict = false;
+            if ($type === 'vmess') {
+                $settings = (array) ($server->tlsSettings ?? []);
+                $legacy = (string) ($settings['serverName'] ?? '');
+                $current = (string) ($settings['server_name'] ?? '');
+                // 单节点表单使用 serverName，批量填写使用 server_name；冲突时保留两项供核对。
+                $serverName = $legacy !== '' ? $legacy : $current;
+                $sniConflict = $legacy !== '' && $current !== '' && $legacy !== $current;
+                if ($sniConflict) {
+                    $sniValues = ['serverName' => $legacy, 'server_name' => $current];
+                }
+            }
+
+            $tlsMode = 'tls';
+            if ($type === 'shadowsocks') {
+                $tlsMode = 'none';
+            } elseif ($type === 'vmess') {
+                $tlsMode = (int) $server->tls ? 'tls' : 'none';
+            } elseif ($type === 'vless' || $type === 'v2node') {
+                $tlsMode = [0 => 'none', 1 => 'tls', 2 => 'reality'][(int) $server->tls] ?? 'none';
+            }
+
+            $nodes[] = [
+                'id' => (int) $server->id,
+                'type' => $type,
+                'name' => (string) $server->name,
+                'protocol' => $type === 'v2node' ? (string) $server->protocol : $type,
+                'tls_mode' => $tlsMode,
+                'server_name' => $serverName,
+                'server_name_applicable' => self::SNI_STORAGE[$type] !== null,
+                'server_name_conflict' => $sniConflict,
+                'server_name_values' => $sniValues,
+                'dest' => $type === 'v2node' ? $this->readField($server, self::DEST_STORAGE) : null,
+                'dest_applicable' => $type === 'v2node' && $tlsMode === 'reality',
+            ];
+        }
+
+        return ['matched_count' => count($nodes), 'nodes' => $nodes];
+    }
+
     /**
      * 批量填写 Server Name(SNI) / Server Address 的预演：只读，不落库。
      *
