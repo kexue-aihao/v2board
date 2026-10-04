@@ -108462,6 +108462,7 @@
                     batchCopyRegenerate: !0,
                     batchServerName: "",
                     batchDest: "",
+                    batchRate: "",
                     batchPreview: null,
                     batchDeleteConfirmed: !1,
                     batchNetwork: "",
@@ -108810,6 +108811,89 @@
                     this.setState({batchLoading: !1, batchStage: ""});
                 }
             }
+            batchRateEquals(value, target) {
+                return (typeof value === "string" || typeof value === "number") && String(value).trim() !== "" &&
+                    Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) === Number(target)
+            }
+            async previewBatchRate() {
+                if (this.batchBusy) return;
+                var nodes = this.selectedBatchNodes(), rate = this.state.batchRate.trim();
+                if (!nodes.length || nodes.length > 200) {
+                    this.setState({batchError: nodes.length ? "一次最多设置 200 个节点" : "请先在列表中勾选要设置倍率的节点", batchPreview: null});
+                    return
+                }
+                if (!/^[0-9]{1,8}(\.[0-9]{1,2})?$/.test(rate) || !Number.isFinite(Number(rate)) || Number(rate) <= 0) {
+                    this.setState({batchError: "倍率须在 0.01～99999999.99 之间，最多两位小数", batchPreview: null});
+                    return
+                }
+                var params = {nodes: nodes, rate: rate}, keys = nodes.map(node=>this.batchKey(node)).sort();
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在预览倍率", batchPreview: null, batchError: "", batchResult: ""});
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/rate/preview", params, !0));
+                    if (!Array.isArray(data.nodes) || data.matched_count !== nodes.length || data.nodes.length !== nodes.length ||
+                        !this.batchRateEquals(data.rate, rate) || !Number.isInteger(data.changed_count) ||
+                        data.changed_count !== data.nodes.filter(node=>node.changed === !0).length ||
+                        JSON.stringify(data.nodes.map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys) ||
+                        !data.nodes.every(node=>typeof node.name === "string" && typeof node.rate === "string" &&
+                            this.batchRateEquals(node.new_rate, rate) && typeof node.changed === "boolean")) {
+                        throw new Error("倍率预览结果不完整或与所选节点不一致，请重新预览")
+                    }
+                    if (this.state.batchDialog !== "rate" || this.state.batchRate.trim() !== rate ||
+                        JSON.stringify(this.selectedBatchNodes().map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys)) {
+                        throw new Error("倍率或节点选择已变更，请重新预览")
+                    }
+                    this.setState({batchPreview: Object.assign({}, data, {params: params}),
+                        batchResult: data.changed_count ? "" : "所选节点倍率与目标值一致，无需修改"});
+                } catch (error) {
+                    this.setState({batchError: error.message || "倍率预览失败，请稍后重试"});
+                } finally {
+                    this.batchBusy = !1;
+                    this.setState({batchLoading: !1, batchStage: ""});
+                }
+            }
+            async applyBatchRate() {
+                if (this.batchBusy) return;
+                var preview = this.state.batchPreview;
+                if (this.state.batchDialog !== "rate" || !preview || !preview.changed_count) return;
+                var keys = preview.params.nodes.map(node=>this.batchKey(node)).sort(), rate = preview.params.rate;
+                if (!this.batchRateEquals(this.state.batchRate, rate) ||
+                    JSON.stringify(this.selectedBatchNodes().map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys)) {
+                    this.setState({batchError: "倍率或节点选择已变更，请重新预览", batchPreview: null});
+                    return
+                }
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在保存倍率", batchError: "", batchResult: ""});
+                var saved = !1;
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/rate/apply", Object.assign({}, preview.params, {confirm: !0}), !0));
+                    saved = !0;
+                    if (!this.batchRateEquals(data.rate, rate) || data.requested_count !== preview.params.nodes.length ||
+                        data.matched_count !== preview.matched_count || !Number.isInteger(data.updated_count) ||
+                        data.updated_count < 0 || data.updated_count > data.matched_count ||
+                        !Array.isArray(data.nodes) || data.nodes.length !== data.updated_count) {
+                        throw new Error("倍率保存结果不完整，请刷新列表核对")
+                    }
+                    var updatedKeys = data.nodes.map(node=>this.batchKey(node));
+                    if (!data.nodes.every((node, index)=>keys.indexOf(updatedKeys[index]) >= 0 &&
+                        updatedKeys.indexOf(updatedKeys[index]) === index && this.batchRateEquals(node.rate, rate))) {
+                        throw new Error("倍率保存结果与所选节点不一致，请刷新列表核对")
+                    }
+                    this.setState({batchStage: "正在重新读取并核对倍率"});
+                    var servers = await this.refreshBatchNodeList({_batch_rate: Date.now()});
+                    if (!preview.params.nodes.every(node=>servers.some(server=>this.batchKey(server) === this.batchKey(node) && this.batchRateEquals(server.rate, rate)))) {
+                        throw new Error("重新读取的节点倍率与目标值不一致")
+                    }
+                    var result = "已核对 " + data.matched_count + " 个节点均为 " + data.rate + " x，本次更新 " + data.updated_count + " 个节点";
+                    this.setState({batchResult: result});
+                    c["a"].success(result);
+                } catch (error) {
+                    this.setState({batchError: (saved ? "接口已返回保存成功，但倍率核对失败。请刷新列表检查，勿重复提交：" : "倍率保存未确认完成，请核对列表后重新预览：") + (error.message || "网络请求失败")});
+                } finally {
+                    this.batchBusy = !1;
+                    this.setState({batchLoading: !1, batchStage: "", batchPreview: null});
+                }
+            }
             async previewBatchTls() {
                 if (this.batchBusy) return;
                 var nodes = this.selectedBatchNodes();
@@ -109072,6 +109156,40 @@
                             el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
                             el(l["a"], {loading: busy, disabled: busy || !nodes.length, onClick: ()=>this.inspectBatchTls(), style: {marginRight: 8}}, "刷新"),
                             el(l["a"], {disabled: busy || !preview, onClick: ()=>this.copyBatchTlsInspection()}, "复制结果")
+                        )
+                    ))
+                }
+                if (state.batchDialog === "rate") {
+                    return el(R["a"], {
+                        title: "批量设置节点倍率", width: "min(760px, 100vw)", visible: !0,
+                        maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeBatchDialog()
+                    }, el("div", {style: {paddingBottom: 70}},
+                        el("p", null, "为选中的 " + nodes.length + " 个节点设置同一倍率，仅更新勾选的节点。"),
+                        el("div", {className: "form-group"}, el("label", null, "节点基础倍率"), el(s["a"], {
+                            value: state.batchRate, disabled: busy, maxLength: 11, inputMode: "decimal", placeholder: "例如 1.5",
+                            onChange: event=>this.changeBatchField("batchRate", event.target.value)
+                        })),
+                        el("p", null, "输入大于 0 的数值，最多两位小数。最终扣费倍率还会叠加时段倍率和用户动态倍率。"),
+                        state.batchError && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap"}}, state.batchError),
+                        state.batchResult && el("p", {role: "status"}, state.batchResult),
+                        state.batchStage && el("p", {role: "status"}, state.batchStage),
+                        preview && el("div", null,
+                            el("strong", null, "预计改动 " + preview.changed_count + " / " + preview.matched_count + " 个节点，请核对后确认应用"),
+                            el("div", {style: {maxHeight: 320, overflow: "auto", marginTop: 12}},
+                                el("table", {className: "table", style: {wordBreak: "break-all"}},
+                                    el("thead", null, el("tr", null, el("th", null, "协议 / 节点"), el("th", null, "当前倍率"), el("th", null, "目标倍率"))),
+                                    el("tbody", null, preview.nodes.map(node=>el("tr", {key: this.batchKey(node)},
+                                        el("td", null, node.type + " #" + node.id + " " + node.name),
+                                        el("td", null, node.rate + " x"),
+                                        el("td", null, node.new_rate + " x", !node.changed && el("span", null, "（无需修改）"))
+                                    )))
+                                )
+                            )
+                        ),
+                        el("div", {className: "v2board-drawer-action"},
+                            el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
+                            el(l["a"], {loading: busy, onClick: ()=>this.previewBatchRate(), style: {marginRight: 8}}, "预览改动"),
+                            el(l["a"], {type: "primary", disabled: busy || !preview || !preview.changed_count, onClick: ()=>this.applyBatchRate()}, "确认应用")
                         )
                     ))
                 }
@@ -109519,7 +109637,14 @@
                     loading: this.state.batchLoading && this.state.batchDialog === "inspect",
                     disabled: A || !this.selectedBatchNodes().length,
                     onClick: ()=>this.openBatchTlsInspection()
-                }, "查看 SNI/地址"), y.a.createElement(l["a"], {
+                }, "查看 SNI/地址"), !Object(L["f"])() && y.a.createElement(l["a"], {
+                    style: {
+                        marginLeft: 8
+                    },
+                    loading: this.state.batchLoading && this.state.batchDialog === "rate",
+                    disabled: A || !this.selectedBatchNodes().length,
+                    onClick: ()=>this.openBatchDialog("rate")
+                }, "批量设置倍率"), y.a.createElement(l["a"], {
                     style: {
                         marginLeft: 8
                     },

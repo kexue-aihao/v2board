@@ -241,6 +241,140 @@ class ServerBatchOperationTest extends TestCase
         }
     }
 
+    public function testRatePreviewReadsEveryTypeWithoutWritingAndSkipsEquivalentValues(): void
+    {
+        $selection = [];
+        $before = [];
+        foreach (self::TYPES as $type) {
+            $this->seedNode($type, 1, $type . '-node', ['rate' => $type === 'vmess' ? '1.500' : '1', 'show' => 0]);
+            $selection[] = ['type' => $type, 'id' => 1];
+            $before[$type] = DB::table('v2_server_' . $type)->get()->toArray();
+        }
+        $response = $this->postJson($this->url . '/rate/preview', ['nodes' => $selection, 'rate' => '1.5'])
+            ->assertOk()->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.rate', '1.50')->assertJsonPath('data.matched_count', 8)->assertJsonPath('data.changed_count', 7);
+        foreach ($response->json('data.nodes') as $node) {
+            $this->assertSame($node['type'] !== 'vmess', $node['changed']);
+            $this->assertSame('1.50', $node['new_rate']);
+            $this->assertEquals($before[$node['type']], DB::table('v2_server_' . $node['type'])->get()->toArray());
+        }
+    }
+
+    public function testRateApplyChangesOnlySelectedNodesAndPreservesOtherFieldsAndChildren(): void
+    {
+        $selection = [];
+        $before = [];
+        $children = [];
+        foreach (self::TYPES as $type) {
+            $this->seedNode($type, 1, $type . '-node', ['rate' => $type === 'vmess' ? '1.50' : '2']);
+            $this->seedNode($type, 2, $type . '-child', ['rate' => '3', 'parent_id' => 1]);
+            $selection[] = ['type' => $type, 'id' => 1];
+            $before[$type] = (array) DB::table('v2_server_' . $type)->where('id', 1)->first();
+            $children[$type] = (array) DB::table('v2_server_' . $type)->where('id', 2)->first();
+        }
+        $response = $this->postJson($this->url . '/rate/apply', ['nodes' => $selection, 'rate' => '1.5', 'confirm' => true])
+            ->assertOk()->assertJsonPath('data.rate', '1.50')->assertJsonPath('data.matched_count', 8)
+            ->assertJsonPath('data.updated_count', 7);
+        $this->assertCount(7, $response->json('data.nodes'));
+        foreach (self::TYPES as $type) {
+            $after = (array) DB::table('v2_server_' . $type)->where('id', 1)->first();
+            $before[$type]['rate'] = '1.50';
+            unset($before[$type]['updated_at'], $after['updated_at']);
+            $this->assertSame($before[$type], $after);
+            $this->assertSame($children[$type], (array) DB::table('v2_server_' . $type)->where('id', 2)->first());
+        }
+        $this->assertSame(0, DB::transactionLevel());
+    }
+
+    public function testRateApplyDeduplicatesNodesAndDoesNotWriteAlreadyMatchingRates(): void
+    {
+        $this->seedNode('trojan', 1, 'unchanged', ['rate' => '1.500']);
+        DB::statement("CREATE TRIGGER forbid_rate_write BEFORE UPDATE ON v2_server_trojan BEGIN SELECT RAISE(ABORT, 'must skip unchanged'); END");
+        $params = ['nodes' => [['type' => 'trojan', 'id' => 1], ['type' => 'trojan', 'id' => 1]], 'rate' => '1.5', 'confirm' => true];
+        $this->postJson($this->url . '/rate/apply', $params)->assertOk()
+            ->assertJsonPath('data.requested_count', 2)->assertJsonPath('data.matched_count', 1)->assertJsonPath('data.updated_count', 0);
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'rate' => '1.500']);
+    }
+
+    public function testRateAcceptsPositiveDecimalBoundariesAndNormalizesForStorage(): void
+    {
+        $this->seedNode('v2node', 1, 'node');
+        foreach (['0.01', '1', 1.25, '00000001.50', '99999999.99'] as $rate) {
+            $this->postJson($this->url . '/rate/apply', [
+                'nodes' => [['type' => 'v2node', 'id' => 1]], 'rate' => $rate, 'confirm' => true,
+            ])->assertOk()->assertJsonPath('data.rate', number_format((float) $rate, 2, '.', ''));
+            $this->assertDatabaseHas('v2_server_v2node', ['id' => 1, 'rate' => number_format((float) $rate, 2, '.', '')]);
+        }
+    }
+
+    /** @dataProvider invalidBatchRates */
+    public function testInvalidRatesAreRejectedByPreviewAndApply($rate): void
+    {
+        $this->seedNode('vmess', 1, 'node');
+        foreach (['preview', 'apply'] as $action) {
+            $this->postJson($this->url . '/rate/' . $action, [
+                'nodes' => [['type' => 'vmess', 'id' => 1]], 'rate' => $rate, 'confirm' => true,
+            ])->assertStatus(422)->assertJsonValidationErrors('rate');
+        }
+        $this->assertDatabaseHas('v2_server_vmess', ['id' => 1, 'rate' => '1']);
+    }
+
+    public static function invalidBatchRates(): array
+    {
+        return [
+            'empty' => [''], 'null' => [null], 'zero' => [0], 'decimal zero' => ['0.00'],
+            'negative' => [-1], 'too small' => ['0.001'], 'too precise' => ['1.234'],
+            'too large' => ['100000000'], 'scientific' => ['1e2'], 'nan' => ['NaN'],
+            'infinity' => ['Infinity'], 'boolean' => [true], 'array' => [['1']],
+            'signed' => ['+1'], 'trailing dot' => ['1.'],
+        ];
+    }
+
+    public function testRateApplyRequiresConfirmationAndValidSelectionAndAdminAccess(): void
+    {
+        $this->seedNode('trojan', 1, 'node');
+        $params = ['nodes' => [['type' => 'trojan', 'id' => 1]], 'rate' => '2'];
+        $this->postJson($this->url . '/rate/apply', $params)->assertStatus(422)->assertJsonValidationErrors('confirm');
+        $this->postJson($this->url . '/rate/preview', ['nodes' => $params['nodes']])->assertStatus(422)->assertJsonValidationErrors('rate');
+        foreach ([[], [['type' => 'unknown', 'id' => 1]], [['type' => 'trojan', 'id' => 0]],
+            [['type' => 'trojan', 'id' => 404]], array_fill(0, 201, ['type' => 'trojan', 'id' => 1])] as $selection) {
+            foreach (['preview', 'apply'] as $action) {
+                $this->postJson($this->url . '/rate/' . $action, ['nodes' => $selection, 'rate' => '2', 'confirm' => true])->assertStatus(422);
+            }
+        }
+        $this->withMiddleware(Admin::class);
+        foreach (['preview', 'apply'] as $action) {
+            $this->postJson($this->url . '/rate/' . $action, $params + ['confirm' => true])->assertStatus(403);
+        }
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'rate' => '1']);
+    }
+
+    public function testRateSaveFailureRollsBackEarlierNodes(): void
+    {
+        $this->seedNode('trojan', 1, 'first', ['rate' => '1']);
+        $this->seedNode('tuic', 1, 'second', ['rate' => '3']);
+        DB::statement("CREATE TRIGGER fail_rate BEFORE UPDATE OF rate ON v2_server_tuic BEGIN SELECT RAISE(ABORT, 'rate test failure'); END");
+        $this->postJson($this->url . '/rate/apply', [
+            'nodes' => [['type' => 'trojan', 'id' => 1], ['type' => 'tuic', 'id' => 1]], 'rate' => '2', 'confirm' => true,
+        ])->assertStatus(500);
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'rate' => '1']);
+        $this->assertDatabaseHas('v2_server_tuic', ['id' => 1, 'rate' => '3']);
+        $this->assertSame(0, DB::transactionLevel());
+    }
+
+    public function testRatePersistenceMismatchRollsBackTheWholeBatch(): void
+    {
+        $this->seedNode('trojan', 1, 'first', ['rate' => '1']);
+        $this->seedNode('tuic', 1, 'second', ['rate' => '3']);
+        DB::statement('CREATE TRIGGER restore_rate AFTER UPDATE OF rate ON v2_server_tuic
+            BEGIN UPDATE v2_server_tuic SET rate = OLD.rate WHERE id = NEW.id; END');
+        $this->postJson($this->url . '/rate/apply', [
+            'nodes' => [['type' => 'trojan', 'id' => 1], ['type' => 'tuic', 'id' => 1]], 'rate' => '2', 'confirm' => true,
+        ])->assertStatus(500);
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'rate' => '1']);
+        $this->assertDatabaseHas('v2_server_tuic', ['id' => 1, 'rate' => '3']);
+    }
+
     public function testInspectionReadsAllTypesWithoutWritingOrExposingTlsSecrets(): void
     {
         $before = [];

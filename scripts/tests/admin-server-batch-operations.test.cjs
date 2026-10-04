@@ -646,3 +646,203 @@ test('clipboard denial keeps inspected values visible and reports the failure', 
     assert.match(h.component.state.batchError, /复制失败/);
     assert.equal(h.component.state.batchResult, '');
 });
+
+const ratePreview = (overrides = {}) => ({ body: { data: Object.assign({
+    rate: '1.50', matched_count: 2, changed_count: 2,
+    nodes: [
+        { type: 'v2node', id: 1, name: 'reality-a', rate: '1', new_rate: '1.50', changed: true },
+        { type: 'vmess', id: 1, name: 'vmess-a', rate: '2', new_rate: '1.50', changed: true },
+    ],
+}, overrides) } });
+const rateApplied = (overrides = {}) => ({ body: { data: Object.assign({
+    rate: '1.50', requested_count: 2, matched_count: 2, updated_count: 2,
+    nodes: [{ type: 'v2node', id: 1, rate: '1.50' }, { type: 'vmess', id: 1, rate: '1.50' }],
+}, overrides) } });
+const rateListing = (rates = [1.5, '1.50']) => listing(NODES.map((node, index) => Object.assign({}, node, { rate: index < 2 ? rates[index] : '9' })));
+function rateHarness(options, rate = '1.5') {
+    const h = seeded(options);
+    h.component.openBatchDialog('rate');
+    h.component.changeBatchField('batchRate', rate);
+    return h;
+}
+
+test('the batch rate button is desktop only and opening the drawer makes no request', () => {
+    const h = seeded({});
+    const button = () => elements(h.component.render()).find(element => flatten(element.children) === '批量设置倍率');
+    assert.equal(button().props.disabled, false);
+    button().props.onClick();
+    assert.equal(h.component.state.batchDialog, 'rate');
+    assert.match(flatten(h.component.renderBatchOperations()), /节点基础倍率/);
+    assert.match(flatten(h.component.renderBatchOperations()), /时段倍率和用户动态倍率/);
+    assert.equal(h.requests.length, 0);
+    h.component.props.serverManage.sortMode = true;
+    assert.equal(button().props.disabled, true);
+    h.component.props.serverManage.sortMode = false;
+    h.component.changeBatchSelection([]);
+    assert.equal(button().props.disabled, true);
+    const mobile = seeded({ mobile: true });
+    assert.doesNotMatch(flatten(mobile.component.render()), /批量设置倍率/);
+});
+
+test('batch rate previews selected nodes, applies with confirmation, then verifies actual rates', async () => {
+    const h = rateHarness({ responses: [ratePreview(), rateApplied(), rateListing()] });
+    await h.component.previewBatchRate();
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.requests[0].url, '/api/v1/test-admin/server/manage/rate/preview');
+    assert.equal(h.requests[0].options.headers.authorization, 'test-auth');
+    assert.deepEqual(h.requests[0].body, { nodes: [
+        { type: 'v2node', id: 1, name: 'reality-a' }, { type: 'vmess', id: 1, name: 'vmess-a' },
+    ], rate: '1.5' });
+    assert.equal(successful(h), false);
+    const text = flatten(h.component.renderBatchOperations());
+    assert.match(text, /当前倍率/);
+    assert.match(text, /目标倍率/);
+    assert.match(text, /1\.50 x/);
+    await h.component.applyBatchRate();
+    assert.equal(h.requests[1].url, '/api/v1/test-admin/server/manage/rate/apply');
+    assert.deepEqual(h.requests[1].body, Object.assign({}, h.requests[0].body, { confirm: true }));
+    assert.match(h.requests[2].url, /\/getNodes\?_batch_rate=\d+/);
+    assert.equal(h.actions[0].type, 'serverManage/setState');
+    assert.equal(h.actions[0].payload.servers[0].rate, 1.5);
+    assert.match(h.component.state.batchResult, /已核对 2.*1\.50 x.*更新 2/);
+    assert.equal(successful(h), true);
+    assert.equal(h.component.state.batchPreview, null);
+});
+
+test('batch rate rejects empty, nonpositive, nondecimal, excessive and oversized inputs before requesting', async () => {
+    for (const rate of ['', '0', '0.00', '-1', '0.001', '1.234', '100000000', '1e2', 'NaN', 'Infinity', '+1', '1.']) {
+        const h = rateHarness({ responses: [] }, rate);
+        await h.component.previewBatchRate();
+        assert.equal(h.requests.length, 0, rate);
+        assert.match(h.component.state.batchError, /倍率须/);
+    }
+    const h = rateHarness({ responses: [] });
+    h.component.changeBatchSelection([]);
+    await h.component.previewBatchRate();
+    assert.match(h.component.state.batchError, /勾选/);
+    const servers = Array.from({ length: 201 }, (_, index) => ({ type: 'vmess', id: index + 1, name: 'node' }));
+    const oversized = rateHarness({ servers, responses: [] });
+    oversized.component.changeBatchSelection(servers.map(node => 'vmess:' + node.id));
+    await oversized.component.previewBatchRate();
+    assert.equal(oversized.requests.length, 0);
+    assert.match(oversized.component.state.batchError, /最多设置 200/);
+});
+
+test('rate input and selection changes invalidate confirmation', async () => {
+    const h = rateHarness({ responses: [ratePreview(), ratePreview()] });
+    await h.component.previewBatchRate();
+    h.component.changeBatchField('batchRate', '2');
+    await h.component.applyBatchRate();
+    assert.equal(h.requests.length, 1);
+    h.component.changeBatchField('batchRate', '1.5');
+    await h.component.previewBatchRate();
+    h.component.changeBatchSelection(['vmess:1']);
+    await h.component.applyBatchRate();
+    assert.equal(h.requests.length, 2);
+    assert.equal(h.component.state.batchPreview, null);
+});
+
+test('a rate preview with no changes disables confirmation and makes no write request', async () => {
+    const response = ratePreview({ changed_count: 0 });
+    response.body.data.nodes.forEach(node => { node.rate = '1.500'; node.changed = false; });
+    const h = rateHarness({ responses: [response] });
+    await h.component.previewBatchRate();
+    const confirm = elements(h.component.renderBatchOperations()).find(element => flatten(element.children) === '确认应用');
+    assert.equal(confirm.props.disabled, true);
+    assert.match(h.component.state.batchResult, /无需修改/);
+    await h.component.applyBatchRate();
+    assert.equal(h.requests.length, 1);
+    assert.equal(successful(h), false);
+});
+
+test('rate preview and apply double clicks each issue one request', async () => {
+    const h = rateHarness({ responses: [ratePreview(), rateApplied(), rateListing()] });
+    await Promise.all([h.component.previewBatchRate(), h.component.previewBatchRate()]);
+    assert.equal(h.requests.length, 1);
+    await Promise.all([h.component.applyBatchRate(), h.component.applyBatchRate()]);
+    assert.equal(h.requests.length, 3);
+    await h.component.applyBatchRate();
+    assert.equal(h.requests.length, 3);
+});
+
+test('rate selection changes during preview cannot restore an outdated confirmation', async () => {
+    let finish;
+    const h = rateHarness({ responses: [() => new Promise(resolve => { finish = resolve; })] });
+    const reading = h.component.previewBatchRate();
+    h.component.changeBatchSelection(['vmess:1']);
+    finish(ratePreview());
+    await reading;
+    assert.equal(h.component.state.batchPreview, null);
+    assert.match(h.component.state.batchError, /选择已变更/);
+});
+
+test('invalid or mismatched rate previews cannot enable a write', async () => {
+    const duplicate = ratePreview();
+    duplicate.body.data.nodes[1] = duplicate.body.data.nodes[0];
+    const wrongTarget = ratePreview();
+    wrongTarget.body.data.nodes[0].new_rate = '2';
+    for (const response of [duplicate, wrongTarget, ratePreview({ matched_count: 1 }), ratePreview({ changed_count: 1 }), ratePreview({ rate: '2' }), new Error('offline')]) {
+        const h = rateHarness({ responses: [response] });
+        await h.component.previewBatchRate();
+        assert.equal(h.component.state.batchPreview, null);
+        assert.ok(h.component.state.batchError);
+        await h.component.applyBatchRate();
+        assert.equal(h.requests.length, 1);
+        assert.equal(successful(h), false);
+    }
+});
+
+test('failed rate saves clear confirmation and cannot be blindly resubmitted', async () => {
+    for (const response of [new Error('offline'), { status: 500, body: { message: 'save failed' } }]) {
+        const h = rateHarness({ responses: [ratePreview(), response] });
+        await h.component.previewBatchRate();
+        await h.component.applyBatchRate();
+        assert.equal(h.component.state.batchPreview, null);
+        assert.match(h.component.state.batchError, /未确认完成/);
+        assert.equal(successful(h), false);
+        await h.component.applyBatchRate();
+        assert.equal(h.requests.length, 2);
+    }
+});
+
+test('rate verification checks every selected node including nodes the server did not update', async () => {
+    const preview = ratePreview({ changed_count: 1 });
+    preview.body.data.nodes[1].rate = '1.50';
+    preview.body.data.nodes[1].changed = false;
+    const applied = rateApplied({ updated_count: 1, nodes: [{ type: 'v2node', id: 1, rate: '1.50' }] });
+    const h = rateHarness({ responses: [preview, applied, rateListing([1.5, 2])] });
+    await h.component.previewBatchRate();
+    await h.component.applyBatchRate();
+    assert.match(h.component.state.batchError, /倍率核对失败.*勿重复提交/);
+    assert.match(h.component.state.batchError, /与目标值不一致/);
+    assert.equal(successful(h), false);
+    assert.equal(h.component.state.batchPreview, null);
+});
+
+test('a rate save which becomes a no-op still rereads and confirms matching values', async () => {
+    const h = rateHarness({ responses: [ratePreview(), rateApplied({ updated_count: 0, nodes: [] }), rateListing()] });
+    await h.component.previewBatchRate();
+    await h.component.applyBatchRate();
+    assert.equal(h.requests.length, 3);
+    assert.equal(successful(h), true);
+    assert.match(h.component.state.batchResult, /本次更新 0/);
+});
+
+test('invalid saved results and failed rate refreshes never claim success or keep confirmation', async () => {
+    for (const response of [rateApplied({ updated_count: 1, nodes: [{ type: 'trojan', id: 7, rate: '1.50' }] }),
+        rateApplied({ rate: '2' }), rateApplied({ updated_count: 2, nodes: [{ type: 'vmess', id: 1, rate: '1.50' }, { type: 'vmess', id: 1, rate: '1.50' }] })]) {
+        const h = rateHarness({ responses: [ratePreview(), response] });
+        await h.component.previewBatchRate();
+        await h.component.applyBatchRate();
+        assert.equal(successful(h), false);
+        assert.match(h.component.state.batchError, /勿重复提交/);
+        assert.equal(h.component.state.batchPreview, null);
+    }
+    const h = rateHarness({ responses: [ratePreview(), rateApplied(), new Error('offline')] });
+    await h.component.previewBatchRate();
+    await h.component.applyBatchRate();
+    assert.equal(successful(h), false);
+    assert.match(h.component.state.batchError, /倍率核对失败/);
+    await h.component.applyBatchRate();
+    assert.equal(h.requests.length, 3);
+});

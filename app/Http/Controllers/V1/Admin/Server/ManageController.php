@@ -91,6 +91,22 @@ class ManageController extends Controller
         ]);
     }
 
+    public function previewRate(Request $request)
+    {
+        $params = $this->validateRate($request, false);
+        return response([
+            'data' => (new ServerBatchOperationService())->previewRate($params['nodes'], (string) $params['rate'])
+        ])->header('Cache-Control', 'no-store, private');
+    }
+
+    public function applyRate(Request $request)
+    {
+        $params = $this->validateRate($request, true);
+        return response([
+            'data' => (new ServerBatchOperationService())->applyRate($params['nodes'], (string) $params['rate'])
+        ]);
+    }
+
     public function inspectTlsFields(Request $request)
     {
         $params = $this->validateSelection($request, false);
@@ -203,7 +219,7 @@ class ManageController extends Controller
     }
 
     /**
-     * @param array<string, string> $extraRules
+     * @param array<string, string|array> $extraRules
      */
     private function validateSelection(Request $request, bool $requireConfirmation, array $extraRules = []): array
     {
@@ -217,6 +233,13 @@ class ManageController extends Controller
         }
 
         return $request->validate($rules);
+    }
+
+    private function validateRate(Request $request, bool $requireConfirmation): array
+    {
+        return $this->validateSelection($request, $requireConfirmation, [
+            'rate' => ['required', 'numeric', 'gt:0', 'max:99999999.99', 'regex:' . ServerBatchOperationService::RATE_PATTERN],
+        ]);
     }
 
     private function validateTlsFields(Request $request, bool $requireConfirmation): array

@@ -26,6 +26,8 @@ use ParagonIE_Sodium_Compat as SodiumCompat;
 class ServerBatchOperationService
 {
     public const MAX_SELECTION = 200;
+    // 节点 rate 为 varchar(11)，统计倍率为 decimal(10,2)，统一接收普通十进制数。
+    public const RATE_PATTERN = '/\A[0-9]{1,8}(?:\.[0-9]{1,2})?\z/';
 
     private const MODELS = [
         'shadowsocks' => ServerShadowsocks::class,
@@ -124,6 +126,84 @@ class ServerBatchOperationService
                 'nodes' => $created,
             ];
         });
+    }
+
+    /** 预览基础倍率，保留当前保存值供管理员逐节点核对。 */
+    public function previewRate(array $selection, string $rate): array
+    {
+        $rate = $this->normalizeRate($rate);
+        $nodes = [];
+        foreach ($this->load($selection) as $entry) {
+            $server = $entry['server'];
+            $nodes[] = [
+                'id' => (int) $server->id,
+                'type' => $entry['type'],
+                'name' => (string) $server->name,
+                'rate' => (string) $server->rate,
+                'new_rate' => $rate,
+                'changed' => !$this->rateMatches($server->rate, $rate),
+            ];
+        }
+
+        return [
+            'rate' => $rate,
+            'matched_count' => count($nodes),
+            'changed_count' => count(array_filter($nodes, function (array $node) { return $node['changed']; })),
+            'nodes' => $nodes,
+        ];
+    }
+
+    /** 批量更新基础倍率；锁定所选节点，保存后复核，任一失败整批回滚。 */
+    public function applyRate(array $selection, string $rate): array
+    {
+        $rate = $this->normalizeRate($rate);
+        return DB::transaction(function () use ($selection, $rate) {
+            $entries = $this->resolve($selection);
+            $updated = [];
+            foreach ($entries as $entry) {
+                $server = $entry['server'];
+                if ($this->rateMatches($server->rate, $rate)) {
+                    continue;
+                }
+                $oldRate = (string) $server->rate;
+                $server->rate = $rate;
+                if (!$server->save()) {
+                    abort(500, __('节点倍率保存失败，本次操作已回滚'));
+                }
+                $persisted = $server->fresh();
+                if (!$persisted || !$this->rateMatches($persisted->rate, $rate)) {
+                    abort(500, __('节点倍率保存后复核不一致，本次操作已回滚'));
+                }
+                $updated[] = [
+                    'id' => (int) $persisted->id,
+                    'type' => $entry['type'],
+                    'name' => (string) $persisted->name,
+                    'old_rate' => $oldRate,
+                    'rate' => (string) $persisted->rate,
+                ];
+            }
+
+            return [
+                'rate' => $rate,
+                'requested_count' => count($selection),
+                'matched_count' => count($entries),
+                'updated_count' => count($updated),
+                'nodes' => $updated,
+            ];
+        });
+    }
+
+    private function normalizeRate(string $rate): string
+    {
+        if (!preg_match(self::RATE_PATTERN, $rate) || (float) $rate <= 0) {
+            abort(422, __('倍率须在 0.01～99999999.99 之间，最多两位小数'));
+        }
+        return number_format((float) $rate, 2, '.', '');
+    }
+
+    private function rateMatches($current, string $target): bool
+    {
+        return is_numeric($current) && is_finite((float) $current) && (float) $current === (float) $target;
     }
 
     /** 查看选中节点当前保存的 TLS 字段，只返回展示所需的字段。 */
