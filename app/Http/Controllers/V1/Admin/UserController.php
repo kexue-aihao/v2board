@@ -25,6 +25,7 @@ use App\Services\SubscriptionService;
 use App\Services\IpLocationService;
 use App\Services\OnlineDeviceService;
 use App\Services\TelegramService;
+use App\Services\TelegramAdminOperationService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -767,6 +768,8 @@ class UserController extends Controller
         $now = time();
         $hasSubscriptions = Schema::hasTable('v2_subscription');
         $actorId = (int)$request->input('user.id', 0);
+        $actor = $request->input('user');
+        $actor = is_array($actor) ? $actor : [];
 
         if ($action === 'scan') {
             $ids = $this->subscriptionCleanupQuery($now, $hasSubscriptions)
@@ -784,17 +787,10 @@ class UserController extends Controller
                 'id', 'email', 'plan_id', 'expired_at', 'balance', 'commission_balance'
             ]);
             $data = $users->map(function ($user) use ($now) {
-                $empty = $user->plan_id === null;
-                $expired = $user->expired_at !== null && (int)$user->expired_at < $now;
-                return [
-                    'id' => (int)$user->id,
-                    'email' => $user->email,
-                    'expired_at' => $user->expired_at,
-                    'balance' => (int)$user->balance,
-                    'commission_balance' => (int)$user->commission_balance,
-                    'reason' => $empty && $expired ? 'empty_and_expired' : ($empty ? 'empty' : 'expired')
-                ];
+                return $this->subscriptionCleanupUserData($user, $now);
             })->values();
+
+            TelegramAdminOperationService::subscriptionCleanupScanned(count($ids), $actor, $now);
 
             return response([
                 'data' => $data,
@@ -826,49 +822,82 @@ class UserController extends Controller
         }
 
         $deleted = 0;
+        $processed = 0;
+        $deletedUsers = [];
         $cleanupQuery = $this->subscriptionCleanupQuery($snapshot['checked_at'], $hasSubscriptions);
-        foreach ($ids as $id) {
-            $removed = DB::transaction(function () use ($id, $cleanupQuery, $hasSubscriptions) {
-                // 与充值、开通订阅保持相同锁顺序：先用户，再订阅。
-                $user = User::whereKey($id)->lockForUpdate()->first();
-                if (!$user) return false;
-                if ($hasSubscriptions) {
-                    Subscription::where('user_id', $id)->lockForUpdate()->get(['id']);
-                }
-                $eligible = (clone $cleanupQuery)
-                    ->whereKey($id)->lockForUpdate()->first();
-                if (!$eligible) return false;
+        try {
+            foreach ($ids as $id) {
+                $removed = DB::transaction(function () use ($id, $cleanupQuery, $hasSubscriptions, $snapshot) {
+                    // 与充值、开通订阅保持相同锁顺序：先用户，再订阅。
+                    $user = User::whereKey($id)->lockForUpdate()->first();
+                    if (!$user) return null;
+                    if ($hasSubscriptions) {
+                        Subscription::where('user_id', $id)->lockForUpdate()->get(['id']);
+                    }
+                    $eligible = (clone $cleanupQuery)
+                        ->whereKey($id)->lockForUpdate()->first();
+                    if (!$eligible) return null;
+                    $userData = $this->subscriptionCleanupUserData($eligible, $snapshot['checked_at']);
 
-                $authService = new AuthService($user);
-                $authService->removeAllSession();
-                Order::where('user_id', $user->id)->delete();
-                User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
-                InviteCode::where('user_id', $user->id)->delete();
+                    $authService = new AuthService($user);
+                    $authService->removeAllSession();
+                    Order::where('user_id', $user->id)->delete();
+                    User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
+                    InviteCode::where('user_id', $user->id)->delete();
 
-                $tickets = Ticket::where('user_id', $user->id)->get();
-                foreach ($tickets as $ticket) {
-                    TicketMessage::where('ticket_id', $ticket->id)->delete();
+                    $tickets = Ticket::where('user_id', $user->id)->get();
+                    foreach ($tickets as $ticket) {
+                        TicketMessage::where('ticket_id', $ticket->id)->delete();
+                    }
+                    Ticket::where('user_id', $user->id)->delete();
+                    (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
+                    (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
+                    if ($hasSubscriptions) {
+                        Subscription::where('user_id', $user->id)->delete();
+                    }
+                    return $user->delete() ? $userData : null;
+                });
+                $processed++;
+                // 事务提交以后再收集，避免把回滚的账号写进“已删除”通知。
+                if ($removed !== null) {
+                    $deletedUsers[] = $removed;
+                    $deleted++;
                 }
-                Ticket::where('user_id', $user->id)->delete();
-                (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
-                (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
-                if ($hasSubscriptions) {
-                    Subscription::where('user_id', $user->id)->delete();
-                }
-                return $user->delete();
-            });
-            if ($removed) $deleted++;
+            }
+        } catch (\Throwable $exception) {
+            TelegramAdminOperationService::subscriptionCleanupDeleted(
+                $deletedUsers, count($ids), $processed, $actor, $snapshot['checked_at'], true
+            );
+            throw $exception;
         }
         Cache::forget($cacheKey);
 
         info('ADMIN SUBSCRIPTION CLEANUP deleted=' . $deleted
             . ' by=' . (is_array($request->user) ? ($request->user['email'] ?? '-') : '-'));
 
+        TelegramAdminOperationService::subscriptionCleanupDeleted(
+            $deletedUsers, count($ids), $processed, $actor, $snapshot['checked_at']
+        );
+
         return response([
             'data' => [
                 'deleted_count' => $deleted
             ]
         ]);
+    }
+
+    private function subscriptionCleanupUserData(User $user, int $now): array
+    {
+        $empty = $user->plan_id === null;
+        $expired = $user->expired_at !== null && (int)$user->expired_at < $now;
+        return [
+            'id' => (int)$user->id,
+            'email' => $user->email,
+            'expired_at' => $user->expired_at,
+            'balance' => (int)$user->balance,
+            'commission_balance' => (int)$user->commission_balance,
+            'reason' => $empty && $expired ? 'empty_and_expired' : ($empty ? 'empty' : 'expired')
+        ];
     }
 
     private function subscriptionCleanupQuery(int $now, bool $hasSubscriptions)

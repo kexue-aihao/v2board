@@ -6944,7 +6944,7 @@
                 })),
                 f.a.createElement(m, {
                     title: "后台操作通知",
-                    description: "仅通知节点和套餐上架、下架及已上架项目删除，发送到配置的售后群。消息会隐藏节点地址和连接参数。"
+                    description: "通知节点和套餐上架、下架，以及无效账号检测和删除结果，发送到配置的售后群。删除结果以账号列表发送，长列表自动分段；节点地址和连接参数会隐藏。"
                 }, f.a.createElement(l["a"], {
                     checked: parseInt(y.telegram_admin_operation_enable),
                     onChange: e=>this.set("telegram", "telegram_admin_operation_enable", e ? 1 : 0)

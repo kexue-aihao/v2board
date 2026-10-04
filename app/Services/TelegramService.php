@@ -32,7 +32,7 @@ class TelegramService {
         if ($messageThreadId !== null && $messageThreadId > 0) {
             $params['message_thread_id'] = $messageThreadId;
         }
-        return $this->request('sendMessage', $params);
+        return $this->request('sendMessage', $params, 8);
     }
 
     public function answerCallbackQuery(string $callbackQueryId, string $text = '', bool $showAlert = false)
@@ -198,7 +198,12 @@ class TelegramService {
             $curl->setConnectTimeout(min(3, $timeout));
             $curl->setTimeout($timeout);
         }
-        $curl->get($this->api . $method . '?' . http_build_query($params));
+        // 长账号列表不能放在 URL 查询串里，sendMessage 使用 Bot API 支持的 POST。
+        if ($method === 'sendMessage') {
+            $curl->post($this->api . $method, $params);
+        } else {
+            $curl->get($this->api . $method . '?' . http_build_query($params));
+        }
         $response = $curl->response;
         $curl->close();
         if (!isset($response->ok)) abort(500, __('请求失败'));

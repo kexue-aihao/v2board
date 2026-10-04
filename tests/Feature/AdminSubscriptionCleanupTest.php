@@ -3,12 +3,16 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Jobs\SendTelegramAdminOperationJob;
 use App\Services\AuthService;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Queue;
+use Mockery;
 use Tests\TestCase;
 
 class AdminSubscriptionCleanupTest extends TestCase
@@ -21,8 +25,10 @@ class AdminSubscriptionCleanupTest extends TestCase
         config([
             'database.default' => 'sqlite',
             'database.connections.sqlite.database' => ':memory:',
-            'cache.default' => 'array'
+            'cache.default' => 'array',
+            'v2board.telegram_admin_operation_enable' => 0,
         ]);
+        Queue::fake();
         DB::purge('sqlite');
         DB::reconnect('sqlite');
         $this->withoutMiddleware();
@@ -238,6 +244,7 @@ class AdminSubscriptionCleanupTest extends TestCase
 
     public function testThePreviewLimitDoesNotLimitTheCleanupSnapshot(): void
     {
+        $this->enableCleanupNotifications();
         $users = [];
         for ($index = 0; $index < 205; $index++) {
             $users[] = ['email' => 'empty-' . $index . '@example.test'];
@@ -246,10 +253,16 @@ class AdminSubscriptionCleanupTest extends TestCase
         $response = $this->postJson($this->url, ['action' => 'scan'])
             ->assertOk()->assertJsonPath('total', 205)->assertJsonPath('returned', 200);
         $this->assertSame(205, User::count());
+        Queue::fake();
         $this->postJson($this->url, [
             'action' => 'delete', 'confirm' => 1, 'scan_token' => $response->json('scan_token')
         ])->assertOk()->assertJsonPath('data.deleted_count', 205);
         $this->assertSame(0, User::count());
+        $messages = Queue::pushed(SendTelegramAdminOperationJob::class)->map(function ($job) {
+            return $this->notificationText($job);
+        })->implode("\n");
+        $this->assertStringContainsString('empty-204@example.test', $messages);
+        $this->assertStringContainsString('已删除：205', $messages);
     }
 
     public function testOptionalIdsCannotExpandTheSnapshotAndAreValidated(): void
@@ -267,6 +280,128 @@ class AdminSubscriptionCleanupTest extends TestCase
         $this->assertDatabaseMissing('v2_user', ['id' => $first->id]);
         $this->assertDatabaseHas('v2_user', ['id' => $second->id]);
         $this->assertDatabaseHas('v2_user', ['id' => $newUser->id]);
+    }
+
+    public function testScanSendsAGroupSummaryWithoutDeletingAccounts(): void
+    {
+        $this->enableCleanupNotifications();
+        $user = $this->user('expired@example.test', 1, time() - 60);
+        $this->postJson($this->url, ['action' => 'scan', 'user' => ['id' => 99, 'email' => 'admin@example.test']])
+            ->assertOk()->assertJsonPath('total', 1);
+        Queue::assertPushed(SendTelegramAdminOperationJob::class, 1);
+        Queue::assertPushed(SendTelegramAdminOperationJob::class, function ($job) {
+            $text = $this->notificationText($job);
+            return strpos($text, '无效账号检测完成') !== false
+                && strpos($text, '符合条件：1 个账号') !== false
+                && strpos($text, 'admin@example.test') !== false;
+        });
+        $this->assertDatabaseHas('v2_user', ['id' => $user->id]);
+    }
+
+    public function testDeletionReportsOnlyActualDeletedAccounts(): void
+    {
+        $this->enableCleanupNotifications();
+        $deleted = $this->user('deleted@example.test', 1, time() - 60);
+        $protected = $this->user('protected@example.test', null, null);
+        $scanToken = $this->scanToken();
+        $protected->update(['balance' => 1]);
+        Queue::fake();
+        $this->postJson($this->url, ['action' => 'delete', 'confirm' => 1, 'scan_token' => $scanToken])
+            ->assertOk()->assertJsonPath('data.deleted_count', 1);
+        Queue::assertPushed(SendTelegramAdminOperationJob::class, 1);
+        Queue::assertPushed(SendTelegramAdminOperationJob::class, function ($job) {
+            $text = $this->notificationText($job);
+            return strpos($text, 'deleted@example.test') !== false
+                && strpos($text, 'protected@example.test') === false
+                && strpos($text, '已删除：1；跳过：1；未完成：0') !== false;
+        });
+        $this->assertDatabaseMissing('v2_user', ['id' => $deleted->id]);
+        $this->assertDatabaseHas('v2_user', ['id' => $protected->id]);
+    }
+
+    public function testRejectedDeletionDoesNotSendADeletionNotification(): void
+    {
+        $this->enableCleanupNotifications();
+        $user = $this->user('expired@example.test', 1, time() - 60);
+        $scanToken = $this->scanToken();
+        Queue::fake();
+        $this->postJson($this->url, ['action' => 'delete', 'scan_token' => $scanToken])->assertStatus(422);
+        $this->postJson($this->url, ['action' => 'delete', 'confirm' => 1])->assertStatus(422);
+        Queue::assertNothingPushed();
+        $this->assertDatabaseHas('v2_user', ['id' => $user->id]);
+    }
+
+    public function testDeletionNotificationIsQueuedAfterTheTransactionCommits(): void
+    {
+        $this->enableCleanupNotifications();
+        $user = $this->user('expired@example.test', 1, time() - 60);
+        $scanToken = $this->scanToken();
+        $dispatcher = Mockery::mock(Dispatcher::class);
+        $dispatcher->shouldReceive('dispatch')->once()->andReturnUsing(function ($job) use ($user) {
+            $this->assertSame(0, DB::transactionLevel());
+            $this->assertDatabaseMissing('v2_user', ['id' => $user->id]);
+            $this->assertStringContainsString('expired@example.test', $this->notificationText($job));
+        });
+        $this->app->instance(Dispatcher::class, $dispatcher);
+        $this->postJson($this->url, ['action' => 'delete', 'confirm' => 1, 'scan_token' => $scanToken])
+            ->assertOk()->assertJsonPath('data.deleted_count', 1);
+    }
+
+    public function testNotificationQueueFailuresDoNotBreakScanningOrDeletion(): void
+    {
+        $this->enableCleanupNotifications();
+        $user = $this->user('expired@example.test', 1, time() - 60);
+        $dispatcher = Mockery::mock(Dispatcher::class);
+        $dispatcher->shouldReceive('dispatch')->twice()->andThrow(new \RuntimeException('notification queue offline'));
+        $this->app->instance(Dispatcher::class, $dispatcher);
+        $scanToken = $this->scanToken();
+        $this->postJson($this->url, ['action' => 'delete', 'confirm' => 1, 'scan_token' => $scanToken])
+            ->assertOk()->assertJsonPath('data.deleted_count', 1);
+        $this->assertDatabaseMissing('v2_user', ['id' => $user->id]);
+    }
+
+    public function testInterruptedCleanupReportsOnlyCommittedDeletions(): void
+    {
+        $this->enableCleanupNotifications();
+        $first = $this->user('committed@example.test', null, null);
+        $second = $this->user('rolled-back@example.test', null, null);
+        $third = $this->user('unprocessed@example.test', null, null);
+        DB::table('v2_order')->insert(['user_id' => $second->id]);
+        DB::statement('CREATE TRIGGER fail_cleanup BEFORE DELETE ON v2_user WHEN OLD.id = '
+            . (int)$second->id . " BEGIN SELECT RAISE(ABORT, 'cleanup test failure'); END");
+        $scanToken = $this->scanToken();
+        Queue::fake();
+        $this->postJson($this->url, ['action' => 'delete', 'confirm' => 1, 'scan_token' => $scanToken])->assertStatus(500);
+        $this->assertDatabaseMissing('v2_user', ['id' => $first->id]);
+        $this->assertDatabaseHas('v2_user', ['id' => $second->id]);
+        $this->assertDatabaseHas('v2_user', ['id' => $third->id]);
+        $this->assertDatabaseHas('v2_order', ['user_id' => $second->id]);
+        Queue::assertPushed(SendTelegramAdminOperationJob::class, 1);
+        Queue::assertPushed(SendTelegramAdminOperationJob::class, function ($job) {
+            $text = $this->notificationText($job);
+            return strpos($text, '无效账号清理中断') !== false
+                && strpos($text, 'committed@example.test') !== false
+                && strpos($text, 'rolled-back@example.test') === false
+                && strpos($text, 'unprocessed@example.test') === false
+                && strpos($text, '已删除：1；跳过：0；未完成：2') !== false;
+        });
+    }
+
+    private function enableCleanupNotifications(): void
+    {
+        config([
+            'v2board.telegram_admin_operation_enable' => 1,
+            'v2board.telegram_bot_token' => 'test-token',
+            'v2board.telegram_discuss_id' => '-100123456789',
+            'v2board.telegram_admin_operation_topic_id' => 42,
+        ]);
+    }
+
+    private function notificationText(SendTelegramAdminOperationJob $job): string
+    {
+        $reflection = new \ReflectionProperty($job, 'text');
+        $reflection->setAccessible(true);
+        return $reflection->getValue($job);
     }
 
     private function scanToken(): string

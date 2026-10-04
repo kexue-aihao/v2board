@@ -82,6 +82,25 @@ class TelegramAdminOperationServiceTest extends TestCase
         });
     }
 
+    public function testPublishedNodeDeletionKeepsItsNameAndRate(): void
+    {
+        config([
+            'v2board.telegram_admin_operation_enable' => 1,
+            'v2board.telegram_bot_token' => 'test-token',
+            'v2board.telegram_discuss_id' => '-100123456789',
+        ]);
+        Queue::fake();
+        TelegramAdminOperationService::nodeDeleted((object)[
+            'show' => 1, 'name' => '东京 01', 'rate' => 2,
+        ], 'vless');
+        Queue::assertPushed(SendTelegramAdminOperationJob::class, function ($job) {
+            $text = $this->jobValues($job)['text'];
+            return strpos($text, '节点下架') !== false
+                && strpos($text, '东京 01') !== false
+                && strpos($text, '2x') !== false;
+        });
+    }
+
     private function jobValues($job): array
     {
         $values = [];
