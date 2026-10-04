@@ -47,6 +47,8 @@ class AdminRoute
             $router->post('/server/manage/rate/apply', 'V1\\Admin\\Server\\ManageController@applyRate');
             $router->post('/server/manage/server-port/preview', 'V1\\Admin\\Server\\ManageController@previewServerPort');
             $router->post('/server/manage/server-port/apply', 'V1\\Admin\\Server\\ManageController@applyServerPort');
+            $router->post('/server/manage/ports/preview', 'V1\\Admin\\Server\\ManageController@previewPorts');
+            $router->post('/server/manage/ports/apply', 'V1\\Admin\\Server\\ManageController@applyPorts');
             $router->post('/server/manage/tls-fields/inspect', 'V1\\Admin\\Server\\ManageController@inspectTlsFields');
             $router->post('/server/manage/tls-fields/preview', 'V1\\Admin\\Server\\ManageController@previewTlsFields');
             $router->post('/server/manage/tls-fields/apply', 'V1\\Admin\\Server\\ManageController@applyTlsFields');

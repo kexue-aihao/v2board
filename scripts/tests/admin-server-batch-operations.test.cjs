@@ -744,30 +744,30 @@ test('the batch rate button is desktop only and opening the drawer makes no requ
 });
 
 const portPreview = (overrides = {}) => ({ body: { data: Object.assign({
-    server_port: 8443, matched_count: 2, changed_count: 2,
+    mode: 'server_port', server_port: 8443, matched_count: 2, changed_count: 2,
     nodes: [
         { type: 'v2node', id: 1, name: 'reality-a', server_port: 443, new_server_port: 8443, changed: true },
         { type: 'vmess', id: 1, name: 'vmess-a', server_port: 9443, new_server_port: 8443, changed: true },
     ],
 }, overrides) } });
 const portApplied = (overrides = {}) => ({ body: { data: Object.assign({
-    server_port: 8443, requested_count: 2, matched_count: 2, updated_count: 2,
+    mode: 'server_port', server_port: 8443, requested_count: 2, matched_count: 2, updated_count: 2,
     nodes: [{ type: 'v2node', id: 1, server_port: 8443 }, { type: 'vmess', id: 1, server_port: 8443 }],
 }, overrides) } });
 const portListing = (ports = [8443, '8443']) => listing(NODES.map((node, index) => Object.assign({}, node, { server_port: index < 2 ? ports[index] : 443 })));
 function portHarness(options, port = '8443') {
     const h = seeded(options);
-    h.component.openBatchDialog('server-port');
+    h.component.openBatchDialog('ports');
     h.component.changeBatchField('batchServerPort', port);
     return h;
 }
 
 test('batch server port uses the desktop selection and opens without making requests', () => {
     const h = seeded({});
-    const button = () => elements(h.component.render()).find(element => flatten(element.children) === '批量设置服务端口');
+    const button = () => elements(h.component.render()).find(element => flatten(element.children) === '批量设置端口');
     assert.equal(button().props.disabled, false);
     button().props.onClick();
-    assert.equal(h.component.state.batchDialog, 'server-port');
+    assert.equal(h.component.state.batchDialog, 'ports');
     const text = flatten(h.component.renderBatchOperations());
     assert.match(text, /选中的 2 个节点/);
     assert.match(text, /连接端口保持原值/);
@@ -777,27 +777,27 @@ test('batch server port uses the desktop selection and opens without making requ
     h.component.props.serverManage.sortMode = false;
     h.component.changeBatchSelection([]);
     assert.equal(button().props.disabled, true);
-    assert.doesNotMatch(flatten(seeded({ mobile: true }).component.render()), /批量设置服务端口/);
+    assert.doesNotMatch(flatten(seeded({ mobile: true }).component.render()), /批量设置端口/);
 });
 
 test('server port previews saved values, confirms with the snapshot, then rereads selected nodes', async () => {
     const h = portHarness({ responses: [portPreview(), portApplied(), portListing()] });
-    await h.component.previewBatchServerPort();
+    await h.component.previewBatchPorts();
     assert.equal(h.requests.length, 1);
-    assert.equal(h.requests[0].url, '/api/v1/test-admin/server/manage/server-port/preview');
+    assert.equal(h.requests[0].url, '/api/v1/test-admin/server/manage/ports/preview');
     assert.equal(h.requests[0].options.headers.authorization, 'test-auth');
     assert.equal(h.requests[0].options.headers['Content-Type'], 'application/json');
     assert.deepEqual(h.requests[0].body, { nodes: [
         { type: 'v2node', id: 1, name: 'reality-a' }, { type: 'vmess', id: 1, name: 'vmess-a' },
-    ], server_port: 8443 });
+    ], mode: 'server_port', server_port: 8443 });
     assert.equal(successful(h), false);
     assert.match(flatten(h.component.renderBatchOperations()), /当前服务端口目标服务端口.*443.*8443/);
-    await h.component.applyBatchServerPort();
-    assert.equal(h.requests[1].url, '/api/v1/test-admin/server/manage/server-port/apply');
+    await h.component.applyBatchPorts();
+    assert.equal(h.requests[1].url, '/api/v1/test-admin/server/manage/ports/apply');
     assert.deepEqual(h.requests[1].body, { nodes: [
         { type: 'v2node', id: 1, server_port: 443 }, { type: 'vmess', id: 1, server_port: 9443 },
-    ], server_port: 8443, confirm: true });
-    assert.match(h.requests[2].url, /\/getNodes\?_batch_server_port=\d+/);
+    ], mode: 'server_port', server_port: 8443, confirm: true });
+    assert.match(h.requests[2].url, /\/getNodes\?_batch_ports=\d+/);
     assert.equal(h.actions[0].payload.servers[0].server_port, 8443);
     assert.match(h.component.state.batchResult, /已核对 2.*8443.*更新 2/);
     assert.equal(successful(h), true);
@@ -807,19 +807,19 @@ test('server port previews saved values, confirms with the snapshot, then reread
 test('server port validation rejects invalid ports, missing selection and oversized batches before requests', async () => {
     for (const port of ['', '0', '-1', '65536', '1.5', '443.0', '1e2', '+443', '00443', '443-444', '443,444', 'NaN']) {
         const h = portHarness({ responses: [] }, port);
-        await h.component.previewBatchServerPort();
+        await h.component.previewBatchPorts();
         assert.equal(h.requests.length, 0, port);
         assert.match(h.component.state.batchError, /1～65535/);
     }
     const h = portHarness({ responses: [] });
     h.component.changeBatchSelection([]);
-    await h.component.previewBatchServerPort();
+    await h.component.previewBatchPorts();
     assert.equal(h.requests.length, 0);
     assert.match(h.component.state.batchError, /勾选/);
     const servers = Array.from({ length: 201 }, (_, index) => ({ type: 'vmess', id: index + 1, name: 'node' }));
     const oversized = portHarness({ servers, responses: [] });
     oversized.component.changeBatchSelection(servers.map(node => 'vmess:' + node.id));
-    await oversized.component.previewBatchServerPort();
+    await oversized.component.previewBatchPorts();
     assert.equal(oversized.requests.length, 0);
     assert.match(oversized.component.state.batchError, /最多设置 200/);
 });
@@ -829,7 +829,7 @@ test('server port boundaries accept legacy empty values in the preview', async (
         const response = portPreview({ server_port: port });
         response.body.data.nodes.forEach(node => { node.server_port = null; node.new_server_port = port; });
         const h = portHarness({ responses: [response] }, String(port));
-        await h.component.previewBatchServerPort();
+        await h.component.previewBatchPorts();
         assert.equal(h.requests[0].body.server_port, port);
         assert.equal(h.component.state.batchError, '');
         assert.match(flatten(h.component.renderBatchOperations()), /未设置/);
@@ -839,9 +839,9 @@ test('server port boundaries accept legacy empty values in the preview', async (
 test('changing port input or selection invalidates the preview', async () => {
     for (const change of [h => h.component.changeBatchField('batchServerPort', '443'), h => h.component.changeBatchSelection(['vmess:1'])]) {
         const h = portHarness({ responses: [portPreview()] });
-        await h.component.previewBatchServerPort();
+        await h.component.previewBatchPorts();
         change(h);
-        await h.component.applyBatchServerPort();
+        await h.component.applyBatchPorts();
         assert.equal(h.requests.length, 1);
         assert.equal(h.component.state.batchPreview, null);
     }
@@ -850,7 +850,7 @@ test('changing port input or selection invalidates the preview', async () => {
 test('server port changes during preview cannot enable outdated confirmation', async () => {
     let finish;
     const h = portHarness({ responses: [() => new Promise(resolve => { finish = resolve; })] });
-    const reading = h.component.previewBatchServerPort();
+    const reading = h.component.previewBatchPorts();
     h.component.changeBatchSelection(['vmess:1']);
     finish(portPreview());
     await reading;
@@ -862,16 +862,16 @@ test('server port matching values disable confirmation and double clicks never d
     const response = portPreview({ changed_count: 0 });
     response.body.data.nodes.forEach(node => { node.server_port = 8443; node.changed = false; });
     const same = portHarness({ responses: [response] });
-    await same.component.previewBatchServerPort();
+    await same.component.previewBatchPorts();
     const confirm = elements(same.component.renderBatchOperations()).find(element => flatten(element.children) === '确认应用');
     assert.equal(confirm.props.disabled, true);
-    await same.component.applyBatchServerPort();
+    await same.component.applyBatchPorts();
     assert.equal(same.requests.length, 1);
     const h = portHarness({ responses: [portPreview(), portApplied(), portListing()] });
-    await Promise.all([h.component.previewBatchServerPort(), h.component.previewBatchServerPort()]);
+    await Promise.all([h.component.previewBatchPorts(), h.component.previewBatchPorts()]);
     assert.equal(h.requests.length, 1);
-    await Promise.all([h.component.applyBatchServerPort(), h.component.applyBatchServerPort()]);
-    await h.component.applyBatchServerPort();
+    await Promise.all([h.component.applyBatchPorts(), h.component.applyBatchPorts()]);
+    await h.component.applyBatchPorts();
     assert.equal(h.requests.length, 3);
 });
 
@@ -882,8 +882,8 @@ test('invalid port previews cannot enable saving', async () => {
     wrongTarget.body.data.nodes[0].new_server_port = 443;
     for (const response of [duplicate, wrongTarget, portPreview({ matched_count: 1 }), portPreview({ changed_count: 1 }), new Error('offline')]) {
         const h = portHarness({ responses: [response] });
-        await h.component.previewBatchServerPort();
-        await h.component.applyBatchServerPort();
+        await h.component.previewBatchPorts();
+        await h.component.applyBatchPorts();
         assert.equal(h.component.state.batchPreview, null);
         assert.ok(h.component.state.batchError);
         assert.equal(h.requests.length, 1);
@@ -894,9 +894,9 @@ test('failed or conflicting port saves clear confirmation and never claim succes
     for (const response of [new Error('offline'), { status: 409, body: { message: '节点服务端口已变更，请重新预览' } },
         { status: 500, body: { message: 'save failed' } }]) {
         const h = portHarness({ responses: [portPreview(), response] });
-        await h.component.previewBatchServerPort();
-        await h.component.applyBatchServerPort();
-        await h.component.applyBatchServerPort();
+        await h.component.previewBatchPorts();
+        await h.component.applyBatchPorts();
+        await h.component.applyBatchPorts();
         assert.equal(h.component.state.batchPreview, null);
         assert.match(h.component.state.batchError, /未确认完成/);
         assert.equal(successful(h), false);
@@ -910,10 +910,10 @@ test('port saves verify every selected node and do not retry when refresh fails'
         preview.body.data.nodes[1].server_port = 8443;
         preview.body.data.nodes[1].changed = false;
         const h = portHarness({ responses: [preview, portApplied({ updated_count: 1, nodes: [{ type: 'v2node', id: 1, server_port: 8443 }] }), refresh] });
-        await h.component.previewBatchServerPort();
-        await h.component.applyBatchServerPort();
-        await h.component.applyBatchServerPort();
-        assert.match(h.component.state.batchError, /服务端口核对失败.*勿重复提交/);
+        await h.component.previewBatchPorts();
+        await h.component.applyBatchPorts();
+        await h.component.applyBatchPorts();
+        assert.match(h.component.state.batchError, /端口核对失败.*勿重复提交/);
         assert.equal(successful(h), false);
         assert.equal(h.component.state.batchPreview, null);
         assert.equal(h.requests.length, 3);
@@ -924,12 +924,128 @@ test('invalid port save responses never claim success', async () => {
     for (const response of [portApplied({ server_port: 443 }), portApplied({ updated_count: 1, nodes: [{ type: 'trojan', id: 7, server_port: 8443 }] }),
         portApplied({ nodes: [{ type: 'vmess', id: 1, server_port: 8443 }, { type: 'vmess', id: 1, server_port: 8443 }] })]) {
         const h = portHarness({ responses: [portPreview(), response] });
-        await h.component.previewBatchServerPort();
-        await h.component.applyBatchServerPort();
+        await h.component.previewBatchPorts();
+        await h.component.applyBatchPorts();
         assert.match(h.component.state.batchError, /勿重复提交/);
         assert.equal(successful(h), false);
         assert.equal(h.component.state.batchPreview, null);
     }
+});
+
+function multiPortHarness(mode, { connectionPort = '7443', staleConnectionPort = false } = {}) {
+    const preview = portPreview({ mode }), applied = portApplied({ mode });
+    if (mode !== 'server_port') {
+        preview.body.data.port = connectionPort;
+        applied.body.data.port = connectionPort;
+        preview.body.data.nodes.forEach((node, index) => {
+            node.port = index ? '443' : '10000-20000';
+            node.new_port = connectionPort;
+        });
+        applied.body.data.nodes.forEach(node => { node.port = connectionPort; });
+    }
+    if (mode === 'port') {
+        delete preview.body.data.server_port;
+        delete applied.body.data.server_port;
+        preview.body.data.nodes.forEach(node => { delete node.server_port; delete node.new_server_port; });
+        applied.body.data.nodes.forEach(node => { delete node.server_port; });
+    }
+    const servers = NODES.map((node, index) => Object.assign({}, node, {
+        server_port: mode === 'port' ? 9443 : 8443,
+        port: staleConnectionPort ? '443' : (index ? Number(connectionPort) : connectionPort),
+    }));
+    const h = portHarness({ responses: [preview, applied, listing(servers)] });
+    h.component.changeBatchField('batchConnectionPort', connectionPort);
+    h.component.changeBatchField('batchPortMode', mode);
+    return h;
+}
+
+test('one port button exposes three modes with only the relevant inputs', () => {
+    const h = portHarness({});
+    assert.equal(elements(h.component.render()).filter(element => flatten(element.children) === '批量设置端口').length, 1);
+    let tree = elements(h.component.renderBatchOperations());
+    const selector = tree.find(element => element.props.id === 'batch-port-mode');
+    assert.deepEqual(plain(selector.children).map(option => option.props.value), ['server_port', 'port', 'both']);
+    assert.ok(tree.some(element => element.props.id === 'batch-port-server_port'));
+    assert.ok(!tree.some(element => element.props.id === 'batch-port-port'));
+    selector.props.onChange({ target: { value: 'port' } });
+    tree = elements(h.component.renderBatchOperations());
+    assert.ok(!tree.some(element => element.props.id === 'batch-port-server_port'));
+    assert.ok(tree.some(element => element.props.id === 'batch-port-port'));
+    selector.props.onChange({ target: { value: 'both' } });
+    tree = elements(h.component.renderBatchOperations());
+    assert.ok(tree.some(element => element.props.id === 'batch-port-server_port'));
+    assert.ok(tree.some(element => element.props.id === 'batch-port-port'));
+    assert.equal(h.requests.length, 0);
+});
+
+test('connection and both modes send only active targets and preserve full old port ranges in snapshots', async () => {
+    for (const mode of ['port', 'both']) {
+        const h = multiPortHarness(mode);
+        await h.component.previewBatchPorts();
+        assert.equal(h.requests[0].body.mode, mode);
+        assert.equal(h.requests[0].body.port, '7443');
+        assert.equal(h.requests[0].body.server_port, mode === 'both' ? 8443 : undefined);
+        const text = flatten(h.component.renderBatchOperations());
+        assert.match(text, /当前连接端口目标连接端口/);
+        assert.match(text, /10000-20000/);
+        if (mode === 'both') assert.match(text, /当前服务端口目标服务端口/);
+        await h.component.applyBatchPorts();
+        assert.equal(h.requests[1].body.nodes[0].port, '10000-20000');
+        assert.equal(h.requests[1].body.nodes[0].server_port, mode === 'both' ? 443 : undefined);
+        assert.equal(h.requests[1].body.confirm, true);
+        assert.equal(h.requests.length, 3);
+        assert.equal(successful(h), true);
+        assert.match(h.component.state.batchResult, /连接端口 7443/);
+        if (mode === 'both') assert.match(h.component.state.batchResult, /服务端口 8443/);
+    }
+});
+
+test('both ports can be set to the same value and connection-only ignores hidden invalid server input', async () => {
+    const both = multiPortHarness('both', { connectionPort: '8443' });
+    await both.component.previewBatchPorts();
+    await both.component.applyBatchPorts();
+    assert.equal(successful(both), true);
+    const connection = multiPortHarness('port');
+    connection.component.changeBatchField('batchServerPort', 'invalid');
+    await connection.component.previewBatchPorts();
+    await connection.component.applyBatchPorts();
+    assert.equal(successful(connection), true);
+    assert.equal(connection.requests[1].body.server_port, undefined);
+});
+
+test('both mode requires both valid targets and switching mode invalidates a prior preview', async () => {
+    for (const field of ['batchServerPort', 'batchConnectionPort']) {
+        const h = multiPortHarness('both');
+        h.component.changeBatchField(field, '');
+        await h.component.previewBatchPorts();
+        assert.equal(h.requests.length, 0);
+        assert.match(h.component.state.batchError, /1～65535/);
+    }
+    for (const change of [h => h.component.changeBatchField('batchPortMode', 'port'), h => h.component.changeBatchField('batchConnectionPort', '9443')]) {
+        const h = multiPortHarness('both');
+        await h.component.previewBatchPorts();
+        change(h);
+        await h.component.applyBatchPorts();
+        assert.equal(h.component.state.batchPreview, null);
+        assert.equal(h.requests.length, 1);
+    }
+});
+
+test('both mode checks connection port persistence as well as server port', async () => {
+    const h = multiPortHarness('both', { staleConnectionPort: true });
+    await h.component.previewBatchPorts();
+    await h.component.applyBatchPorts();
+    assert.equal(successful(h), false);
+    assert.match(h.component.state.batchError, /端口核对失败/);
+});
+
+test('a response for the wrong port mode cannot enable confirmation', async () => {
+    const h = portHarness({ responses: [portPreview({ mode: 'port' })] });
+    await h.component.previewBatchPorts();
+    await h.component.applyBatchPorts();
+    assert.equal(h.component.state.batchPreview, null);
+    assert.equal(h.requests.length, 1);
+    assert.ok(h.component.state.batchError);
 });
 
 test('batch rate previews selected nodes, applies with confirmation, then verifies actual rates', async () => {

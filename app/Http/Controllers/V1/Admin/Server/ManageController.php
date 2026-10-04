@@ -147,6 +147,22 @@ class ManageController extends Controller
         ])->header('Cache-Control', 'no-store, private');
     }
 
+    public function previewPorts(Request $request)
+    {
+        $params = $this->validatePorts($request, false);
+        return response([
+            'data' => ['mode' => $params['mode']] + (new ServerBatchOperationService())->previewPorts($params['nodes'], $params['ports'])
+        ])->header('Cache-Control', 'no-store, private');
+    }
+
+    public function applyPorts(Request $request)
+    {
+        $params = $this->validatePorts($request, true);
+        return response([
+            'data' => ['mode' => $params['mode']] + (new ServerBatchOperationService())->applyPorts($params['nodes'], $params['ports'])
+        ]);
+    }
+
     public function previewTlsFields(Request $request)
     {
         $params = $this->validateTlsFields($request, false);
@@ -308,6 +324,29 @@ class ManageController extends Controller
             $rules['nodes.*.server_port'] = 'present|nullable|integer';
         }
         return $this->validateSelection($request, $requireConfirmation, $rules);
+    }
+
+    private function validatePorts(Request $request, bool $requireConfirmation): array
+    {
+        $mode = $request->validate(['mode' => 'required|in:server_port,port,both'])['mode'];
+        $fields = $mode === 'both' ? ['server_port', 'port'] : [$mode];
+        $rules = [];
+        foreach (['server_port', 'port'] as $field) {
+            $rules[$field] = in_array($field, $fields, true)
+                ? ['required', 'numeric', 'integer', 'between:1,65535', 'regex:/\A[1-9][0-9]{0,4}\z/']
+                : 'prohibited';
+            if ($requireConfirmation && in_array($field, $fields, true)) {
+                // Connection ports may currently contain a range; keep that snapshot intact.
+                $rules['nodes.*.' . $field] = $field === 'port' ? 'present|nullable|string|max:255' : 'present|nullable|integer';
+            }
+        }
+        $params = $this->validateSelection($request, $requireConfirmation, $rules);
+        $params['mode'] = $mode;
+        $params['ports'] = [];
+        foreach ($fields as $field) {
+            $params['ports'][$field] = $field === 'port' ? (string) $params[$field] : (int) $params[$field];
+        }
+        return $params;
     }
 
     private function validateTlsFields(Request $request, bool $requireConfirmation): array

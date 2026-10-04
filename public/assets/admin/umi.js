@@ -108464,6 +108464,8 @@
                     batchDest: "",
                     batchRate: "",
                     batchServerPort: "",
+                    batchConnectionPort: "",
+                    batchPortMode: "server_port",
                     batchRenamePrefix: "",
                     batchRenameSuffix: "",
                     batchRenameSeparator: " | ",
@@ -109009,85 +109011,115 @@
                     this.setState({batchLoading: !1, batchStage: "", batchPreview: null});
                 }
             }
-            batchServerPortEquals(value, target) {
+            batchPortFields(mode) {
+                return mode === "both" ? ["server_port", "port"] : ["server_port", "port"].includes(mode) ? [mode] : []
+            }
+            batchPortLabel(field) {
+                return field === "server_port" ? "服务端口" : "连接端口"
+            }
+            batchPortEquals(value, target) {
                 return (typeof value === "string" || typeof value === "number") && /^[1-9][0-9]{0,4}$/.test(String(value)) &&
                     Number(value) <= 65535 && Number(value) === Number(target)
             }
-            async previewBatchServerPort() {
+            batchPortParams() {
+                var mode = this.state.batchPortMode, fields = this.batchPortFields(mode), params = {mode: mode};
+                if (!fields.length) throw new Error("请选择要修改的端口类型");
+                fields.forEach(field=>{
+                    var value = (field === "server_port" ? this.state.batchServerPort : this.state.batchConnectionPort).trim();
+                    if (!this.batchPortEquals(value, value)) throw new Error(this.batchPortLabel(field) + "须为 1～65535 之间的整数");
+                    params[field] = field === "server_port" ? Number(value) : value;
+                });
+                return params
+            }
+            async previewBatchPorts() {
                 if (this.batchBusy) return;
-                var nodes = this.selectedBatchNodes(), input = this.state.batchServerPort.trim(), port = Number(input);
+                var nodes = this.selectedBatchNodes(), targets;
                 if (!nodes.length || nodes.length > 200) {
-                    this.setState({batchError: nodes.length ? "一次最多设置 200 个节点" : "请先在列表中勾选要设置服务端口的节点", batchPreview: null});
+                    this.setState({batchError: nodes.length ? "一次最多设置 200 个节点" : "请先在列表中勾选要设置端口的节点", batchPreview: null});
                     return
                 }
-                if (!this.batchServerPortEquals(input, port)) {
-                    this.setState({batchError: "服务端口须为 1～65535 之间的整数", batchPreview: null});
-                    return
-                }
-                var params = {nodes: nodes, server_port: port}, keys = nodes.map(node=>this.batchKey(node)).sort();
-                this.batchBusy = !0;
-                this.setState({batchLoading: !0, batchStage: "正在预览服务端口", batchPreview: null, batchError: "", batchResult: ""});
                 try {
-                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/server-port/preview", params, !0));
-                    if (!Array.isArray(data.nodes) || data.matched_count !== nodes.length || data.nodes.length !== nodes.length ||
-                        data.server_port !== port || !Number.isInteger(data.changed_count) ||
-                        data.changed_count !== data.nodes.filter(node=>node.changed === !0).length ||
-                        JSON.stringify(data.nodes.map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys) ||
-                        !data.nodes.every(node=>typeof node.name === "string" && (node.server_port === null || Number.isInteger(node.server_port)) &&
-                            node.new_server_port === port && node.changed === (node.server_port !== port))) {
-                        throw new Error("服务端口预览结果不完整或与所选节点不一致，请重新预览")
-                    }
-                    if (this.state.batchDialog !== "server-port" || this.state.batchServerPort.trim() !== input ||
-                        JSON.stringify(this.selectedBatchNodes().map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys)) {
-                        throw new Error("服务端口或节点选择已变更，请重新预览")
-                    }
-                    params.nodes = data.nodes.map(node=>({type: node.type, id: node.id, server_port: node.server_port}));
-                    this.setState({batchPreview: Object.assign({}, data, {params: params}),
-                        batchResult: data.changed_count ? "" : "所选节点服务端口与目标值一致，无需修改"});
+                    targets = this.batchPortParams();
                 } catch (error) {
-                    this.setState({batchError: error.message || "服务端口预览失败，请稍后重试"});
+                    this.setState({batchError: error.message, batchPreview: null});
+                    return
+                }
+                var fields = this.batchPortFields(targets.mode), params = Object.assign({nodes: nodes}, targets), keys = nodes.map(node=>this.batchKey(node)).sort();
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在预览端口", batchPreview: null, batchError: "", batchResult: ""});
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/ports/preview", params, !0));
+                    if (!Array.isArray(data.nodes) || data.matched_count !== nodes.length || data.nodes.length !== nodes.length ||
+                        data.mode !== targets.mode || !fields.every(field=>this.batchPortEquals(data[field], targets[field])) ||
+                        !Number.isInteger(data.changed_count) || data.changed_count !== data.nodes.filter(node=>node.changed === !0).length ||
+                        JSON.stringify(data.nodes.map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys) ||
+                        !data.nodes.every(node=>typeof node.name === "string" &&
+                            fields.every(field=>(node[field] === null || (field === "server_port" ? Number.isInteger(node[field]) : typeof node[field] === "string")) &&
+                                this.batchPortEquals(node["new_" + field], targets[field])) &&
+                            node.changed === fields.some(field=>!this.batchPortEquals(node[field], targets[field])))) {
+                        throw new Error("端口预览结果不完整或与所选节点不一致，请重新预览")
+                    }
+                    if (this.state.batchDialog !== "ports" || JSON.stringify(this.batchPortParams()) !== JSON.stringify(targets) ||
+                        JSON.stringify(this.selectedBatchNodes().map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys)) {
+                        throw new Error("端口设置或节点选择已变更，请重新预览")
+                    }
+                    params.nodes = data.nodes.map(node=>{
+                        var snapshot = {type: node.type, id: node.id};
+                        fields.forEach(field=>{ snapshot[field] = node[field]; });
+                        return snapshot
+                    });
+                    this.setState({batchPreview: Object.assign({}, data, {params: params, targets: targets}),
+                        batchResult: data.changed_count ? "" : "所选节点端口与目标值一致，无需修改"});
+                } catch (error) {
+                    this.setState({batchError: error.message || "端口预览失败，请稍后重试"});
                 } finally {
                     this.batchBusy = !1;
                     this.setState({batchLoading: !1, batchStage: ""});
                 }
             }
-            async applyBatchServerPort() {
+            async applyBatchPorts() {
                 if (this.batchBusy) return;
                 var preview = this.state.batchPreview;
-                if (this.state.batchDialog !== "server-port" || !preview || !preview.changed_count) return;
-                var keys = preview.params.nodes.map(node=>this.batchKey(node)).sort(), port = preview.params.server_port;
-                if (!this.batchServerPortEquals(this.state.batchServerPort.trim(), port) ||
-                    JSON.stringify(this.selectedBatchNodes().map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys)) {
-                    this.setState({batchError: "服务端口或节点选择已变更，请重新预览", batchPreview: null});
+                if (this.state.batchDialog !== "ports" || !preview || !preview.changed_count) return;
+                var targets = preview.targets, fields = this.batchPortFields(targets.mode), keys = preview.params.nodes.map(node=>this.batchKey(node)).sort();
+                try {
+                    if (JSON.stringify(this.batchPortParams()) !== JSON.stringify(targets) ||
+                        JSON.stringify(this.selectedBatchNodes().map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys)) {
+                        throw new Error("端口设置或节点选择已变更，请重新预览")
+                    }
+                } catch (error) {
+                    this.setState({batchError: error.message, batchPreview: null});
                     return
                 }
                 this.batchBusy = !0;
-                this.setState({batchLoading: !0, batchStage: "正在保存服务端口", batchError: "", batchResult: ""});
+                this.setState({batchLoading: !0, batchStage: "正在保存端口", batchError: "", batchResult: ""});
                 var saved = !1;
                 try {
-                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/server-port/apply", Object.assign({}, preview.params, {confirm: !0}), !0));
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/ports/apply", Object.assign({}, preview.params, {confirm: !0}), !0));
                     saved = !0;
-                    if (data.server_port !== port || data.requested_count !== preview.params.nodes.length ||
-                        data.matched_count !== preview.matched_count || !Number.isInteger(data.updated_count) ||
-                        data.updated_count < 0 || data.updated_count > data.matched_count ||
+                    if (data.mode !== targets.mode || !fields.every(field=>this.batchPortEquals(data[field], targets[field])) ||
+                        data.requested_count !== preview.params.nodes.length || data.matched_count !== preview.matched_count ||
+                        !Number.isInteger(data.updated_count) || data.updated_count < 0 || data.updated_count > data.matched_count ||
                         !Array.isArray(data.nodes) || data.nodes.length !== data.updated_count) {
-                        throw new Error("服务端口保存结果不完整，请刷新列表核对")
+                        throw new Error("端口保存结果不完整，请刷新列表核对")
                     }
                     var updatedKeys = data.nodes.map(node=>this.batchKey(node));
                     if (!data.nodes.every((node, index)=>keys.indexOf(updatedKeys[index]) >= 0 &&
-                        updatedKeys.indexOf(updatedKeys[index]) === index && node.server_port === port)) {
-                        throw new Error("服务端口保存结果与所选节点不一致，请刷新列表核对")
+                        updatedKeys.indexOf(updatedKeys[index]) === index && fields.every(field=>this.batchPortEquals(node[field], targets[field])))) {
+                        throw new Error("端口保存结果与所选节点不一致，请刷新列表核对")
                     }
-                    this.setState({batchStage: "正在重新读取并核对服务端口"});
-                    var servers = await this.refreshBatchNodeList({_batch_server_port: Date.now()});
-                    if (!preview.params.nodes.every(node=>servers.some(server=>this.batchKey(server) === this.batchKey(node) && this.batchServerPortEquals(server.server_port, port)))) {
-                        throw new Error("重新读取的节点服务端口与目标值不一致")
+                    this.setState({batchStage: "正在重新读取并核对端口"});
+                    var servers = await this.refreshBatchNodeList({_batch_ports: Date.now()});
+                    if (!preview.params.nodes.every(node=>servers.some(server=>this.batchKey(server) === this.batchKey(node) &&
+                        fields.every(field=>this.batchPortEquals(server[field], targets[field]))))) {
+                        throw new Error("重新读取的节点端口与目标值不一致")
                     }
-                    var result = "已核对 " + data.matched_count + " 个节点服务端口均为 " + port + "，本次更新 " + data.updated_count + " 个节点";
+                    var result = "已核对 " + data.matched_count + " 个节点：" +
+                        fields.map(field=>this.batchPortLabel(field) + " " + targets[field]).join("，") + "；本次更新 " + data.updated_count + " 个节点";
                     this.setState({batchResult: result});
                     c["a"].success(result);
                 } catch (error) {
-                    this.setState({batchError: (saved ? "接口已返回保存成功，但服务端口核对失败。请刷新列表检查，勿重复提交：" : "服务端口保存未确认完成，请核对列表后重新预览：") + (error.message || "网络请求失败")});
+                    this.setState({batchError: (saved ? "接口已返回保存成功，但端口核对失败。请刷新列表检查，勿重复提交：" : "端口保存未确认完成，请核对列表后重新预览：") + (error.message || "网络请求失败")});
                 } finally {
                     this.batchBusy = !1;
                     this.setState({batchLoading: !1, batchStage: "", batchPreview: null});
@@ -109445,17 +109477,25 @@
                         )
                     ))
                 }
-                if (state.batchDialog === "server-port") {
+                if (state.batchDialog === "ports") {
+                    var portFields = this.batchPortFields(state.batchPortMode);
                     return el(R["a"], {
-                        title: "批量设置服务端口", width: "min(760px, 100vw)", visible: !0,
+                        title: "批量设置端口", width: "min(880px, 100vw)", visible: !0,
                         maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeBatchDialog()
                     }, el("div", {style: {paddingBottom: 70}},
-                        el("p", {role: "status"}, "为选中的 " + nodes.length + " 个节点设置同一服务端口。"),
-                        el("div", {className: "form-group"}, el("label", {htmlFor: "batch-server-port"}, "服务端口"), el(s["a"], {
-                            id: "batch-server-port", value: state.batchServerPort, disabled: busy, maxLength: 5, inputMode: "numeric", placeholder: "1～65535，例如 443",
-                            onChange: event=>this.changeBatchField("batchServerPort", event.target.value)
-                        })),
-                        el("p", null, "修改所选节点的服务端监听端口，连接端口保持原值。使用中转或 NAT 时，请确认转发配置与新端口匹配。"),
+                        el("p", {role: "status"}, "为选中的 " + nodes.length + " 个节点批量设置端口。"),
+                        el("div", {className: "form-group"}, el("label", {htmlFor: "batch-port-mode"}, "修改类型"), el("select", {
+                            id: "batch-port-mode", className: "form-control", value: state.batchPortMode, disabled: busy,
+                            onChange: event=>this.changeBatchField("batchPortMode", event.target.value)
+                        }, el("option", {value: "server_port"}, "仅修改服务端口"), el("option", {value: "port"}, "仅修改连接端口"), el("option", {value: "both"}, "服务端口和连接端口一起修改"))),
+                        portFields.map(field=>el("div", {key: field, className: "form-group"}, el("label", {htmlFor: "batch-port-" + field}, this.batchPortLabel(field)), el(s["a"], {
+                            id: "batch-port-" + field, value: field === "server_port" ? state.batchServerPort : state.batchConnectionPort,
+                            disabled: busy, maxLength: 5, inputMode: "numeric", placeholder: "1～65535，例如 443",
+                            onChange: event=>this.changeBatchField(field === "server_port" ? "batchServerPort" : "batchConnectionPort", event.target.value)
+                        }))),
+                        el("p", null, state.batchPortMode === "server_port" ? "服务端口为节点服务端监听端口。连接端口保持原值。" :
+                            state.batchPortMode === "port" ? "连接端口为客户端连接节点时使用的端口。服务端口保持原值。" : "两个端口可以填写相同或不同的值，请与实际监听及转发配置保持一致。"),
+                        portFields.includes("port") && el("p", null, "连接端口将统一设置为填写的单一端口；已有的端口范围也会被替换，请核对预览。"),
                         state.batchError && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap"}}, state.batchError),
                         state.batchResult && el("p", {role: "status"}, state.batchResult),
                         state.batchStage && el("p", {role: "status"}, state.batchStage),
@@ -109463,19 +109503,23 @@
                             el("strong", null, "预计改动 " + preview.changed_count + " / " + preview.matched_count + " 个节点，请核对后确认应用"),
                             el("div", {style: {maxHeight: 320, overflow: "auto", marginTop: 12}},
                                 el("table", {className: "table", style: {wordBreak: "break-all"}},
-                                    el("thead", null, el("tr", null, el("th", null, "协议 / 节点"), el("th", null, "当前服务端口"), el("th", null, "目标服务端口"))),
+                                    el("thead", null, el("tr", null, el("th", null, "协议 / 节点"), portFields.map(field=>[
+                                        el("th", {key: "old-" + field}, "当前" + this.batchPortLabel(field)), el("th", {key: "new-" + field}, "目标" + this.batchPortLabel(field))
+                                    ]))),
                                     el("tbody", null, preview.nodes.map(node=>el("tr", {key: this.batchKey(node)},
                                         el("td", null, node.type + " #" + node.id + " " + node.name),
-                                        el("td", null, node.server_port === null ? "未设置" : node.server_port),
-                                        el("td", null, node.new_server_port, !node.changed && el("span", null, "（无需修改）"))
+                                        portFields.map(field=>[
+                                            el("td", {key: "old-" + field}, node[field] === null ? "未设置" : node[field]),
+                                            el("td", {key: "new-" + field}, node["new_" + field], this.batchPortEquals(node[field], node["new_" + field]) && el("span", null, "（无需修改）"))
+                                        ])
                                     )))
                                 )
                             )
                         ),
                         el("div", {className: "v2board-drawer-action"},
                             el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
-                            el(l["a"], {loading: busy, onClick: ()=>this.previewBatchServerPort(), style: {marginRight: 8}}, "预览改动"),
-                            el(l["a"], {type: "primary", disabled: busy || !preview || !preview.changed_count, onClick: ()=>this.applyBatchServerPort()}, "确认应用")
+                            el(l["a"], {loading: busy, onClick: ()=>this.previewBatchPorts(), style: {marginRight: 8}}, "预览改动"),
+                            el(l["a"], {type: "primary", disabled: busy || !preview || !preview.changed_count, onClick: ()=>this.applyBatchPorts()}, "确认应用")
                         )
                     ))
                 }
@@ -109937,10 +109981,10 @@
                     onClick: ()=>this.openBatchDialog("rate")
                 }, "批量设置倍率"), !Object(L["f"])() && y.a.createElement(l["a"], {
                     style: {marginLeft: 8},
-                    loading: this.state.batchLoading && this.state.batchDialog === "server-port",
+                    loading: this.state.batchLoading && this.state.batchDialog === "ports",
                     disabled: A || this.state.batchLoading || !this.selectedBatchNodes().length,
-                    onClick: ()=>this.openBatchDialog("server-port")
-                }, "批量设置服务端口"), y.a.createElement(l["a"], {
+                    onClick: ()=>this.openBatchDialog("ports")
+                }, "批量设置端口"), y.a.createElement(l["a"], {
                     style: {
                         marginLeft: 8
                     },

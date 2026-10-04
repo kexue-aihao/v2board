@@ -302,76 +302,101 @@ class ServerBatchOperationService
         return is_numeric($current) && is_finite((float) $current) && (float) $current === (float) $target;
     }
 
-    /** 顶层 server_port 为服务端监听端口，区别于连接端口及 REALITY 目标端口。 */
+    /** 保留旧接口，兼容仍使用上一版管理资源的页面。 */
     public function previewServerPort(array $selection, int $port): array
     {
-        $this->validateServerPort($port);
+        return $this->previewPorts($selection, ['server_port' => $port]);
+    }
+
+    public function applyServerPort(array $selection, int $port): array
+    {
+        return $this->applyPorts($selection, ['server_port' => $port]);
+    }
+
+    /** 顶层 server_port 为服务端监听端口，port 为连接端口。 */
+    public function previewPorts(array $selection, array $ports): array
+    {
+        $ports = $this->normalizePorts($ports);
         $nodes = [];
         foreach ($this->load($selection) as $entry) {
             $server = $entry['server'];
-            $current = $server->server_port === null ? null : (int) $server->server_port;
-            $nodes[] = [
+            $node = [
                 'id' => (int) $server->id,
                 'type' => $entry['type'],
                 'name' => (string) $server->name,
-                'server_port' => $current,
-                'new_server_port' => $port,
-                'changed' => $current !== $port,
+                'changed' => false,
             ];
+            foreach ($ports as $field => $port) {
+                $node[$field] = $this->portValue($field, $server->{$field});
+                $node['new_' . $field] = $port;
+                $node['changed'] = $node['changed'] || $node[$field] !== $port;
+            }
+            $nodes[] = $node;
         }
 
-        return [
-            'server_port' => $port,
+        return $ports + [
             'matched_count' => count($nodes),
             'changed_count' => count(array_filter($nodes, function (array $node) { return $node['changed']; })),
             'nodes' => $nodes,
         ];
     }
 
-    public function applyServerPort(array $selection, int $port): array
+    public function applyPorts(array $selection, array $ports): array
     {
-        $this->validateServerPort($port);
-        return DB::transaction(function () use ($selection, $port) {
+        $ports = $this->normalizePorts($ports);
+        return DB::transaction(function () use ($selection, $ports) {
             $entries = $this->resolve($selection);
             $expected = [];
             foreach ($selection as $item) {
-                if (!array_key_exists('server_port', $item)) {
-                    abort(422, __('请先预览节点服务端口'));
-                }
                 $key = $item['type'] . ':' . $item['id'];
                 if (!array_key_exists($key, $expected)) {
-                    $expected[$key] = $item['server_port'] === null ? null : (int) $item['server_port'];
+                    $expected[$key] = [];
+                    foreach ($ports as $field => $port) {
+                        if (!array_key_exists($field, $item)) {
+                            abort(422, __('请先预览节点端口'));
+                        }
+                        $expected[$key][$field] = $this->portValue($field, $item[$field]);
+                    }
                 }
             }
             $updated = [];
             foreach ($entries as $entry) {
                 $server = $entry['server'];
-                $current = $server->server_port === null ? null : (int) $server->server_port;
-                if ($current === $port) {
+                $values = [];
+                $changed = false;
+                foreach ($ports as $field => $port) {
+                    $current = $this->portValue($field, $server->{$field});
+                    $values['old_' . $field] = $current;
+                    if ($current === $port) {
+                        continue;
+                    }
+                    if ($current !== $expected[$entry['type'] . ':' . $server->id][$field]) {
+                        abort(409, __('节点端口已变更，请重新预览：:type #:id', ['type' => $entry['type'], 'id' => $server->id]));
+                    }
+                    $server->{$field} = $port;
+                    $changed = true;
+                }
+                if (!$changed) {
                     continue;
                 }
-                if ($current !== $expected[$entry['type'] . ':' . $server->id]) {
-                    abort(409, __('节点服务端口已变更，请重新预览：:type #:id', ['type' => $entry['type'], 'id' => $server->id]));
-                }
-                $server->server_port = $port;
                 if (!$server->save()) {
-                    abort(500, __('节点服务端口保存失败，本次操作已回滚'));
+                    abort(500, __('节点端口保存失败，本次操作已回滚'));
                 }
                 $persisted = $server->fresh();
-                if (!$persisted || (int) $persisted->server_port !== $port) {
-                    abort(500, __('节点服务端口保存后复核不一致，本次操作已回滚'));
+                foreach ($ports as $field => $port) {
+                    if (!$persisted || $this->portValue($field, $persisted->{$field}) !== $port) {
+                        abort(500, __('节点端口保存后复核不一致，本次操作已回滚'));
+                    }
+                    $values[$field] = $this->portValue($field, $persisted->{$field});
                 }
                 $updated[] = [
                     'id' => (int) $persisted->id,
                     'type' => $entry['type'],
                     'name' => (string) $persisted->name,
-                    'old_server_port' => $current,
-                    'server_port' => (int) $persisted->server_port,
-                ];
+                ] + $values;
             }
 
-            return [
-                'server_port' => $port,
+            return $ports + [
                 'requested_count' => count($selection),
                 'matched_count' => count($entries),
                 'updated_count' => count($updated),
@@ -380,11 +405,26 @@ class ServerBatchOperationService
         });
     }
 
-    private function validateServerPort(int $port): void
+    private function normalizePorts(array $ports): array
     {
-        if ($port < 1 || $port > 65535) {
-            abort(422, __('服务端口须为 1～65535 之间的整数'));
+        if (!$ports || array_diff(array_keys($ports), ['server_port', 'port'])) {
+            abort(422, __('请选择要修改的端口类型'));
         }
+        foreach ($ports as $field => $port) {
+            if ((!is_int($port) && !is_string($port)) || !preg_match('/\A[1-9][0-9]{0,4}\z/', (string) $port) || (int) $port > 65535) {
+                abort(422, __('端口须为 1～65535 之间的整数'));
+            }
+            $ports[$field] = $this->portValue($field, $port);
+        }
+        return $ports;
+    }
+
+    private function portValue(string $field, $value)
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        return $field === 'server_port' ? (int) $value : (string) $value;
     }
 
     /** 查看选中节点当前保存的 TLS 字段，只返回展示所需的字段。 */
