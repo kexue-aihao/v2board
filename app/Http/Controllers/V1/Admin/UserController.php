@@ -653,12 +653,15 @@ class UserController extends Controller
     {
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        $builder = User::orderBy($sort, $sortType);
+        $builder = User::where('id', '<>', 1)->orderBy($sort, $sortType);
         $this->filter($request, $builder);
         try {
             $builder->each(function ($user){
                 $authService = new AuthService($user);
                 $authService->removeAllSession();
+                $changed = clone $user;
+                $changed->banned = 1;
+                \App\Services\SecurityAuditService::modelChange('updated', $changed);
             });
             $builder->update([
                 'banned' => 1
@@ -676,7 +679,7 @@ class UserController extends Controller
     {
         $sortType = in_array($request->input('sort_type'), ['ASC', 'DESC']) ? $request->input('sort_type') : 'DESC';
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
-        $builder = User::orderBy($sort, $sortType);
+        $builder = User::where('id', '<>', 1)->orderBy($sort, $sortType);
         $this->filter($request, $builder);
 
         DB::beginTransaction();
@@ -701,6 +704,7 @@ class UserController extends Controller
                     Subscription::where('user_id', $user->id)->delete();
                 }
                 User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
+                \App\Services\SecurityAuditService::modelChange('deleted', $user);
             });
             $builder->delete();
             DB::commit();

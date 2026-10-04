@@ -4,7 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { test } = require('node:test');
 
-const bundle = fs.readFileSync(path.join(__dirname, '../../public/assets/admin/umi.js'), 'utf8');
+const bundle = fs.readFileSync(path.join(__dirname, '../../resources/admin/legacy/umi.js'), 'utf8');
 const start = bundle.indexOf('    d1ca: function(e, t, n) {');
 const end = bundle.indexOf('    dI71: function(e, t, n) {', start);
 assert.ok(start >= 0 && end > start, 'user management module must exist');

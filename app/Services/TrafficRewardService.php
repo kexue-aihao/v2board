@@ -80,10 +80,24 @@ class TrafficRewardService
     public function gameRulesForAdministrator(User $actor, ?int $subscriptionId = null): array
     {
         $this->assertGameRuleAdministrator($actor, $subscriptionId);
+        SecurityAuditService::append('reward.rules.read', 'success', ['subscription_id' => $subscriptionId], AdminAccessService::actor($actor));
         return $this->gameRules();
     }
 
     public function saveGameRuleForAdministrator(User $actor, string $game, $probability, $multiplier, ?int $subscriptionId = null, $enabled = null, $dailyLimit = null): array
+    {
+        $actor = User::findOrFail($actor->id);
+        return SecurityAuditService::run(request(), AdminAccessService::actor($actor), function () use ($actor, $game, $probability, $multiplier, $subscriptionId, $enabled, $dailyLimit) {
+            $this->assertGameRuleAdministrator($actor, $subscriptionId);
+            SecurityAuditService::append('reward.rules.change', 'pending', ['game' => $game, 'before' => $this->gameRules(),
+                'requested' => ['probability' => $probability, 'multiplier' => $multiplier, 'enabled' => $enabled, 'daily_limit' => $dailyLimit]]);
+            $result = $this->persistGameRule($actor, $game, $probability, $multiplier, $subscriptionId, $enabled, $dailyLimit);
+            SecurityAuditService::append('reward.rules.change', 'success', ['game' => $game, 'after' => $result]);
+            return $result;
+        });
+    }
+
+    private function persistGameRule(User $actor, string $game, $probability, $multiplier, ?int $subscriptionId = null, $enabled = null, $dailyLimit = null): array
     {
         $this->assertGameRuleAdministrator($actor, $subscriptionId);
         if (!in_array($game, ['dice', 'slots'], true)) {
@@ -218,7 +232,7 @@ class TrafficRewardService
         return [
             'user' => $user,
             'subscription_id' => (int)$subscription->id,
-            'is_admin' => (int)$user->is_admin === 1,
+            'is_admin' => in_array(AdminAccessService::role($user), ['super', 'marketing'], true),
         ];
     }
 
@@ -502,7 +516,7 @@ class TrafficRewardService
     private function assertGameRuleAdministrator(User $actor, ?int $subscriptionId = null): void
     {
         $actor = User::findOrFail($actor->id);
-        if ((int)$actor->is_admin !== 1) throw new RuntimeException('仅管理员订阅可管理游戏规则');
+        if (!in_array(AdminAccessService::role($actor), ['super', 'marketing'], true)) throw new RuntimeException('仅超级管理员或运营管理员可管理游戏规则');
         if ($subscriptionId !== null) $this->activeSubscription($actor, $subscriptionId);
     }
 

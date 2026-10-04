@@ -57,7 +57,7 @@ class CheckServer extends Command
                     $server['name'],
                     $server['host']
                 );
-                $telegramService->sendMessageWithAdmin($message);
+                $telegramService->sendMessageWithAdmin($message, false, ['super', 'operations']);
                 Cache::forget(CacheKey::get(sprintf("SERVER_%s_LAST_CHECK_AT", strtoupper($server['type'])), $server->id));
             }
         }

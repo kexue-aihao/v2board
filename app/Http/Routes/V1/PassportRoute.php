@@ -16,7 +16,8 @@ class PassportRoute
         ), '/');
         if ($securePath !== '') {
             $router->group([
-                'prefix' => $securePath
+                'prefix' => $securePath,
+                'middleware' => \App\Http\Middleware\AdminLoginAudit::class,
             ], function ($router) {
                 $router->post('/passport/auth/login', 'V1\\Passport\\AuthController@adminLogin');
                 $router->post('/passport/auth/verify2fa', 'V1\\Passport\\AuthController@adminVerify2fa');
@@ -26,7 +27,8 @@ class PassportRoute
         }
 
         $router->group([
-            'prefix' => 'passport'
+            'prefix' => 'passport',
+            'middleware' => \App\Http\Middleware\AdminLoginAudit::class,
         ], function ($router) {
             // Auth
             $router->post('/auth/register/telegram', 'V1\\Passport\\AuthController@registerByTelegram');

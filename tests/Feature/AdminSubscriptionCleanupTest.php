@@ -211,12 +211,15 @@ class AdminSubscriptionCleanupTest extends TestCase
         $this->postJson($this->url, ['action' => 'delete', 'confirm' => 1, 'scan_token' => $scanToken])->assertStatus(422);
     }
 
-    public function testOnlyAdministratorsCanScanOrDeleteAndSnapshotsBelongToTheirCreator(): void
+    public function testOnlySuperAdministratorCanScanOrDelete(): void
     {
         $this->withMiddleware();
-        $ordinary = $this->user('ordinary@example.test', null, null);
         $admin = $this->user('admin@example.test', null, null, true);
+        $ordinary = $this->user('ordinary@example.test', null, null);
         $otherAdmin = $this->user('other-admin@example.test', null, null, true);
+        \Tests\Support\AdminSecurityFixture::install();
+        $admin->refresh();
+        $otherAdmin->refresh()->forceFill(['admin_role' => 'operations'])->save();
         $ordinaryToken = (new AuthService($ordinary))->generateAuthData(Request::create('/'), true)['auth_data'];
         $adminToken = (new AuthService($admin))->generateAuthData(Request::create('/'), true)['auth_data'];
         $otherToken = (new AuthService($otherAdmin))->generateAuthData(Request::create('/'), true)['auth_data'];
@@ -227,7 +230,7 @@ class AdminSubscriptionCleanupTest extends TestCase
         $scanToken = $this->postJson($this->url, ['action' => 'scan'], ['Authorization' => $adminToken])
             ->assertOk()->json('scan_token');
         $this->postJson($this->url, ['action' => 'delete', 'confirm' => 1, 'scan_token' => $scanToken], ['Authorization' => $otherToken])
-            ->assertStatus(422);
+            ->assertStatus(403);
         $this->assertDatabaseHas('v2_user', ['id' => $ordinary->id]);
         $this->postJson($this->url, ['action' => 'delete', 'confirm' => 1, 'scan_token' => $scanToken], ['Authorization' => $adminToken])
             ->assertOk()->assertJsonPath('data.deleted_count', 1);

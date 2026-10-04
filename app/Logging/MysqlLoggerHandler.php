@@ -18,18 +18,21 @@ class MysqlLoggerHandler extends AbstractProcessingHandler
     {
         try{
             if(isset($record['context']['exception']) && is_object($record['context']['exception'])){
-                $record['context']['exception'] = (array)$record['context']['exception'];
+                // Exception messages (especially SQL errors) may embed passwords
+                // or bound tokens even after the structured context is redacted.
+                $record['message'] = 'Exception: ' . get_class($record['context']['exception']);
+                $record['context']['exception'] = ['exception_type' => get_class($record['context']['exception'])];
             }
-            $record['request_data'] = request()->all() ??[];
+            $record['request_data'] = \App\Services\SecurityAuditService::redact(request()->except(['user']) ?? []);
             $log = [
                 'title' => $record['message'],
                 'level' => $record['level_name'],
                 'host' => $record['request_host'] ?? request()->getSchemeAndHttpHost(),
-                'uri' => $record['request_uri'] ?? request()->getRequestUri(),
+                'uri' => request()->getPathInfo(),
                 'method' => $record['request_method'] ?? request()->getMethod(),
                 'ip' => request()->getClientIp(),
                 'data' => json_encode($record['request_data']) ,
-                'context' => isset($record['context']) ? json_encode($record['context']) : '',
+                'context' => isset($record['context']) ? json_encode(\App\Services\SecurityAuditService::redact($record['context'])) : '',
                 'created_at' => strtotime($record['datetime']),
                 'updated_at' => strtotime($record['datetime']),
             ];

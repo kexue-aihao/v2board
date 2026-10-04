@@ -102,6 +102,7 @@ class V2boardInstall extends Command
             if (!$this->registerAdmin($email, $password)) {
                 abort(500, '管理员账号注册失败，请重试');
             }
+            (new \App\Services\SchemaUpgradeService())->run();
 
             $this->info('一切就绪');
             $this->info("管理员邮箱：{$email}");
@@ -119,6 +120,8 @@ class V2boardInstall extends Command
     private function registerAdmin($email, $password)
     {
         $user = new User();
+        if (User::where('id', 1)->exists()) abort(500, '创始管理员 ID 1 已存在，不能覆盖');
+        $user->id = 1;
         $user->email = $email;
         if (strlen($password) < 8) {
             abort(500, '管理员密码长度最小为8位字符');

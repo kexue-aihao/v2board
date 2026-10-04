@@ -9,8 +9,22 @@ class AdminRoute
     {
         $router->group([
             'prefix' => config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))),
-            'middleware' => ['admin', 'log'],
+            'middleware' => ['admin'],
         ], function ($router) {
+            $router->get('/security/bootstrap', 'V1\\Admin\\SecurityController@bootstrap');
+            $router->get('/security/asset', 'V1\\Admin\\SecurityController@asset');
+            $router->get('/security/administrators', 'V1\\Admin\\SecurityController@administrators');
+            $router->post('/security/administrators/role', 'V1\\Admin\\SecurityController@assignRole');
+            $router->get('/security/audit', 'V1\\Admin\\SecurityController@audit');
+            $router->post('/security/audit/verify', 'V1\\Admin\\SecurityController@verifyAudit');
+            $router->post('/security/audit/export', 'V1\\Admin\\SecurityController@exportAudit');
+            $router->get('/security/options/plans', 'V1\\Admin\\SecurityController@planOptions');
+            $router->get('/security/options/groups', 'V1\\Admin\\SecurityController@groupOptions');
+            $router->get('/security/options/plan-config', 'V1\\Admin\\SecurityController@planConfig');
+            $router->post('/security/logout', 'V1\\Admin\\SecurityController@logout');
+            $router->post('/security/account/password', 'V1\\User\\UserController@changePassword');
+            $router->get('/security/account/sessions', 'V1\\User\\UserController@getActiveSession');
+            $router->post('/security/account/sessions/remove', 'V1\\User\\UserController@removeActiveSession');
             // Config
             $router->get ('/config/fetch', 'V1\\Admin\\ConfigController@fetch');
             $router->post('/config/save', 'V1\\Admin\\ConfigController@save');

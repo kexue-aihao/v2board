@@ -6,7 +6,7 @@ const { test } = require('node:test');
 
 // 「动态倍率」页跑在产物里的整段模块上（不是源码文件），所以这里从 umi.js 里抠出来跑 ——
 // 模块里任何一个拼错的 n(...) 模块 id、或 render 里引用了不存在的字段，都会在这里炸。
-const bundle = fs.readFileSync(path.join(__dirname, '../../public/assets/admin/umi.js'), 'utf8');
+const bundle = fs.readFileSync(path.join(__dirname, '../../resources/admin/legacy/umi.js'), 'utf8');
 /**
  * 从产物里抠出某个模块的源码。边界不写死下一个模块名 —— 后面的补丁还会往产物尾部追加模块，
  * 写死「到模块对象结尾」的话，下次追加就会把两个模块一起抠出来（clean-gateway 上踩过这个坑）。

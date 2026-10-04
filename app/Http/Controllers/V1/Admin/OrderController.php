@@ -44,6 +44,9 @@ class OrderController extends Controller
     {
         $order = Order::find($request->input('id'));
         if (!$order) abort(500, __('订单不存在'));
+        // The order page needs only account identity, not the user-management DTO.
+        $order['user'] = User::where('id', $order->user_id)->first(['id', 'email']);
+        $order['invite_user'] = $order->invite_user_id ? User::where('id', $order->invite_user_id)->first(['id', 'email']) : null;
         $order['commission_log'] = CommissionLog::where('trade_no', $order->trade_no)->get();
         if ($order->surplus_order_ids) {
             $order['surplus_orders'] = Order::whereIn('id', $order->surplus_order_ids)->get();

@@ -86,7 +86,7 @@ class AuthController extends Controller
         if ($user->banned) {
             abort(403, __('Your account has been suspended'));
         }
-        if ($adminOnly && !(bool)$user->is_admin) {
+        if ($adminOnly && !\App\Services\AdminAccessService::role($user)) {
             abort(403, __('Administrator access required'));
         }
 
@@ -124,7 +124,7 @@ class AuthController extends Controller
         $user = $challenge && !empty($challenge['user_id'])
             ? User::find($challenge['user_id'])
             : null;
-        if (!$user || !(bool)$user->is_admin) {
+        if (!$user || !\App\Services\AdminAccessService::role($user)) {
             abort(403, __('Administrator access required'));
         }
     }
@@ -279,6 +279,9 @@ class AuthController extends Controller
         $user = User::where('email', $email)->first();
         if (!$user) {
             abort(404, __('This email is not registered in the system'));
+        }
+        if ($user->is_admin || $user->is_staff) {
+            abort(403, '管理员账号不允许通过机器人重置密码');
         }
         if ((string)($user->telegram_id ?? '') === '') {
             abort(409, __('This account has not bound Telegram, please use the email verification code'));

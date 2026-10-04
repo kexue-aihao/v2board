@@ -6,7 +6,7 @@ const { test } = require('node:test');
 
 // Exercise the shipped component AND its HTTP client; mocking the client
 // would hide serialization and Content-Type parsing regressions.
-const bundle = fs.readFileSync(path.join(__dirname, '../../public/assets/admin/umi.js'), 'utf8');
+const bundle = fs.readFileSync(path.join(__dirname, '../../resources/admin/legacy/umi.js'), 'utf8');
 function moduleSource(name, next) {
     const start = bundle.indexOf('    ' + name + ': function(e, t, n) {');
     const end = bundle.indexOf('    ' + next + ': function(e, t, n) {', start);

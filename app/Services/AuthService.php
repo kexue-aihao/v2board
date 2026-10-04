@@ -13,7 +13,6 @@ use Illuminate\Http\Request;
 class AuthService
 {
     private const SESSION_TTL = 2592000;
-    private const USER_CACHE_TTL = 3600;
 
     private $user;
 
@@ -28,6 +27,15 @@ class AuthService
             abort(403, __('需要完成二步验证后才能建立登录会话'));
         }
         $guid = Helper::guid();
+        if ($this->user->is_admin || $this->user->is_staff) {
+            $actor = AdminAccessService::actor($this->user);
+            $context = $request->attributes->get('security_audit_context');
+            if ($context) {
+                $context['actor'] = $actor;
+                $request->attributes->set('security_audit_context', $context);
+            }
+            SecurityAuditService::append('authentication.login', 'success', ['two_factor_verified' => (bool)$twoFactorVerified], $actor);
+        }
         $now = time();
         $expiresAt = $now + self::SESSION_TTL;
         $authData = JWT::encode([
@@ -35,6 +43,7 @@ class AuthService
             'session' => $guid,
             'iat' => $now,
             'exp' => $expiresAt,
+            'admin_version' => (int)$this->user->admin_version,
         ], config('app.key'), 'HS256');
         self::addSession($this->user->id, $guid, [
             'ip' => $request->ip(),
@@ -45,7 +54,7 @@ class AuthService
         ]);
         return [
             'token' => $this->user->token,
-            'is_admin' => $this->user->is_admin,
+            'is_admin' => AdminAccessService::role($this->user) !== null,
             'auth_data' => $authData
         ];
     }
@@ -63,23 +72,12 @@ class AuthService
                 return false;
             }
 
-            $user = Cache::get($jwt);
-            if (!$user) {
-                $user = User::select([
-                    'id',
-                    'email',
-                    'is_admin',
-                    'is_staff'
-                ])
-                    ->find($data['id']);
-                if (!$user) return false;
-                $user = $user->toArray();
-                Cache::put($jwt, $user, min(
-                    self::USER_CACHE_TTL,
-                    max(1, (int)$data['exp'] - time())
-                ));
-            }
-            return $user;
+            // Authorization is never taken from the hour-long profile cache.
+            // Reading the row also works during upgrades before the new nullable
+            // role columns exist; missing roles fail closed for legacy admins.
+            $user = User::find($data['id']);
+            if (!$user || $user->banned || (int)($data['admin_version'] ?? 0) !== (int)$user->admin_version) return false;
+            return AdminAccessService::actor($user);
         } catch (\Throwable $e) {
             return false;
         }

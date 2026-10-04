@@ -16,7 +16,7 @@
  * CRLF，在那种副本上跑会静默失配，所以这里直接拒绝而不是改坏文件。
  */
 
-$bundlePath = __DIR__ . '/../public/assets/admin/umi.js';
+$bundlePath = __DIR__ . '/../resources/admin/legacy/umi.js';
 $bundle = file_get_contents($bundlePath);
 if ($bundle === false) {
     fwrite(STDERR, "Unable to read admin bundle.\n");

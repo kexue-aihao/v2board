@@ -23,15 +23,15 @@ class ReplyTicket extends Telegram {
             abort(500, '用户不存在');
         }
         if (!$msg->text) return;
-        if (!($user->is_admin || $user->is_staff)) return;
+        $role = \App\Services\AdminAccessService::role($user);
+        if (!$role || !\App\Services\AdminAccessService::allows($role, 'V1\\Admin\\TicketController@reply')) return;
         $ticketService = new TicketService();
-        $ticketService->replyByAdmin(
-            $ticketId,
-            $msg->text,
-            $user->id
-        );
+        \App\Services\SecurityAuditService::run(request(), \App\Services\AdminAccessService::actor($user), function () use ($ticketService, $ticketId, $msg, $user) {
+            $ticketService->replyByAdmin($ticketId, $msg->text, $user->id);
+            return response(['data' => true]);
+        });
         $telegramService = $this->telegramService;
         $telegramService->sendMessage($msg->chat_id, "#`{$ticketId}` 的工单已回复成功", 'markdown');
-        $telegramService->sendMessageWithAdmin("#`{$ticketId}` 的工单已由 {$user->email} 进行回复", false);
+        $telegramService->sendMessageWithAdmin("#`{$ticketId}` 的工单已由 {$user->email} 进行回复", true);
     }
 }

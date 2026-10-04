@@ -7,6 +7,7 @@ use App\Services\ThemeService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
+use App\Services\SecurityAuditService;
 
 class ThemeController extends Controller
 {
@@ -29,6 +30,11 @@ class ThemeController extends Controller
             if (!File::exists($themeConfigFile)) continue;
             $themeConfig = json_decode(File::get($themeConfigFile), true);
             if (!isset($themeConfig['configs']) || !is_array($themeConfig)) continue;
+            if ((request()->user['admin_role'] ?? 'super') !== 'super') {
+                $themeConfig['configs'] = array_values(array_filter($themeConfig['configs'], function ($field) {
+                    return !preg_match('/html|script|custom_code/i', $field['field_name'] ?? '');
+                }));
+            }
             $themeConfigs[$theme] = $themeConfig;
             if (config("theme.{$theme}")) continue;
             $themeService = new ThemeService($theme);
@@ -47,9 +53,11 @@ class ThemeController extends Controller
         $payload = $request->validate([
             'name' => 'required|in:' . join(',', $this->themes)
         ]);
-        return response([
-            'data' => config("theme.{$payload['name']}")
-        ]);
+        $data = (array)config("theme.{$payload['name']}");
+        if (($request->user['admin_role'] ?? 'super') !== 'super') {
+            foreach (array_keys($data) as $field) if (preg_match('/html|script|custom_code/i', $field)) unset($data[$field]);
+        }
+        return response(['data' => $data]);
     }
 
     public function saveThemeConfig(Request $request)
@@ -65,10 +73,21 @@ class ThemeController extends Controller
         $themeConfig = json_decode(File::get($themeConfigFile), true);
         if (!isset($themeConfig['configs']) || !is_array($themeConfig)) abort(500, __('主题配置文件有误'));
         $validateFields = array_column($themeConfig['configs'], 'field_name');
+        $previousFile = base_path() . "/config/theme/{$payload['name']}.php";
+        $previousConfig = File::exists($previousFile) ? (array) require $previousFile : (array)config("theme.{$payload['name']}");
         $config = [];
         foreach ($validateFields as $validateField) {
+            if (($request->user['admin_role'] ?? 'super') !== 'super' && preg_match('/html|script|custom_code/i', $validateField)) {
+                abort_if(array_key_exists($validateField, $payload['config']), 403, '只有超级管理员可以修改可执行的主题注入内容');
+                $config[$validateField] = $previousConfig[$validateField] ?? '';
+                continue;
+            }
             $config[$validateField] = isset($payload['config'][$validateField]) ? $payload['config'][$validateField] : '';
         }
+
+        if ($request->attributes->get('security_audit_context')) SecurityAuditService::append('theme.change', 'pending', [
+            'theme' => $payload['name'], 'before' => $previousConfig, 'after' => $config,
+        ]);
 
         File::ensureDirectoryExists(base_path() . '/config/theme/');
 
@@ -84,8 +103,9 @@ class ThemeController extends Controller
             abort(500, __('保存失败'));
         }
 
-        return response([
-            'data' => $config
-        ]);
+        if (($request->user['admin_role'] ?? 'super') !== 'super') {
+            foreach (array_keys($config) as $field) if (preg_match('/html|script|custom_code/i', $field)) unset($config[$field]);
+        }
+        return response(['data' => $config]);
     }
 }

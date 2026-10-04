@@ -9,7 +9,7 @@
         // i18n.*.js 是各语种字典文件（引擎按 localStorage 语言就地加载），用 glob
         // 一并纳入版本计算：任一字典更新都要让全套 ?v= 换新。
         $adminAssetFiles = array_merge(
-            ['umi.js', 'umi.css', 'custom.css', 'vendors.async.js', 'components.async.js', 'i18n.js'],
+            ['security-loader.js', 'login.js', 'umi.css', 'custom.css', 'i18n.js'],
             array_map('basename', glob(public_path('assets/admin/i18n.*.js')) ?: [])
         );
         $adminAssetFingerprints = array_filter(array_map(function ($file) {
@@ -46,6 +46,7 @@
             background_url: '{{$background_url}}',
             logo: '{{$logo}}',
             secure_path: '{{$secure_path}}'
+            ,admin_asset_version: '{{$adminAssetVersion}}'
         }
     </script>
 </head>
@@ -55,9 +56,7 @@
 {{-- 覆盖翻译层必须是 body 内第一个脚本：fetch/XHR 的 Content-Language 补丁
      要抢在应用（含 2FA 覆盖层的裸 fetch）发出首个请求之前装好。 --}}
 <script src="/assets/admin/i18n.js?v={{$adminAssetVersion}}"></script>
-<script src="/assets/admin/vendors.async.js?v={{$adminAssetVersion}}"></script>
-<script src="/assets/admin/components.async.js?v={{$adminAssetVersion}}"></script>
-<script src="/assets/admin/umi.js?v={{$adminAssetVersion}}"></script>
+<script src="/assets/admin/security-loader.js?v={{$adminAssetVersion}}"></script>
 </body>
 
 </html>

@@ -19,6 +19,9 @@ class TelegramLoginLinkService
 
     public function issue(User $user, $telegramChatId = null, $redirect = 'dashboard', bool $requireHttps = false): string
     {
+        if ($user->is_admin || $user->is_staff) {
+            throw new \RuntimeException('管理员账号请使用密码与二步验证登录');
+        }
         if ($user->banned) {
             throw new RuntimeException('User is suspended');
         }
@@ -79,7 +82,7 @@ class TelegramLoginLinkService
             }
 
             $user = User::where('id', $link->user_id)->lockForUpdate()->first();
-            if (!$user || $user->banned
+            if (!$user || $user->banned || $user->is_admin || $user->is_staff
                 || ($link->telegram_chat_id !== null && (string)$user->telegram_id !== (string)$link->telegram_chat_id)) {
                 $link->consumed_at = $now;
                 $link->updated_at = $now;

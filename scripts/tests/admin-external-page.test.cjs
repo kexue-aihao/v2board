@@ -6,7 +6,7 @@ const { test } = require('node:test');
 
 // 「外部订阅源」页跑在产物里的整段模块上，所以从 umi.js 里抠出来跑：模块里任何一个拼错的
 // 模块 id、或 render 里引用了不存在的字段，都会在这里炸，而不是等运维点开菜单才发现。
-const bundle = fs.readFileSync(path.join(__dirname, '../../public/assets/admin/umi.js'), 'utf8');
+const bundle = fs.readFileSync(path.join(__dirname, '../../resources/admin/legacy/umi.js'), 'utf8');
 
 test('external menu patch works without a separate rate sidebar and saves menu-only changes', () => {
     const menu = bundle.match(/                    }, \{\n                        title: "外部订阅源",[\s\S]*?                        \}\)\n/);

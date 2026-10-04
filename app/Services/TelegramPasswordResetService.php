@@ -42,6 +42,9 @@ class TelegramPasswordResetService
      */
     public function issue(User $user): array
     {
+        if ($user->is_admin || $user->is_staff) {
+            return ['ok' => false, 'message' => '管理员账号请使用后台账号安全或服务器命令重置密码'];
+        }
         if (!$this->enabled()) {
             return ['ok' => false, 'message' => '机器人尚未配置，请联系管理员重置密码'];
         }

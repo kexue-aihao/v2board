@@ -28,6 +28,7 @@ class TelegramNotificationTest extends TestCase
             $table->increments('id');
             $table->boolean('is_admin')->default(false);
             $table->boolean('is_staff')->default(false);
+            $table->string('admin_role')->nullable();
             $table->unsignedBigInteger('telegram_id')->nullable();
             $table->integer('created_at')->nullable();
             $table->integer('updated_at')->nullable();
@@ -51,13 +52,24 @@ class TelegramNotificationTest extends TestCase
     public function testStaffCanBeIncludedExplicitly(): void
     {
         DB::table('v2_user')->insert([
-            ['is_admin' => 1, 'is_staff' => 0, 'telegram_id' => 4011],
-            ['is_admin' => 0, 'is_staff' => 1, 'telegram_id' => 4012],
+            ['is_admin' => 1, 'is_staff' => 0, 'admin_role' => null, 'telegram_id' => 4011],
+            ['is_admin' => 1, 'is_staff' => 0, 'admin_role' => 'support', 'telegram_id' => 4012],
         ]);
         Queue::fake();
 
         (new TelegramService())->sendMessageWithAdmin('ticket update', true);
 
         Queue::assertPushed(SendTelegramJob::class, 2);
+    }
+
+    public function testNotificationsFollowBusinessRolesInsteadOfTheOldAdminFlag(): void
+    {
+        foreach ([null, 'operations', 'finance', 'support', 'marketing', null] as $i => $role) {
+            DB::table('v2_user')->insert(['id' => $i + 1, 'is_admin' => 1, 'admin_role' => $role, 'telegram_id' => 5000 + $i]);
+        }
+        $service = new TelegramService();
+        $this->assertSame([1, 3], $service->administratorRecipients()->pluck('id')->values()->all());
+        $this->assertSame([1, 4], $service->administratorRecipients(true)->pluck('id')->values()->all());
+        $this->assertSame([1, 2], $service->administratorRecipients(false, ['super', 'operations'])->pluck('id')->values()->all());
     }
 }

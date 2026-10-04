@@ -376,6 +376,9 @@ class OAuthController extends Controller
 
     private function loginResponse(User $user, Request $request)
     {
+        if ($user->is_admin || $user->is_staff) {
+            abort(403, '管理员账号请使用密码与二步验证登录');
+        }
         $twoFactor = (new TwoFactorService())->issueLoginResult($user, $request);
         if ($twoFactor) return response(['data' => $twoFactor]);
         return response(['data' => (new AuthService($user))->generateAuthData($request)]);

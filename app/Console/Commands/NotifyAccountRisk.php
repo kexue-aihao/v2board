@@ -72,7 +72,7 @@ class NotifyAccountRisk extends Command
             return self::SUCCESS;
         }
 
-        $recipients = User::where('is_admin', 1)->whereNotNull('telegram_id')->count();
+        $recipients = (new TelegramService())->administratorRecipients(false, ['super', 'operations'])->count();
         if ($recipients <= 0) {
             $this->warn(sprintf(
                 '%d 个账号待办，但没有任何绑定了 Telegram 的管理员，本轮不发送。',
@@ -84,7 +84,7 @@ class NotifyAccountRisk extends Command
             return self::SUCCESS;
         }
 
-        (new TelegramService())->sendMessageWithAdmin($message);
+        (new TelegramService())->sendMessageWithAdmin($message, false, ['super', 'operations']);
         $service->markNotified(array_column($pending, 'user_id'));
 
         $this->info(sprintf(

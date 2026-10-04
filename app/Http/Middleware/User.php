@@ -24,6 +24,15 @@ class User
         $request->merge([
             'user' => $user
         ]);
+        $action = $request->route()->getActionName();
+        if (preg_match('/User\\\\(?:TwoFactorController@|UserController@(changePassword|resetPassword|resetSecurity|removeActiveSession|unbindTelegram)$|TelegramController@(?:prepareAccountBinding|revokeBinding)$)/', $action)) {
+            $model = \App\Models\User::find($user['id']);
+            if ($model && ($model->is_admin || $model->is_staff)) {
+                return \App\Services\SecurityAuditService::run($request, \App\Services\AdminAccessService::actor($model), function () use ($request, $next) {
+                    return $next($request);
+                });
+            }
+        }
         return $next($request);
     }
 }

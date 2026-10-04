@@ -237,6 +237,9 @@ class TicketController extends Controller
 			$user = User::find($userid);
 
 			if ($user) {
+				// Customer support receives only the ticket context; account-wide
+				// balances, traffic and risk information remain super-only.
+				$telegramService->sendMessageWithAdmin("📮工单提醒 #{$ticket->id}\n邮箱：{$user->email}\n主题：{$ticket->subject}\n内容：{$message}", false, ['support']);
 				$transfer_enable = $this->getFlowData($user->transfer_enable); // 总流量
 				$remaining_traffic = $this->getFlowData($user->transfer_enable - $user->u - $user->d); // 剩余流量
 				$u = $this->getFlowData($user->u); // 上传
@@ -266,13 +269,13 @@ class TicketController extends Controller
 
 				$money = $user->balance / 100;
 				$affmoney = $user->commission_balance / 100;
-				$telegramService->sendMessageWithAdmin("📮工单提醒 #{$ticket->id}\n———————————————\n邮箱：\n`{$user->email}`\n用户位置：\n`{$location}`\nIP:\n{$ip_address}\n套餐与流量：\n`{$planName} of {$transfer_enable}/{$remaining_traffic}`\n上传/下载：\n`{$u}/{$d}`\n到期时间：\n`{$expired_at}`\n余额/佣金余额：\n`{$money}/{$affmoney}`\n主题：\n`{$ticket->subject}`\n内容：\n {$message} ", false);
+				$telegramService->sendMessageWithAdmin("📮工单提醒 #{$ticket->id}\n———————————————\n邮箱：\n`{$user->email}`\n用户位置：\n`{$location}`\nIP:\n{$ip_address}\n套餐与流量：\n`{$planName} of {$transfer_enable}/{$remaining_traffic}`\n上传/下载：\n`{$u}/{$d}`\n到期时间：\n`{$expired_at}`\n余额/佣金余额：\n`{$money}/{$affmoney}`\n主题：\n`{$ticket->subject}`\n内容：\n {$message} ", false, ['super']);
 			} else {
 				// Handle case where user data is not found
-				$telegramService->sendMessageWithAdmin("User data not found for user ID: {$userid}", false);
+				$telegramService->sendMessageWithAdmin("User data not found for user ID: {$userid}", true);
 			}
 		} else {
-			$telegramService->sendMessageWithAdmin("📮工单提醒 #{$ticket->id}\n———————————————\n主题：\n`{$ticket->subject}`\n内容：\n {$message} ", false);
+			$telegramService->sendMessageWithAdmin("📮工单提醒 #{$ticket->id}\n———————————————\n主题：\n`{$ticket->subject}`\n内容：\n {$message} ", true);
 		}
 		} catch (\Throwable $e) {
 			// 2026-08-01 问题三：通知失败只记日志，工单主流程照常返回成功。

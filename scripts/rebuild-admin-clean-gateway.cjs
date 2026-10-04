@@ -1,6 +1,6 @@
 /**
  * 开发工具：把 scripts/admin-clean-gateway-module.js 的当前内容重新写进
- * public/assets/admin/umi.js。
+ * resources/admin/legacy/umi.js。
  *
  * 为什么需要它：patch-admin-clean-gateway.php 是幂等的 —— 产物里已经是它打过的样子
  * 时，它会直接跳过模块替换（这是重复部署必须的行为）。所以改完模块源码后单跑补丁是
@@ -125,7 +125,7 @@ function fromGit(commit) {
         .toString('utf8').split('\r\n').join('\n');
 }
 
-const bundlePath = path.join(ROOT, 'public/assets/admin/umi.js');
+const bundlePath = path.join(ROOT, 'resources/admin/legacy/umi.js');
 const rebuilt = build(fromGit('HEAD'));
 
 for (const needle of ['href: "/risk/rule"', 'riskrulepage', 'title: "订阅风控网关"', '/risk/rule/recompute',

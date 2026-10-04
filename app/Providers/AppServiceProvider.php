@@ -34,6 +34,31 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot()
     {
+        \App\Services\SecurityAuditQueue::register();
+        foreach (['created', 'updated', 'deleted'] as $event) {
+            \Illuminate\Support\Facades\Event::listen('eloquent.' . $event . ': *', function ($name, $payload) use ($event) {
+                \App\Services\SecurityAuditService::modelChange($event, $payload[0]);
+            });
+        }
+        \Illuminate\Support\Facades\DB::listen(function ($query) {
+            if (!app()->bound('request')) return;
+            $request = request();
+            $context = $request->attributes->get('security_audit_context');
+            if (!$context || !preg_match('/^\s*(insert(?:\s+or\s+ignore)?\s+into|update|delete\s+from)\s+[`"]?(\w+)/i', $query->sql, $matches)) return;
+            if (strpos($matches[2], 'v2_admin_audit') === 0) return;
+            // Never record SQL bindings: they can contain credentials or payment secrets.
+            $context['statements'][] = ['operation' => strtolower($matches[1]), 'table' => $matches[2]];
+            $request->attributes->set('security_audit_context', $context);
+        });
+        User::saving(function ($user) {
+            if (!$user->exists || (int)$user->getOriginal('id') !== 1 || !(int)$user->getOriginal('is_admin')) return;
+            if ($user->isDirty('id') || !$user->is_admin || $user->banned || $user->admin_role) {
+                throw new \RuntimeException('不能删除、停用或降级唯一超级管理员');
+            }
+        });
+        User::deleting(function ($user) {
+            if ((int)$user->id === 1 && $user->is_admin) throw new \RuntimeException('不能删除唯一超级管理员');
+        });
         $this->app['view']->addNamespace('theme', public_path() . '/theme');
         foreach (ServerIdService::TYPES as $entry) {
             $entry[0]::observe(RatePolicyNodeObserver::class);

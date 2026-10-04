@@ -295,6 +295,13 @@ class ConfigController extends Controller
                 )
             ]
         ];
+        if (($request->user['admin_role'] ?? 'super') !== 'super') {
+            unset($data['rewards']);
+            foreach ($data as &$section) {
+                if (is_array($section)) foreach (\App\Services\AdminAccessService::SECURITY_FIELDS as $field) unset($section[$field]);
+            }
+            unset($section);
+        }
         if ($key && isset($data[$key])) {
             return response([
                 'data' => [

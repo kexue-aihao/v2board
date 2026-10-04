@@ -261,7 +261,7 @@ class FailingCallbackTelegramService extends TelegramService
         throw new RuntimeException('callback acknowledgement failed');
     }
 
-    public function sendMessage(int $chatId, string $text, string $parseMode = '', ?array $replyMarkup = null)
+    public function sendMessage(int $chatId, string $text, string $parseMode = '', ?array $replyMarkup = null, ?int $messageThreadId = null)
     {
         $this->messages[] = compact('chatId', 'text', 'parseMode', 'replyMarkup');
         return (object)['ok' => true];

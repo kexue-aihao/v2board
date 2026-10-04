@@ -204,7 +204,7 @@ class NativeResultTelegramService extends TelegramService
 {
     public $messages = [];
 
-    public function sendMessage(int $chatId, string $text, string $parseMode = '', ?array $replyMarkup = null)
+    public function sendMessage(int $chatId, string $text, string $parseMode = '', ?array $replyMarkup = null, ?int $messageThreadId = null)
     {
         $this->messages[] = compact('chatId', 'text', 'parseMode', 'replyMarkup');
         return (object)['ok' => true];

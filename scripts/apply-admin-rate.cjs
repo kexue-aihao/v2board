@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const bundlePath = path.join(__dirname, '../public/assets/admin/umi.js');
+const bundlePath = path.join(__dirname, '../resources/admin/legacy/umi.js');
 const modulePath = path.join(__dirname, 'admin-rate-module.js');
 let bundle = fs.readFileSync(bundlePath, 'utf8').replace(/\r\n/g, '\n');
 const changed = [];

@@ -1,6 +1,6 @@
 <?php
 
-$bundlePath = __DIR__ . '/../public/assets/admin/umi.js';
+$bundlePath = __DIR__ . '/../resources/admin/legacy/umi.js';
 $bundle = file_get_contents($bundlePath);
 if ($bundle === false) {
     fwrite(STDERR, "Unable to read admin bundle.\n");

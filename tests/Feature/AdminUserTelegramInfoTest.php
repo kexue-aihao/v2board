@@ -46,6 +46,10 @@ class AdminUserTelegramInfoTest extends TestCase
     private function login(bool $admin = true): void
     {
         $user = User::create(['email' => 'operator@example.test', 'is_admin' => $admin]);
+        if ($admin) {
+            \Tests\Support\AdminSecurityFixture::install();
+            $user->refresh();
+        }
         $auth = (new AuthService($user))->generateAuthData(Request::create('/'), true);
         $this->withHeader('authorization', $auth['auth_data']);
     }

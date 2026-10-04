@@ -12,7 +12,7 @@ const { test } = require('node:test');
 // 检出成 CRLF，而下面的模块边界扫描与菜单断言都按 \n 锚定 —— 不归一化的话，同一份产物
 // 在这台机器上会假报失败。
 const bundle = fs
-    .readFileSync(path.join(__dirname, '../../public/assets/admin/umi.js'), 'utf8')
+    .readFileSync(path.join(__dirname, '../../resources/admin/legacy/umi.js'), 'utf8')
     .split('\r\n')
     .join('\n');
 

@@ -38,7 +38,8 @@ class SchemaUpgradeService
         'server_tls_pin_schema' => 'server_tls_pin_schema_v1',
         'dynamic_rate_schema' => 'dynamic_rate_schema_v1',
         'rate_policy_schema' => 'rate_policy_schema_v1',
-        'external_subscription_schema' => 'external_subscription_schema_v1'
+        'external_subscription_schema' => 'external_subscription_schema_v1',
+        'admin_security_schema' => 'admin_security_schema_v1'
     ];
 
     public function run(): array
@@ -170,6 +171,9 @@ class SchemaUpgradeService
                 return;
             case 'external_subscription_schema':
                 $this->applyExternalSubscriptionSchema();
+                return;
+            case 'admin_security_schema':
+                AdminSecuritySchema::apply();
                 return;
         }
 

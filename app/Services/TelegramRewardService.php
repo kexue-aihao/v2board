@@ -429,7 +429,7 @@ class TelegramRewardService
         return [
             'user' => $user,
             'subscription_id' => (int)$subscription->id,
-            'is_admin' => (int)$user->is_admin === 1,
+            'is_admin' => in_array(AdminAccessService::role($user), ['super', 'marketing'], true),
         ];
     }
 
