@@ -33,6 +33,8 @@ class ServerBatchOperationTest extends TestCase
                 $table->increments('id');
                 $table->string('name');
                 $table->string('host');
+                $table->string('port')->default('443');
+                $table->integer('server_port')->nullable()->default(443);
                 $table->string('rate')->default('1');
                 $table->boolean('show')->default(true);
                 $table->integer('sort')->default(0);
@@ -463,6 +465,171 @@ class ServerBatchOperationTest extends TestCase
         ])->assertStatus(500);
         $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'rate' => '1']);
         $this->assertDatabaseHas('v2_server_tuic', ['id' => 1, 'rate' => '3']);
+    }
+
+    public function testServerPortPreviewAndApplySupportEveryTypeAndPreserveOtherFields(): void
+    {
+        $selection = [];
+        $before = [];
+        $unselected = [];
+        foreach (self::TYPES as $type) {
+            $this->seedNode($type, 1, $type . '-node', [
+                'server_port' => $type === 'vmess' ? 8443 : 443,
+                'port' => '10000-20000',
+                'show' => 0,
+                'tls_settings' => json_encode(['server_port' => '443', 'private_key' => 'keep-me']),
+            ]);
+            $this->seedNode($type, 2, $type . '-child', ['server_port' => 10443, 'parent_id' => 1]);
+            $selection[] = ['type' => $type, 'id' => 1];
+            $before[$type] = (array) DB::table('v2_server_' . $type)->where('id', 1)->first();
+            $unselected[$type] = (array) DB::table('v2_server_' . $type)->where('id', 2)->first();
+        }
+        $preview = $this->postJson($this->url . '/server-port/preview', ['nodes' => $selection, 'server_port' => '8443'])
+            ->assertOk()->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.server_port', 8443)->assertJsonPath('data.matched_count', 8)->assertJsonPath('data.changed_count', 7);
+        foreach ($preview->json('data.nodes') as $node) {
+            $this->assertSame($node['type'] !== 'vmess', $node['changed']);
+            $this->assertSame(8443, $node['new_server_port']);
+            $this->assertSame($before[$node['type']], (array) DB::table('v2_server_' . $node['type'])->where('id', 1)->first());
+            $this->assertArrayNotHasKey('tls_settings', $node);
+        }
+        $this->postJson($this->url . '/server-port/apply', [
+            'nodes' => $preview->json('data.nodes'), 'server_port' => 8443, 'confirm' => true,
+        ])->assertOk()->assertJsonPath('data.server_port', 8443)->assertJsonPath('data.matched_count', 8)
+            ->assertJsonPath('data.updated_count', 7)->assertJsonCount(7, 'data.nodes');
+        foreach (self::TYPES as $type) {
+            $after = (array) DB::table('v2_server_' . $type)->where('id', 1)->first();
+            $before[$type]['server_port'] = 8443;
+            unset($before[$type]['updated_at'], $after['updated_at']);
+            $this->assertSame($before[$type], $after);
+            $this->assertSame($unselected[$type], (array) DB::table('v2_server_' . $type)->where('id', 2)->first());
+        }
+        $this->assertSame(0, DB::transactionLevel());
+    }
+
+    public function testServerPortChangesASelectedChildWithoutUpdatingItsParent(): void
+    {
+        $this->seedNode('v2node', 1, 'parent');
+        $this->seedNode('v2node', 2, 'child', ['parent_id' => 1]);
+        $this->postJson($this->url . '/server-port/apply', [
+            'nodes' => [['type' => 'v2node', 'id' => 2, 'server_port' => 443]], 'server_port' => 8443, 'confirm' => true,
+        ])->assertOk()->assertJsonPath('data.updated_count', 1);
+        $this->assertDatabaseHas('v2_server_v2node', ['id' => 1, 'server_port' => 443]);
+        $this->assertDatabaseHas('v2_server_v2node', ['id' => 2, 'server_port' => 8443, 'parent_id' => 1]);
+    }
+
+    public function testServerPortBoundariesAndLegacyEmptyValues(): void
+    {
+        $this->seedNode('v2node', 1, 'node', ['server_port' => null]);
+        $previous = null;
+        foreach ([1, '65535'] as $port) {
+            $preview = $this->postJson($this->url . '/server-port/preview', [
+                'nodes' => [['type' => 'v2node', 'id' => 1]], 'server_port' => $port,
+            ])->assertOk()->assertJsonPath('data.nodes.0.server_port', $previous);
+            $this->postJson($this->url . '/server-port/apply', [
+                'nodes' => $preview->json('data.nodes'), 'server_port' => $port, 'confirm' => true,
+            ])->assertOk()->assertJsonPath('data.updated_count', 1);
+            $previous = (int) $port;
+            $this->assertDatabaseHas('v2_server_v2node', ['id' => 1, 'server_port' => $previous]);
+        }
+    }
+
+    /** @dataProvider invalidBatchServerPorts */
+    public function testInvalidServerPortsAreRejectedByPreviewAndApply($port): void
+    {
+        $this->seedNode('trojan', 1, 'node');
+        foreach (['preview', 'apply'] as $action) {
+            $this->postJson($this->url . '/server-port/' . $action, [
+                'nodes' => [['type' => 'trojan', 'id' => 1, 'server_port' => 443]], 'server_port' => $port, 'confirm' => true,
+            ])->assertStatus(422)->assertJsonValidationErrors('server_port');
+        }
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'server_port' => 443]);
+    }
+
+    public static function invalidBatchServerPorts(): array
+    {
+        return [
+            [''], [null], [0], [-1], [65536], [1.5], ['443.0'], ['1e2'], ['+443'], ['00443'],
+            ['443-444'], ['443,444'], ['NaN'], [true], [false], [['443']],
+        ];
+    }
+
+    public function testServerPortRequiresConfirmationSnapshotValidSelectionAndAdminAccess(): void
+    {
+        $this->seedNode('trojan', 1, 'node');
+        $params = ['nodes' => [['type' => 'trojan', 'id' => 1, 'server_port' => 443]], 'server_port' => 8443];
+        $this->postJson($this->url . '/server-port/apply', $params)->assertStatus(422)->assertJsonValidationErrors('confirm');
+        $this->postJson($this->url . '/server-port/apply', [
+            'nodes' => [['type' => 'trojan', 'id' => 1]], 'server_port' => 8443, 'confirm' => true,
+        ])->assertStatus(422)->assertJsonValidationErrors('nodes.0.server_port');
+        foreach (['preview', 'apply'] as $action) {
+            $this->postJson($this->url . '/server-port/' . $action, ['nodes' => $params['nodes'], 'confirm' => true])
+                ->assertStatus(422)->assertJsonValidationErrors('server_port');
+            foreach ([[], [['type' => 'unknown', 'id' => 1, 'server_port' => 443]],
+                [['type' => 'trojan', 'id' => 0, 'server_port' => 443]],
+                [['type' => 'trojan', 'id' => 404, 'server_port' => 443]],
+                array_fill(0, 201, $params['nodes'][0])] as $selection) {
+                $this->postJson($this->url . '/server-port/' . $action, [
+                    'nodes' => $selection, 'server_port' => 8443, 'confirm' => true,
+                ])->assertStatus(422);
+            }
+        }
+        $this->withMiddleware(Admin::class);
+        foreach (['preview', 'apply'] as $action) {
+            $this->postJson($this->url . '/server-port/' . $action, $params + ['confirm' => true])->assertStatus(403);
+        }
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'server_port' => 443]);
+    }
+
+    public function testServerPortDeduplicatesAndSkipsAlreadyMatchingValues(): void
+    {
+        $this->seedNode('trojan', 1, 'node', ['server_port' => 8443]);
+        DB::statement("CREATE TRIGGER forbid_port_write BEFORE UPDATE ON v2_server_trojan BEGIN SELECT RAISE(ABORT, 'must skip unchanged'); END");
+        $selection = array_fill(0, 2, ['type' => 'trojan', 'id' => 1, 'server_port' => 443]);
+        $this->postJson($this->url . '/server-port/preview', ['nodes' => $selection, 'server_port' => 8443])
+            ->assertOk()->assertJsonPath('data.matched_count', 1)->assertJsonPath('data.changed_count', 0);
+        $this->postJson($this->url . '/server-port/apply', ['nodes' => $selection, 'server_port' => 8443, 'confirm' => true])
+            ->assertOk()->assertJsonPath('data.requested_count', 2)->assertJsonPath('data.matched_count', 1)->assertJsonPath('data.updated_count', 0);
+    }
+
+    public function testServerPortConcurrentChangeRollsBackTheBatch(): void
+    {
+        $this->seedNode('trojan', 1, 'first');
+        $this->seedNode('tuic', 1, 'second');
+        $preview = $this->postJson($this->url . '/server-port/preview', [
+            'nodes' => [['type' => 'trojan', 'id' => 1], ['type' => 'tuic', 'id' => 1]], 'server_port' => 8443,
+        ])->assertOk();
+        DB::table('v2_server_tuic')->where('id', 1)->update(['server_port' => 9443]);
+        $this->postJson($this->url . '/server-port/apply', [
+            'nodes' => $preview->json('data.nodes'), 'server_port' => 8443, 'confirm' => true,
+        ])->assertStatus(409);
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'server_port' => 443]);
+        $this->assertDatabaseHas('v2_server_tuic', ['id' => 1, 'server_port' => 9443]);
+        $this->assertSame(0, DB::transactionLevel());
+    }
+
+    /** @dataProvider serverPortWriteFailures */
+    public function testServerPortWriteFailureRollsBackEarlierUpdates(string $trigger): void
+    {
+        $this->seedNode('trojan', 1, 'first');
+        $this->seedNode('tuic', 1, 'second');
+        DB::statement($trigger);
+        $this->postJson($this->url . '/server-port/apply', [
+            'nodes' => [['type' => 'trojan', 'id' => 1, 'server_port' => 443], ['type' => 'tuic', 'id' => 1, 'server_port' => 443]],
+            'server_port' => 8443, 'confirm' => true,
+        ])->assertStatus(500);
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'server_port' => 443]);
+        $this->assertDatabaseHas('v2_server_tuic', ['id' => 1, 'server_port' => 443]);
+        $this->assertSame(0, DB::transactionLevel());
+    }
+
+    public static function serverPortWriteFailures(): array
+    {
+        return [
+            ['CREATE TRIGGER restore_port AFTER UPDATE OF server_port ON v2_server_tuic
+                BEGIN UPDATE v2_server_tuic SET server_port = OLD.server_port WHERE id = NEW.id; END'],
+            ["CREATE TRIGGER fail_port BEFORE UPDATE OF server_port ON v2_server_tuic BEGIN SELECT RAISE(ABORT, 'port test failure'); END"],
+        ];
     }
 
     public function testInspectionReadsAllTypesWithoutWritingOrExposingTlsSecrets(): void

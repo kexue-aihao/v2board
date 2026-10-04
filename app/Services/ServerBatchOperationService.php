@@ -302,6 +302,91 @@ class ServerBatchOperationService
         return is_numeric($current) && is_finite((float) $current) && (float) $current === (float) $target;
     }
 
+    /** 顶层 server_port 为服务端监听端口，区别于连接端口及 REALITY 目标端口。 */
+    public function previewServerPort(array $selection, int $port): array
+    {
+        $this->validateServerPort($port);
+        $nodes = [];
+        foreach ($this->load($selection) as $entry) {
+            $server = $entry['server'];
+            $current = $server->server_port === null ? null : (int) $server->server_port;
+            $nodes[] = [
+                'id' => (int) $server->id,
+                'type' => $entry['type'],
+                'name' => (string) $server->name,
+                'server_port' => $current,
+                'new_server_port' => $port,
+                'changed' => $current !== $port,
+            ];
+        }
+
+        return [
+            'server_port' => $port,
+            'matched_count' => count($nodes),
+            'changed_count' => count(array_filter($nodes, function (array $node) { return $node['changed']; })),
+            'nodes' => $nodes,
+        ];
+    }
+
+    public function applyServerPort(array $selection, int $port): array
+    {
+        $this->validateServerPort($port);
+        return DB::transaction(function () use ($selection, $port) {
+            $entries = $this->resolve($selection);
+            $expected = [];
+            foreach ($selection as $item) {
+                if (!array_key_exists('server_port', $item)) {
+                    abort(422, __('请先预览节点服务端口'));
+                }
+                $key = $item['type'] . ':' . $item['id'];
+                if (!array_key_exists($key, $expected)) {
+                    $expected[$key] = $item['server_port'] === null ? null : (int) $item['server_port'];
+                }
+            }
+            $updated = [];
+            foreach ($entries as $entry) {
+                $server = $entry['server'];
+                $current = $server->server_port === null ? null : (int) $server->server_port;
+                if ($current === $port) {
+                    continue;
+                }
+                if ($current !== $expected[$entry['type'] . ':' . $server->id]) {
+                    abort(409, __('节点服务端口已变更，请重新预览：:type #:id', ['type' => $entry['type'], 'id' => $server->id]));
+                }
+                $server->server_port = $port;
+                if (!$server->save()) {
+                    abort(500, __('节点服务端口保存失败，本次操作已回滚'));
+                }
+                $persisted = $server->fresh();
+                if (!$persisted || (int) $persisted->server_port !== $port) {
+                    abort(500, __('节点服务端口保存后复核不一致，本次操作已回滚'));
+                }
+                $updated[] = [
+                    'id' => (int) $persisted->id,
+                    'type' => $entry['type'],
+                    'name' => (string) $persisted->name,
+                    'old_server_port' => $current,
+                    'server_port' => (int) $persisted->server_port,
+                ];
+            }
+
+            return [
+                'server_port' => $port,
+                'requested_count' => count($selection),
+                'matched_count' => count($entries),
+                'updated_count' => count($updated),
+                'nodes' => $updated,
+            ];
+        });
+    }
+
+    private function validateServerPort(int $port): void
+    {
+        if ($port < 1 || $port > 65535) {
+            abort(422, __('服务端口须为 1～65535 之间的整数'));
+        }
+    }
+
     /** 查看选中节点当前保存的 TLS 字段，只返回展示所需的字段。 */
     public function inspectTlsFields(array $selection): array
     {

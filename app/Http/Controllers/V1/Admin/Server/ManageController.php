@@ -123,6 +123,22 @@ class ManageController extends Controller
         ]);
     }
 
+    public function previewServerPort(Request $request)
+    {
+        $params = $this->validateServerPort($request, false);
+        return response([
+            'data' => (new ServerBatchOperationService())->previewServerPort($params['nodes'], (int) $params['server_port'])
+        ])->header('Cache-Control', 'no-store, private');
+    }
+
+    public function applyServerPort(Request $request)
+    {
+        $params = $this->validateServerPort($request, true);
+        return response([
+            'data' => (new ServerBatchOperationService())->applyServerPort($params['nodes'], (int) $params['server_port'])
+        ]);
+    }
+
     public function inspectTlsFields(Request $request)
     {
         $params = $this->validateSelection($request, false);
@@ -280,6 +296,18 @@ class ManageController extends Controller
         return $this->validateSelection($request, $requireConfirmation, [
             'rate' => ['required', 'numeric', 'gt:0', 'max:99999999.99', 'regex:' . ServerBatchOperationService::RATE_PATTERN],
         ]);
+    }
+
+    private function validateServerPort(Request $request, bool $requireConfirmation): array
+    {
+        $rules = [
+            'server_port' => ['required', 'numeric', 'integer', 'between:1,65535', 'regex:/\A[1-9][0-9]{0,4}\z/'],
+        ];
+        if ($requireConfirmation) {
+            // Carry the saved value from preview to detect concurrent edits, including legacy empty values.
+            $rules['nodes.*.server_port'] = 'present|nullable|integer';
+        }
+        return $this->validateSelection($request, $requireConfirmation, $rules);
     }
 
     private function validateTlsFields(Request $request, bool $requireConfirmation): array
