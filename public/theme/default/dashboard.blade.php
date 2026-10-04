@@ -16,12 +16,16 @@
         $siteStatusAssetVersion = $siteStatusAssets
             ? max($siteStatusAssets) . '-' . substr(hash('sha256', implode('|', $siteStatusAssetFingerprint)), 0, 12)
             : $version;
+        $defaultCustomAssetPath = public_path("theme/{$theme}/assets/custom.css");
+        $defaultCustomAssetVersion = is_file($defaultCustomAssetPath)
+            ? filemtime($defaultCustomAssetPath) . '-' . substr(hash_file('sha256', $defaultCustomAssetPath), 0, 12)
+            : $version;
     @endphp
     <link rel="stylesheet" href="/theme/default/assets/site-status.css?v={{$siteStatusAssetVersion}}">
     <link rel="stylesheet" href="/theme/{{$theme}}/assets/components.chunk.css?v={{$version}}">
     <link rel="stylesheet" href="/theme/{{$theme}}/assets/umi.css?v={{$version}}">
     @if (file_exists(public_path("/theme/{$theme}/assets/custom.css")))
-        <link rel="stylesheet" href="/theme/{{$theme}}/assets/custom.css?v={{$version}}">
+        <link rel="stylesheet" href="/theme/{{$theme}}/assets/custom.css?v={{$defaultCustomAssetVersion}}">
     @endif
     <meta charset="utf-8">
     {{-- 与管理端同步放开捏合缩放，理由见 resources/views/admin.blade.php。

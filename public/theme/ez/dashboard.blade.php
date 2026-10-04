@@ -38,6 +38,10 @@
         $ezAssetUrl = function ($file) use ($theme, $ezAssetVersion) {
             return '/theme/' . $theme . '/assets/' . ltrim($file, '/') . '?v=' . $ezAssetVersion;
         };
+        $ezPlanContentPath = $ezAssetRoot . '/plan-content.css';
+        $ezPlanContentVersion = is_file($ezPlanContentPath)
+            ? filemtime($ezPlanContentPath) . '-' . substr(hash_file('sha256', $ezPlanContentPath), 0, 12)
+            : $version;
 
         // 钱包充值入口开关。EZ 主题把整个 /wallet/deposit 功能锁在 baseConfig 的
         // PANEL_TYPE 上：isXiaoV2board() 判定 PANEL_TYPE === 'Xiao-V2board'，为假时
@@ -113,6 +117,7 @@
     @foreach ($ezStyles as $ezStyle)
         <link rel="stylesheet" href="{{ $ezAssetUrl($ezStyle) }}">
     @endforeach
+    <link rel="stylesheet" href="/theme/{{ $theme }}/assets/plan-content.css?v={{ $ezPlanContentVersion }}">
     {{-- manifest 只允许列出 initial chunk。异步 chunk 由 webpack 运行时自己按需加载
          （publicPath 已内联进 runtime）；一旦把异步 CSS 列到这里，上面那个 ?v= 会让
          mini-css-extract 的 findStylesheet 判定失配，导致每个路由的 <link> 被重复插入。

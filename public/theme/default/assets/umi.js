@@ -33008,7 +33008,7 @@
                     }
                 }, f.a.createElement("h4", {
                     className: "mb-0 px-3"
-                }, t.name), g && "object" === typeof g ? f.a.createElement("div", {
+                }, t.name), Array.isArray(g) && g.length > 0 && g.every(e=>e && "object" === typeof e && Object.prototype.hasOwnProperty.call(e, "feature")) ? f.a.createElement("div", {
                     className: "v2board-plan-content px-3"
                 }, null === g || void 0 === g ? void 0 : g.map(e=>{
                     return f.a.createElement("div", {

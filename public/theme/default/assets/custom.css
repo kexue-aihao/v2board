@@ -12,6 +12,50 @@
   --user-ticket-shadow: 0 8px 24px rgb(31 41 55 / 7%);
 }
 
+/* Plan descriptions can contain user-authored HTML. Keep their layout inside
+   the card on narrow screens without overriding inline presentation styles. */
+.v2board-plan-content,
+.html-content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+
+.v2board-plan-content *,
+.html-content * {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.v2board-plan-content img,
+.html-content img {
+  height: auto;
+}
+
+.v2board-plan-content table,
+.html-content table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+}
+
+.v2board-plan-content pre,
+.html-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.v2board-plan-content a,
+.html-content a {
+  overflow-wrap: anywhere;
+}
+
 .v2-ticket-workspace {
   display: grid;
   grid-template-columns: minmax(360px, 40%) minmax(0, 1fr);

@@ -86,6 +86,16 @@
         });
     }
 
+    function renderPlanDescription(value) {
+        var content = String(value == null ? '' : value);
+        try {
+            // Feature-list JSON is rendered as text on this page. Escaping it
+            // keeps markup inside feature values from becoming executable HTML.
+            if (Array.isArray(JSON.parse(content))) return escapeHtml(content);
+        } catch (error) {}
+        return content;
+    }
+
     function money(value) {
         return '\u00a5' + (Number(value) / 100).toFixed(2);
     }
@@ -339,7 +349,7 @@
                 var choices = periods.filter(function (period) { return Number(plan[period]) > 0; }).map(function (period) {
                     return '<button type="button" data-plan="' + Number(plan.id) + '" data-period="' + period + '">' + labels[period] + ' \u00b7 ' + money(plan[period]) + '</button>';
                 }).join('');
-                return '<article class="plan"><h3>' + escapeHtml(plan.name) + '</h3><p>' + escapeHtml(plan.content || '\u57fa\u7840\u8ba2\u9605\u5957\u9910') + '</p><div class="plan-actions">' + choices + '</div></article>';
+                return '<article class="plan"><h3>' + escapeHtml(plan.name) + '</h3><div class="plan-description">' + renderPlanDescription(plan.content || '\u57fa\u7840\u8ba2\u9605\u5957\u9910') + '</div><div class="plan-actions">' + choices + '</div></article>';
             }).join('') : '<div class="empty">\u5f53\u524d\u6682\u65e0\u53ef\u552e\u5957\u9910</div>';
         }).catch(function (error) { show(error.message, true); });
     }
@@ -358,10 +368,12 @@
             var cards = document.querySelectorAll('#plans .plan');
             plans.forEach(function (plan, index) {
                 if (Number(plan.shared_member_limit || 1) <= 1 || !cards[index]) return;
+                var description = cards[index].querySelector('.plan-description');
+                if (!description) return;
                 var badge = document.createElement('small');
                 badge.className = 'shared-plan-note';
                 badge.textContent = '\u5171\u4eab\u5957\u9910 \u00b7 \u6700\u591a ' + Number(plan.shared_member_limit) + ' \u4eba\uff08\u542b\u8d2d\u4e70\u8005\uff09\u5171\u4eab\u6d41\u91cf\u4e0e\u8bbe\u5907\u989d\u5ea6';
-                cards[index].querySelector('p').insertAdjacentElement('afterend', badge);
+                description.insertAdjacentElement('afterend', badge);
             });
         }).catch(function () {});
     }

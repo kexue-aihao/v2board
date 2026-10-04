@@ -331,13 +331,17 @@
 
         /* ── 10. 内容零件（多数由 app.js 注入，类名不可改）───────────────────────── */
         .plans { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-        /* ⚠ app.js:338 注入 article.plan，结构固定为 h3 + p（第一个 p 是描述）+ .plan-actions；
-             decorateSharedPlans(:358-364) 按 API 数组顺序索引对齐 #plans .plan，往「卡内第一个
-             p」的 afterend 插 small.shared-plan-note。p 的 15px 下边距是那枚徽章 margin:-8px 的基准。 */
+        /* ⚠ app.js:338 注入 article.plan，结构固定为 h3 + .plan-description + .plan-actions；
+             decorateSharedPlans(:358-366) 按 API 数组顺序索引对齐 #plans .plan，往 .plan-description
+             的 afterend 插 small.shared-plan-note。描述的 15px 下边距是徽章 margin:-8px 的基准。 */
         .plan { display: flex; min-height: 190px; flex-direction: column; padding: 17px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--chip-bg); transition: border-color var(--ease-fast), background-color var(--ease-fast); }
         .plan:hover { border-color: rgba(var(--theme-color-rgb), .3); }
         .plan h3 { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
-        .plan p { min-height: 48px; margin: 0 0 15px; color: var(--secondary-text-color); font-size: 13px; }
+        .plan-description { min-height: 48px; min-width: 0; max-width: 100%; margin: 0 0 15px; color: var(--secondary-text-color); font-size: 13px; overflow-wrap: anywhere; word-break: break-word; }
+        .plan-description * { box-sizing: border-box; max-width: 100%; }
+        .plan-description img { height: auto; }
+        .plan-description table { display: block; width: 100%; overflow-x: auto; }
+        .plan-description pre { max-width: 100%; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
         .plan-actions { display: flex; gap: 7px; flex-wrap: wrap; margin-top: auto; }
         .plan-actions button { height: var(--control-h-sm); padding: 0 12px; font-size: 12px; }
         .empty { grid-column: 1 / -1; padding: 22px 10px; color: var(--secondary-text-color); font-size: 12px; line-height: 1.7; text-align: center; }
@@ -575,13 +579,13 @@
       plan · plan-actions · empty · order-row · subscription-summary · subscription-meta
       subscription-url · field-note · security-status + is-good / is-error · is-active
       shared-progress · shared-track · shared-plan-note
-    以及这些标签选择器：.plan h3 · .plan p · .order-row span（后代！内含注入按钮）
+    以及这些标签选择器：.plan h3 · .plan-description · .order-row span（后代！内含注入按钮）
       .order-row strong · .subscription-summary strong|p · select > option
 
     结构依赖（违反后多数静默失效，不报错）：
       · #orders-section 必须存在且 id 不改        → app.js:371-372（+ :135 无 null 保护）
       · blade 绝不能预声明 #shared-section        → app.js:370 会提前 return，三个监听不绑定
-      · 套餐卡 h3 + p(第一个p) + .plan-actions    → app.js:358-364 徽章插位与索引对齐
+      · 套餐卡 h3 + .plan-description + .plan-actions → app.js:358-366 徽章插位与索引对齐
       · 模块加载时缓存的 11 个 id 必须先于脚本存在 → app.js:19-29
         message auth-section account logout login-form register-form two-factor-form
         auth-title auth-caption arithmetic-answer arithmetic-status

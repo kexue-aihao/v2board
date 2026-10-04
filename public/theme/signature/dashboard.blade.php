@@ -71,6 +71,10 @@
         $signatureAssetUrl = function ($file) use ($theme, $signatureAssetVersion) {
             return '/theme/' . $theme . '/assets/' . ltrim($file, '/') . '?v=' . $signatureAssetVersion;
         };
+        $signaturePlanContentPath = $signatureAssetRoot . '/plan-content.css';
+        $signaturePlanContentVersion = is_file($signaturePlanContentPath)
+            ? filemtime($signaturePlanContentPath) . '-' . substr(hash_file('sha256', $signaturePlanContentPath), 0, 12)
+            : $version;
 
         // 2026-08-01 问题四：imgbb 图床 key 后台配置化。config.json configs[] 新增 imgbb_api_key
         // （后台主题配置表单 → ThemeController::saveThemeConfig 白名单写入 config/theme/signature.php），
@@ -184,6 +188,7 @@
     @foreach ($signatureStyles as $signatureStyle)
         <link rel="stylesheet" href="{{ $signatureAssetUrl($signatureStyle) }}">
     @endforeach
+    <link rel="stylesheet" href="/theme/{{ $theme }}/assets/plan-content.css?v={{ $signaturePlanContentVersion }}">
     {{-- manifest 只允许列出 initial chunk。异步 chunk 由 webpack 运行时自己按需加载
          （publicPath 已内联进 runtime）；一旦把异步 CSS 列到这里，上面那个 ?v= 会让
          mini-css-extract 的 findStylesheet 判定失配，导致每个路由的 <link> 被重复插入。

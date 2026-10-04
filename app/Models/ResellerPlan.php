@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use App\Services\PlanContentSanitizer;
 
 class ResellerPlan extends Model
 {
@@ -15,6 +16,17 @@ class ResellerPlan extends Model
         'created_at' => 'timestamp',
         'updated_at' => 'timestamp',
     ];
+
+    public function getContentAttribute($value): string
+    {
+        return PlanContentSanitizer::sanitize((string)$value);
+    }
+
+    public function setContentAttribute($value): void
+    {
+        $content = is_scalar($value) || $value === null ? (string)$value : '';
+        $this->attributes['content'] = PlanContentSanitizer::sanitize($content);
+    }
 
     public function reseller()
     {
