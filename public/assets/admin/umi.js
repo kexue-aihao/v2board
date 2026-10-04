@@ -71731,6 +71731,11 @@
                 }
             }
             componentWillUnmount() {
+                this.subscriptionCleanupDisposed = true;
+                if (this.subscriptionCleanupModal) {
+                    this.subscriptionCleanupModal.destroy();
+                    this.subscriptionCleanupModal = null;
+                }
                 if (this.telegramInfoModal) {
                     this.telegramInfoModal.destroy();
                     this.telegramInfoModal = null;
@@ -71809,6 +71814,86 @@
                         })
                     }
                 })
+            }
+            subscriptionCleanup() {
+                var t = this;
+                if (this.subscriptionCleanupPending || this.subscriptionCleanupDisposed) return Promise.resolve();
+                if (this.subscriptionCleanupModal) {
+                    this.subscriptionCleanupModal.destroy();
+                    this.subscriptionCleanupModal = null;
+                }
+                this.subscriptionCleanupPending = true;
+                return Object(n("t3Un")["b"])("/" + window.settings.secure_path + "/user/subscription-cleanup", {
+                    action: "scan"
+                }).then(function(response) {
+                    if (t.subscriptionCleanupDisposed) return;
+                    if (!response || response.code !== 200) {
+                        throw new Error(response && (response.message || response.msg) || "检测失败，请稍后重试。");
+                    }
+                    var rows = response.data;
+                    if (!Array.isArray(rows) || !response.scan_token) throw new Error("检测结果异常，请重新检测。");
+                    var total = Number(response.total || 0);
+                    if (!total) {
+                        p["a"].info({
+                            title: "无效账号检测",
+                            content: "没有检测到符合条件的无效账号：订阅已过期或为空，且佣金和余额均为 0。",
+                            okText: "关闭"
+                        });
+                        return;
+                    }
+                    var preview = rows.slice(0, 20).map(function(row) {
+                        var reason = row.reason === "empty_and_expired" ? "订阅为空且已过期"
+                            : row.reason === "empty" ? "订阅为空" : "订阅已过期";
+                        return row.email + "（" + reason + "）";
+                    }).join("、");
+                    if (total > 20) preview += "；仅展示前 20 个，共 " + total + " 个用户";
+                    var scanToken = response.scan_token;
+                    t.subscriptionCleanupModal = p["a"].confirm({
+                        title: "无效账号检测",
+                        width: 620,
+                        content: g.a.createElement("div", null,
+                            g.a.createElement("p", null, "检测到 " + total + " 个普通用户符合清理条件。"),
+                            g.a.createElement("p", null, "条件：订阅已过期或为空，并且佣金为 0、余额为 0。存在其他未过期或长期有效订阅的账号会自动排除。"),
+                            g.a.createElement("p", {style: {wordBreak: "break-all", maxHeight: 180, overflow: "auto"}}, preview),
+                            g.a.createElement("p", {className: "mb-0 text-muted"}, "确认后将删除本次检测的全部 " + total + " 个账号及其订阅、订单、工单等关联数据，无法恢复。删除前会重新核验条件；管理员和员工账号自动排除。检测结果 15 分钟内有效。")),
+                        okText: "删除全部 " + total + " 个无效账号",
+                        okType: "danger",
+                        cancelText: "仅查看",
+                        onCancel: function() { t.subscriptionCleanupModal = null; },
+                        onOk: function() {
+                            return Object(n("t3Un")["b"])("/" + window.settings.secure_path + "/user/subscription-cleanup", {
+                                action: "delete",
+                                confirm: 1,
+                                scan_token: scanToken
+                            }).then(function(result) {
+                                if (!result || result.code !== 200) {
+                                    throw new Error(result && (result.message || result.msg) || "删除失败，请重新检测后重试。");
+                                }
+                                t.subscriptionCleanupModal = null;
+                                if (t.subscriptionCleanupDisposed) return;
+                                t.props.dispatch({type: "user/fetch"});
+                                p["a"].success({
+                                    title: "清理完成",
+                                    content: "已删除 " + Number((result.data || {}).deleted_count || 0) + " 个无效账号；状态已变化的账号会自动跳过。"
+                                });
+                            }).catch(function(error) {
+                                if (!t.subscriptionCleanupDisposed) {
+                                    t.props.dispatch({type: "user/fetch"});
+                                    p["a"].error({title: "删除失败", content: error.message || "删除失败，请重新检测后重试。"});
+                                }
+                                throw error;
+                            });
+                        }
+                    });
+                }).catch(function(error) {
+                    if (t.subscriptionCleanupDisposed) return;
+                    p["a"].error({
+                        title: "检测失败",
+                        content: error.message || "无效账号检测失败，请稍后重试。"
+                    });
+                }).finally(function() {
+                    t.subscriptionCleanupPending = false;
+                });
             }
             userFilter(e, t, n) {
                 var r = arguments.length > 3 && void 0 !== arguments[3] && arguments[3];
@@ -72571,7 +72656,11 @@
                         onClick: ()=>this.ban()
                     }, g.a.createElement(u["a"], {
                         type: "stop"
-                    }), " \u6279\u91cf\u5c01\u7981")), g.a.createElement(c["a"].Item, {
+                    }), " \u6279\u91cf\u5c01\u7981")), g.a.createElement(c["a"].Item, null, g.a.createElement("a", {
+                        onClick: ()=>this.subscriptionCleanup()
+                    }, g.a.createElement(u["a"], {
+                        type: "search"
+                    }), " 检测无效账号")), g.a.createElement(c["a"].Item, {
                         disabled: !E.length
                     }, g.a.createElement("a", {
                         disabled: !E.length,

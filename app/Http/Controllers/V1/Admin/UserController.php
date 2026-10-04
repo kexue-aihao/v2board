@@ -27,6 +27,7 @@ use App\Services\OnlineDeviceService;
 use App\Services\TelegramService;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use App\Services\SubscriptionTokenHistoryService;
 use App\Utils\TokenRotationContext;
@@ -695,6 +696,9 @@ class UserController extends Controller
                 // token 历史单独清：它不该被「清空该用户审计记录」那个按钮带走（那个按钮
                 // 的用途是重置误判的风险判定），但账号注销后 user_id 已无法解析，必须清。
                 (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
+                if (Schema::hasTable('v2_subscription')) {
+                    Subscription::where('user_id', $user->id)->delete();
+                }
                 User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
             });
             $builder->delete();
@@ -731,6 +735,9 @@ class UserController extends Controller
             (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
             // 同 allDel：token 历史不跟随「清空审计记录」按钮，但账号注销时必须清。
             (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
+            if (Schema::hasTable('v2_subscription')) {
+                Subscription::where('user_id', $user->id)->delete();
+            }
 
             $user->delete();
             DB::commit();
@@ -742,5 +749,157 @@ class UserController extends Controller
         return response([
             'data' => true
         ]);
+    }
+
+    /**
+     * 查找并可选删除订阅已过期或为空、且余额和佣金均为零的普通用户。
+     *
+     * 删除操作会再次按同一条件查询，避免管理员查看检测结果到确认删除之间，
+     * 用户已经续费或补上订阅后仍被误删。后台账号和员工账号始终不参与清理。
+     */
+    public function subscriptionCleanup(Request $request)
+    {
+        $action = (string)$request->input('action', 'scan');
+        if (!in_array($action, ['scan', 'delete'], true)) {
+            abort(422, __('参数错误'));
+        }
+
+        $now = time();
+        $hasSubscriptions = Schema::hasTable('v2_subscription');
+        $actorId = (int)$request->input('user.id', 0);
+
+        if ($action === 'scan') {
+            $ids = $this->subscriptionCleanupQuery($now, $hasSubscriptions)
+                ->orderBy('id')->pluck('id')->map(function ($id) {
+                    return (int)$id;
+                })->all();
+            $scanToken = bin2hex(random_bytes(16));
+            // 保留本次检测的具体账号，避免确认时把后来才变为无效的账号一起删除。
+            Cache::put('ADMIN_SUBSCRIPTION_CLEANUP_' . $scanToken, [
+                'ids' => $ids,
+                'checked_at' => $now,
+                'actor_id' => $actorId
+            ], 900);
+            $users = User::whereIn('id', array_slice($ids, 0, 200))->orderBy('id')->get([
+                'id', 'email', 'plan_id', 'expired_at', 'balance', 'commission_balance'
+            ]);
+            $data = $users->map(function ($user) use ($now) {
+                $empty = $user->plan_id === null;
+                $expired = $user->expired_at !== null && (int)$user->expired_at < $now;
+                return [
+                    'id' => (int)$user->id,
+                    'email' => $user->email,
+                    'expired_at' => $user->expired_at,
+                    'balance' => (int)$user->balance,
+                    'commission_balance' => (int)$user->commission_balance,
+                    'reason' => $empty && $expired ? 'empty_and_expired' : ($empty ? 'empty' : 'expired')
+                ];
+            })->values();
+
+            return response([
+                'data' => $data,
+                'total' => count($ids),
+                'returned' => $data->count(),
+                'checked_at' => $now,
+                'snapshot_max_id' => count($ids) ? max($ids) : null,
+                'scan_token' => $scanToken
+            ])->header('Cache-Control', 'no-store, private');
+        }
+
+        if (!$request->boolean('confirm')) {
+            abort(422, __('请确认删除操作'));
+        }
+
+        $params = $request->validate([
+            'scan_token' => 'required|string|size:32',
+            'ids' => 'sometimes|array|max:10000',
+            'ids.*' => 'required|integer|min:1'
+        ]);
+        $cacheKey = 'ADMIN_SUBSCRIPTION_CLEANUP_' . $params['scan_token'];
+        $snapshot = Cache::get($cacheKey);
+        if (!$snapshot || $snapshot['actor_id'] !== $actorId) {
+            abort(422, __('检测结果已失效，请重新检测'));
+        }
+        $ids = $snapshot['ids'];
+        if (array_key_exists('ids', $params)) {
+            $ids = array_values(array_intersect($ids, $params['ids']));
+        }
+
+        $deleted = 0;
+        $cleanupQuery = $this->subscriptionCleanupQuery($snapshot['checked_at'], $hasSubscriptions);
+        foreach ($ids as $id) {
+            $removed = DB::transaction(function () use ($id, $cleanupQuery, $hasSubscriptions) {
+                // 与充值、开通订阅保持相同锁顺序：先用户，再订阅。
+                $user = User::whereKey($id)->lockForUpdate()->first();
+                if (!$user) return false;
+                if ($hasSubscriptions) {
+                    Subscription::where('user_id', $id)->lockForUpdate()->get(['id']);
+                }
+                $eligible = (clone $cleanupQuery)
+                    ->whereKey($id)->lockForUpdate()->first();
+                if (!$eligible) return false;
+
+                $authService = new AuthService($user);
+                $authService->removeAllSession();
+                Order::where('user_id', $user->id)->delete();
+                User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
+                InviteCode::where('user_id', $user->id)->delete();
+
+                $tickets = Ticket::where('user_id', $user->id)->get();
+                foreach ($tickets as $ticket) {
+                    TicketMessage::where('ticket_id', $ticket->id)->delete();
+                }
+                Ticket::where('user_id', $user->id)->delete();
+                (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
+                (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
+                if ($hasSubscriptions) {
+                    Subscription::where('user_id', $user->id)->delete();
+                }
+                return $user->delete();
+            });
+            if ($removed) $deleted++;
+        }
+        Cache::forget($cacheKey);
+
+        info('ADMIN SUBSCRIPTION CLEANUP deleted=' . $deleted
+            . ' by=' . (is_array($request->user) ? ($request->user['email'] ?? '-') : '-'));
+
+        return response([
+            'data' => [
+                'deleted_count' => $deleted
+            ]
+        ]);
+    }
+
+    private function subscriptionCleanupQuery(int $now, bool $hasSubscriptions)
+    {
+        $query = User::query()->where(function ($builder) use ($now) {
+            $builder->whereNull('plan_id')
+                ->orWhere(function ($expired) use ($now) {
+                    $expired->whereNotNull('expired_at')
+                        ->where('expired_at', '<', $now);
+                });
+        });
+
+        $query->where('balance', 0)->where('commission_balance', 0);
+        if ($hasSubscriptions) {
+            // 用户字段只镜像主订阅；其他未过期或长期有效的订阅也必须保护。
+            // 即便订阅被停用/撤销，只要仍在有效期内，就不作为过期账号清理。
+            $query->whereNotExists(function ($subscriptions) use ($now) {
+                $subscriptions->selectRaw('1')->from('v2_subscription')
+                    ->whereColumn('v2_subscription.user_id', 'v2_user.id')
+                    ->where(function ($valid) use ($now) {
+                        $valid->whereNull('expired_at')->orWhere('expired_at', '>=', $now);
+                    });
+            });
+        }
+
+        // 老版本数据库可能尚未迁移员工字段，只有列存在时才加排除条件。
+        foreach (['is_admin', 'is_staff'] as $column) {
+            if (Schema::hasColumn('v2_user', $column)) {
+                $query->where($column, 0);
+            }
+        }
+        return $query;
     }
 }

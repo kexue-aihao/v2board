@@ -150,6 +150,7 @@ class AdminRoute
             $router->post('/user/resetPassword', 'V1\\Admin\\UserController@resetPassword');
             $router->post('/user/delUser', 'V1\\Admin\\UserController@delUser');
             $router->post('/user/allDel', 'V1\\Admin\\UserController@allDel');
+            $router->post('/user/subscription-cleanup', 'V1\\Admin\\UserController@subscriptionCleanup');
             $router->post('/user/setInviteUser', 'V1\\Admin\\UserController@setInviteUser');
             $router->post('/user/subscription/set-primary', 'V1\\Admin\\UserController@setPrimarySubscription');
             $router->post('/user/subscription/revoke', 'V1\\Admin\\UserController@revokeSubscription');

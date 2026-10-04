@@ -11,7 +11,7 @@ assert.ok(start >= 0 && end > start, 'user management module must exist');
 const source = bundle.slice(start, end).trim().slice('d1ca: '.length).replace(/,$/, '');
 
 function harness(respond) {
-    const requests = [], modals = [], copied = [];
+    const requests = [], modals = [], copied = [], notices = [], dispatched = [];
     class Component {
         constructor(props) { this.props = props; }
     }
@@ -25,7 +25,7 @@ function harness(respond) {
             const modal = { options, updates: [], destroyed: false, update(update) { this.updates.push(update); Object.assign(this.options, update); }, destroy() { this.destroyed = true; } };
             modals.push(modal);
             return modal;
-        }, success: () => {}, error: () => {}, info: options => {
+        }, success: options => notices.push({type: 'success', options}), error: options => notices.push({type: 'error', options}), info: options => {
             const modal = {
                 options, updates: [], destroyed: false,
                 update(update) { this.updates.push(update); Object.assign(this.options, update); },
@@ -53,10 +53,10 @@ function harness(respond) {
     const exports = {};
     vm.runInContext('(' + source + ')', context)({}, exports, requireModule);
     const component = new exports.default({
-        dispatch: () => {}, user: { users: [], pagination: {}, filter: [] },
+        dispatch: action => dispatched.push(action), user: { users: [], pagination: {}, filter: [] },
         serverGroup: { groups: [] }, plan: { plans: [] },
     });
-    return { component, requests, modals, copied };
+    return { component, requests, modals, copied, notices, dispatched };
 }
 function nodes(tree) {
     if (!tree || typeof tree !== 'object') return [];
@@ -190,4 +190,114 @@ test('an unbound account has no unbind entry', async () => {
     await h.component.showTelegramInfo(user);
 
     assert.equal(nodes(h.modals[0].options.content).find(node => text(node) === "解绑"), undefined);
+});
+
+test('subscription cleanup scans first and only deletes after confirmation', async () => {
+    const h = harness((url, params) => {
+        if (url.endsWith('/user/subscription-cleanup') && params.action === 'scan') {
+            return { code: 200, total: 2, data: [
+                { id: 7, email: 'expired@example.test', reason: 'expired' },
+                { id: 8, email: 'empty@example.test', reason: 'empty' },
+            ], scan_token: '12345678901234567890123456789012ab' };
+        }
+        return { code: 200, data: { deleted_count: 2 } };
+    });
+
+    const entry = nodes(h.component.render()).find(node => node.props.onClick && text(node) === ' 检测无效账号');
+    assert.ok(entry, 'user management actions must expose cleanup');
+    await entry.props.onClick();
+    assert.equal(h.requests[0].url, '/test-admin/user/subscription-cleanup');
+    assert.equal(h.requests[0].params.action, 'scan');
+    assert.equal(h.modals.length, 1);
+    assert.match(text(h.modals[0].options.content), /2 个普通用户/);
+    assert.match(text(h.modals[0].options.content), /佣金为 0、余额为 0/);
+    assert.match(text(h.modals[0].options.content), /其他未过期或长期有效订阅/);
+    assert.equal(h.modals[0].options.okType, 'danger');
+    assert.equal(h.modals[0].options.cancelText, '仅查看');
+    assert.equal(h.requests.length, 1, 'scan must not delete anything');
+
+    await h.modals[0].options.onOk();
+    assert.equal(h.requests[1].params.action, 'delete');
+    assert.equal(h.requests[1].params.confirm, 1);
+    assert.equal(h.requests[1].params.scan_token, '12345678901234567890123456789012ab');
+    assert.match(h.notices[0].options.content, /已删除 2 个无效账号/);
+    assert.equal(h.dispatched[0].type, 'user/fetch');
+});
+
+test('an empty cleanup scan reports the full rule and never offers deletion', async () => {
+    const h = harness(() => ({ code: 200, total: 0, data: [], scan_token: 'empty-scan' }));
+    await h.component.subscriptionCleanup();
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.modals.length, 1);
+    assert.match(h.modals[0].options.content, /佣金和余额均为 0/);
+    assert.equal(h.modals[0].options.onOk, undefined);
+});
+
+test('choosing view only leaves all accounts untouched', async () => {
+    const h = harness(() => ({code: 200, total: 1, data: [{id: 1, email: 'test'}], scan_token: 'snapshot'}));
+    await h.component.subscriptionCleanup();
+    h.modals[0].options.onCancel();
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.component.subscriptionCleanupModal, null);
+});
+
+test('leaving user management closes cleanup and ignores pending scan responses', async () => {
+    let resolve;
+    const h = harness(() => new Promise(done => { resolve = done; }));
+    const pending = h.component.subscriptionCleanup();
+    h.component.componentWillUnmount();
+    resolve({code: 200, total: 1, data: [{id: 1, email: 'test'}], scan_token: 'snapshot'});
+    await pending;
+    assert.equal(h.modals.length, 0);
+    const opened = harness(() => ({code: 200, total: 1, data: [{id: 1, email: 'test'}], scan_token: 'snapshot'}));
+    await opened.component.subscriptionCleanup();
+    opened.component.componentWillUnmount();
+    assert.equal(opened.modals[0].destroyed, true);
+});
+
+test('cleanup scan failures are visible and permit a new scan', async () => {
+    for (const response of [new Error('offline'), {code: 403, message: '登录已过期'}, {code: 200, data: []}]) {
+        const h = harness(() => { if (response instanceof Error) throw response; return response; });
+        await h.component.subscriptionCleanup();
+        assert.equal(h.notices[0].type, 'error');
+        assert.equal(h.modals.length, 0);
+        assert.equal(h.component.subscriptionCleanupPending, false);
+        await h.component.subscriptionCleanup();
+        assert.equal(h.requests.length, 2);
+    }
+});
+
+test('a repeated click while scanning does not create another request', async () => {
+    let resolve;
+    const h = harness(() => new Promise(done => { resolve = done; }));
+    const first = h.component.subscriptionCleanup();
+    await h.component.subscriptionCleanup();
+    assert.equal(h.requests.length, 1);
+    resolve({code: 200, total: 0, data: [], scan_token: 'empty-scan'});
+    await first;
+    assert.equal(h.component.subscriptionCleanupPending, false);
+});
+
+test('a truncated cleanup preview states the full number of accounts to delete', async () => {
+    const h = harness(() => ({code: 200, total: 250, scan_token: 'snapshot', data:
+        Array.from({length: 200}, (_, index) => ({id: index + 1, email: 'user' + index, reason: 'empty'}))
+    }));
+    await h.component.subscriptionCleanup();
+    assert.match(text(h.modals[0].options.content), /仅展示前 20 个，共 250 个用户/);
+    assert.match(h.modals[0].options.okText, /全部 250 个/);
+});
+
+test('a cleanup deletion failure remains visible and does not report success', async () => {
+    for (const result of [new Error('offline'), {code: 422, message: '检测结果已失效，请重新检测'}]) {
+        const h = harness((url, params) => {
+            if (params.action === 'scan') return {code: 200, total: 1, data: [{id: 1, email: 'test'}], scan_token: 'snapshot'};
+            if (result instanceof Error) throw result;
+            return result;
+        });
+        await h.component.subscriptionCleanup();
+        await assert.rejects(h.modals[0].options.onOk());
+        assert.equal(h.notices[0].type, 'error');
+        assert.equal(h.notices.some(notice => notice.type === 'success'), false);
+        assert.equal(h.dispatched[0].type, 'user/fetch');
+    }
 });
