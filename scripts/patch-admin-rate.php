@@ -70,7 +70,11 @@ if ($moduleEnd === false) {
     exit(1);
 }
 if ($moduleStart !== false && $moduleStart < $moduleEnd) {
-    $bundle = substr_replace($bundle, "    " . $moduleSource, $moduleStart, $moduleEnd - $moduleStart);
+    if (preg_match('/\n    [A-Za-z_$][\w$]*: function\(e, t, n\) \{/', $bundle, $next, PREG_OFFSET_CAPTURE, $moduleStart + 1)) {
+        $moduleEnd = $next[0][1];
+    }
+    $comma = substr(rtrim(substr($bundle, $moduleStart, $moduleEnd - $moduleStart)), -1) === ',' ? ',' : '';
+    $bundle = substr_replace($bundle, "    " . $moduleSource . $comma, $moduleStart, $moduleEnd - $moduleStart);
 } else {
     $bundle = substr_replace($bundle, ",\n    " . $moduleSource, $moduleEnd, 0);
 }

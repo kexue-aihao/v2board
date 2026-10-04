@@ -4,6 +4,7 @@ namespace App\Http\Controllers\V1\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Services\DynamicRateService;
+use App\Services\RatePolicyService;
 use App\Services\ServerIdService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -28,16 +29,19 @@ class RateController extends Controller
             'data' => [
                 'rules' => $service->rules(),
                 'settings' => $service->settings(),
+                'policies' => (new RatePolicyService())->policies(),
+                'policies_ready' => (new RatePolicyService())->ready(),
                 'states' => $service->listStates([
                     'only_stacked' => (int) $request->input('only_stacked', 1) === 1,
                     'keyword' => (string) $request->input('keyword', ''),
+                    'policy_id' => $request->input('policy_id'),
                     'page' => max(1, (int) $request->input('page', 1)),
                     'limit' => max(1, min(200, (int) $request->input('limit', 50)))
                 ]),
                 // 作用域选「某个节点」时要能选节点，顺带给出前 200 个（节点总数就这个量级）
                 'nodes' => $this->nodeOptions()
             ]
-        ]);
+        ])->header('Cache-Control', 'no-store, private');
     }
 
     public function saveRule(Request $request)
@@ -81,7 +85,13 @@ class RateController extends Controller
 
     public function saveSettings(Request $request)
     {
-        $params = $request->validate([
+        $params = $this->validateSettings($request);
+        return response(['data' => (new DynamicRateService())->saveSettings($params)]);
+    }
+
+    private function validateSettings(Request $request, bool $policy = false): array
+    {
+        $rules = [
             'enabled' => 'required|in:0,1',
             'instant_mbps' => 'required|numeric|min:0|max:1000000',
             'sustained_mbps' => 'required|numeric|min:0|max:1000000',
@@ -89,7 +99,9 @@ class RateController extends Controller
             'stack_minutes' => 'required|integer|between:1,1440',
             'stack_multiplier' => 'required|numeric|min:1|max:999.999',
             'decay_step' => 'required|integer|between:1,1440'
-        ]);
+        ];
+        if ($policy) $rules += ['id' => 'nullable|integer|min:1', 'revision' => 'required_with:id|integer|min:1', 'name' => 'required|string|max:80'];
+        $params = $request->validate($rules);
 
         // 持续阈值高于瞬时阈值时，任何超过瞬时阈值的流量都同时超过持续阈值，
         // 突发豁免会把叠加彻底架空 —— 这不是「配置得奇怪」，是配错了。
@@ -97,9 +109,46 @@ class RateController extends Controller
             abort(422, __('持续阈值不能高于瞬时阈值，否则突发豁免会让叠加永远不生效'));
         }
 
-        return response([
-            'data' => (new DynamicRateService())->saveSettings($params)
-        ]);
+        return $params;
+    }
+
+    public function savePolicy(Request $request)
+    {
+        return response(['data' => (new RatePolicyService())->save($this->validateSettings($request, true))]);
+    }
+
+    public function policyOptions()
+    {
+        (new RatePolicyService())->requireReady();
+        return response(['data' => ['policies' => (new RatePolicyService())->policies()]])->header('Cache-Control', 'no-store, private');
+    }
+
+    public function dropPolicy(Request $request)
+    {
+        $params = $request->validate(['id' => 'required|integer|min:1', 'revision' => 'required|integer|min:1']);
+        return response(['data' => (new RatePolicyService())->drop($params['id'], $params['revision'])]);
+    }
+
+    public function previewBinding(Request $request)
+    {
+        return $this->binding($request, false);
+    }
+
+    public function applyBinding(Request $request)
+    {
+        return $this->binding($request, true);
+    }
+
+    private function binding(Request $request, bool $apply)
+    {
+        $rules = ['nodes' => 'required|array|min:1|max:200', 'nodes.*.id' => 'required|integer|min:1',
+            'nodes.*.type' => 'required|in:' . implode(',', array_keys(ServerIdService::TYPES)),
+            'mode' => 'required|in:global,off,policy', 'policy_id' => 'required_if:mode,policy|nullable|integer|min:1'];
+        if ($apply) $rules += ['confirm' => 'required|accepted', 'revision' => 'required|integer|min:1'];
+        $params = $request->validate($rules);
+        return response(['data' => (new RatePolicyService())->bind($params['nodes'], $params['mode'],
+            $params['mode'] === 'policy' ? (int) $params['policy_id'] : 0, $apply ? (int) $params['revision'] : null)])
+            ->header('Cache-Control', 'no-store, private');
     }
 
     /**
@@ -108,11 +157,12 @@ class RateController extends Controller
     public function explain(Request $request)
     {
         $params = $request->validate([
-            'user_id' => 'required|integer|min:1'
+            'user_id' => 'required|integer|min:1',
+            'node_user_id' => 'nullable|integer|min:1'
         ]);
 
         return response([
-            'data' => (new DynamicRateService())->explain((int) $params['user_id'])
+            'data' => (new DynamicRateService())->explain((int) $params['user_id'], null, isset($params['node_user_id']) ? (int) $params['node_user_id'] : null)
         ]);
     }
 

@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\DynamicRateService;
+use App\Services\RatePolicyService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Schema;
 
@@ -45,7 +46,9 @@ class RateTick extends Command
         ));
 
         if ((int) $settings['enabled'] !== 1) {
-            $this->warn('总开关是关的：状态照常推进（便于调参观察），但倍率一律按 1.0 计费。');
+            $this->warn((new RatePolicyService())->ready()
+                ? '全局带宽策略已关闭；绑定的场景策略各自独立启停。基础倍率和时段倍率仍然生效。'
+                : '全局带宽策略已关闭；基础倍率和时段倍率仍然生效。');
         }
         if ($dryRun) {
             $this->line('未写入任何 Redis 键与台账行。');

@@ -15,6 +15,7 @@ use Illuminate\Console\Command;
 class RateExplain extends Command
 {
     protected $signature = 'rate:explain {user_id : 用户 ID}
+        {--node-user-id= : 指定该用户订阅的节点计费标识}
         {--at= : 按指定时间戳解释（默认当前），用于复核某个历史时段的规则命中}';
 
     protected $description = '拆解某个用户当前的计费倍率：节点倍率 × 时段倍率 × 动态倍率';
@@ -29,12 +30,12 @@ class RateExplain extends Command
         }
 
         $at = $this->option('at') ? (int) $this->option('at') : time();
-        $data = (new DynamicRateService())->explain($userId, $at);
+        $data = (new DynamicRateService())->explain($userId, $at, $this->option('node-user-id') ? (int) $this->option('node-user-id') : null);
         $settings = $data['settings'];
 
         $this->line('时间：' . date('Y-m-d H:i:s', $at) . '（站点时区）');
         $this->line(sprintf(
-            '总开关：%s    瞬时阈值：%s Mbps    持续阈值：%s Mbps    豁免：%d 分钟    叠加门槛：%d 分钟    叠加倍率：%s',
+            '全局策略：%s    瞬时阈值：%s Mbps    持续阈值：%s Mbps    豁免：%d 分钟    叠加门槛：%d 分钟    叠加倍率：%s',
             (int) $settings['enabled'] === 1 ? '开' : '关',
             $settings['instant_mbps'],
             $settings['sustained_mbps'],
@@ -45,7 +46,7 @@ class RateExplain extends Command
 
         $state = $data['state'];
         if ($state === null) {
-            $this->line('该用户还没有采样记录（没有流量或还没到过第一轮 tick）。');
+            $this->line(isset($data['node_user_id']) ? '当前计费标识：' . $data['node_user_id'] . '；各节点按绑定场景分别计算。' : '该用户还没有采样记录。');
         } else {
             $this->line(sprintf(
                 '动态倍率：%s（状态 %s，持续计数 %d，突发计数 %d，上一轮速率 %.3f Mbps，采样于 %s）',
@@ -77,15 +78,16 @@ class RateExplain extends Command
             $rows[] = [
                 $node['type'] . ' #' . $node['id'],
                 $node['name'],
+                $node['policy_name'] ?? '全局策略',
                 $node['rate'],
                 $node['band_multiplier'],
-                $data['user_multiplier'],
+                $node['user_multiplier'] ?? $data['user_multiplier'],
                 $node['effective']
             ];
         }
         if ($rows) {
             $this->table(
-                ['节点', '名称', '基础倍率', '时段倍率', '动态倍率', '实际计费倍率'],
+                ['节点', '名称', '场景策略', '基础倍率', '时段倍率', '动态倍率', '实际计费倍率'],
                 $rows
             );
         } else {

@@ -29,6 +29,8 @@ const FETCH_PAYLOAD = {
             { id: 4, scope: 'node', node_type: 'vmess', node_id: 7, weekdays: '', start_minute: 0, end_minute: 1440, multiplier: '2.000', enabled: 0, remark: '' }
         ],
         settings: { enabled: 1, instant_mbps: 50, sustained_mbps: 10, burst_exempt_minutes: 3, stack_minutes: 5, stack_multiplier: 1.5, decay_step: 1 },
+        policies_ready: true,
+        policies: [{ id: 3, name: '专线', revision: 2, node_count: 0, enabled: 1, instant_mbps: 50, sustained_mbps: 10, burst_exempt_minutes: 3, stack_minutes: 5, stack_multiplier: 1.5, decay_step: 1 }],
         states: { total: 1, rows: [{ user_id: 12, email: 'peak@example.com', multiplier: 1.5, rate_bps: 20000000, high: 5, burst: 0, state: 'stacked', sampled_at: 1700000000, computed_at: 1700000000 }] },
         nodes: [{ type: 'vmess', id: 7, name: 'vmess-a' }]
     }
@@ -101,6 +103,52 @@ test('the dynamic rate page module is present and renders before any data arrive
     assert.match(text, /正在叠加的用户/);
     // 参数区块要有数据才渲染，所以这里不要求它出现
     assert.equal(h.requests.length, 0, '渲染本身不该发请求');
+});
+
+test('policy create and edit post a named independent policy with its revision', async () => {
+    const h = harness(); h.component.load(); await new Promise(resolve => setImmediate(resolve));
+    h.component.openPolicy(null); h.component.setPolicy('name', '普通线路');
+    h.component.setPolicy('sustained_mbps', '20');
+    await h.component.savePolicy();
+    const created = h.requests.find(request => request.url.endsWith('/policy/save'));
+    assert.equal(created.body.name, '普通线路'); assert.equal(created.body.sustained_mbps, 20);
+    assert.equal(created.body.id, undefined);
+    await new Promise(resolve => setImmediate(resolve));
+    h.component.openPolicy(h.component.state.policies[0]); h.component.setPolicy('enabled', 0);
+    await h.component.savePolicy();
+    const edits = h.requests.filter(request => request.url.endsWith('/policy/save'));
+    assert.equal(edits[1].body.id, 3); assert.equal(edits[1].body.revision, 2); assert.equal(edits[1].body.enabled, 0);
+});
+
+test('policy form rejects unnamed or invalid entries and bound policies cannot be deleted', async () => {
+    const h = harness(); h.component.load(); await new Promise(resolve => setImmediate(resolve));
+    h.component.openPolicy(null); await h.component.savePolicy();
+    assert.match(h.component.state.error, /名称/);
+    h.component.setPolicy('name', '场景'); h.component.setPolicy('stack_minutes', ''); await h.component.savePolicy();
+    assert.match(h.component.state.error, /有效的策略参数/);
+    h.component.dropPolicy({ id: 1, node_count: 2 });
+    assert.match(h.component.state.error, /解除绑定/);
+    assert.equal(h.requests.length, 1);
+});
+
+test('ledger separates subscriptions and scenes, and explanation sends the subscription identity', async () => {
+    const h = harness(); h.component.load(); await new Promise(resolve => setImmediate(resolve));
+    const row = { user_id: 12, node_user_id: 2000000012, policy_id: 3, subscription_id: 7, policy_name: '专线', email: 'peak@example.com' };
+    h.component.setState({states: {total: 2, rows: [row, { ...row, policy_id: 4 }]}});
+    const table = findAll(h.component.render(), node => node.type === 'Table').at(-1);
+    assert.notEqual(table.props.rowKey(row), table.props.rowKey({ ...row, policy_id: 4 }));
+    table.props.columns.find(column => column.key === 'action').render(null, row).props.onClick();
+    assert.deepEqual(h.requests.at(-1).body, { user_id: 12, node_user_id: 2000000012 });
+    h.component.setState({breakdown: {user_id: 12, subscription_id: 7, user_multiplier: 9, nodes: []}});
+    const breakdown = findAll(h.component.renderBreakdown(), node => node.type === 'Table')[0];
+    const multiplier = breakdown.props.columns.find(column => column.key === 'user');
+    assert.equal(flatten(multiplier.render(null, {user_multiplier: 1.5})), '1.5 x');
+});
+
+test('updating the rate module preserves the external subscription module', () => {
+    assert.match(moduleSource('externalpage'), /class External/);
+    const source = fs.readFileSync(path.join(__dirname, '../admin-rate-module.js'), 'utf8');
+    assert.equal(moduleSource('ratepage').trim(), source.trim().slice('ratepage: '.length));
 });
 
 test('load() pulls everything the page needs from one endpoint', async () => {

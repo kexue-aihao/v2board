@@ -73,8 +73,8 @@ class AdminRateControllerTest extends TestCase
 
         // 参数还没存过时应回落到默认值，页面一打开就有东西可显示
         $response->assertJsonPath('data.settings.enabled', 0);
-        // assertJsonPath 走的是 assertSame：json_encode(50.0) 解出来是 float，写成 int 会判不等
-        $response->assertJsonPath('data.settings.instant_mbps', 50.0);
+        // JSON encodes whole-valued floats as integers without JSON_PRESERVE_ZERO_FRACTION.
+        $response->assertJsonPath('data.settings.instant_mbps', 50);
         $response->assertJsonPath('data.rules', []);
         $response->assertJsonPath('data.states.total', 0);
         $response->assertJsonPath('data.nodes.0.type', 'vmess');
@@ -149,7 +149,7 @@ class AdminRateControllerTest extends TestCase
         ])->assertOk()->assertJsonPath('data.enabled', 1);
 
         $this->getJson($this->url . '/fetch')
-            ->assertJsonPath('data.settings.instant_mbps', 80.0)
+            ->assertJsonPath('data.settings.instant_mbps', 80)
             ->assertJsonPath('data.settings.stack_multiplier', 1.8);
 
         // 持续阈值高于瞬时阈值会让突发豁免把叠加彻底架空，属于配错而不是配得奇怪

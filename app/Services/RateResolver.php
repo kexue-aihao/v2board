@@ -41,7 +41,28 @@ class RateResolver
      */
     public function resolveForPush(array $server, string $protocol, array $userIds, ?int $timestamp = null): array
     {
+        return $this->resolveTraffic($server, $protocol, $userIds, $timestamp)['rates'];
+    }
+
+    public function resolveTraffic(array $server, string $protocol, array $userIds, ?int $timestamp = null): array
+    {
         $nodeRate = $this->nodeRate($server);
+        $policies = new RatePolicyService();
+        $config = $policies->runtime();
+        if ($config) {
+            $policy = $policies->policyFor($config, $protocol, (int) ($server['id'] ?? 0));
+            $band = $this->matcher->multiplierFor($config['rules'], $protocol, (int) ($server['id'] ?? 0), $timestamp ?: time());
+            $multipliers = $policies->multipliers($policy, $userIds);
+            $rates = [];
+            foreach ($userIds as $id) $rates[(int) $id] = $this->combine($nodeRate, $band, $multipliers[$id] ?? 1.0);
+            return ['rates' => $rates, 'sampling' => $policy
+                ? ['mode' => 'policy', 'policy_id' => $policy['id'], 'revision' => $policy['revision']]
+                : ['mode' => 'off']];
+        }
+        if ($policies->ready()) {
+            // Do not accidentally revive legacy global penalties during a Redis outage.
+            return ['rates' => array_fill_keys($userIds, $nodeRate), 'sampling' => ['mode' => 'off']];
+        }
         $band = $this->bandMultiplier($protocol, (int) ($server['id'] ?? 0), $timestamp ?: time());
         $userMultipliers = $this->userMultipliers($userIds);
 
@@ -51,7 +72,7 @@ class RateResolver
             $rates[$userId] = $this->combine($nodeRate, $band, $userMultipliers[$userId] ?? 1.0);
         }
 
-        return $rates;
+        return ['rates' => $rates, 'sampling' => []];
     }
 
     /**

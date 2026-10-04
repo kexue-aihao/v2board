@@ -52,10 +52,13 @@ if (moduleSource.indexOf('ratepage: function(e, t, n) {') === -1
 moduleSource = moduleSource.trim();
 const moduleStart = bundle.indexOf('    ratepage: function(e, t, n) {');
 const moduleEndMarker = '\n});\n\n(function () {\n';
-const moduleEnd = bundle.indexOf(moduleEndMarker);
+let moduleEnd = bundle.indexOf(moduleEndMarker);
 if (moduleEnd === -1) throw new Error('Admin module boundary not found.');
 if (moduleStart !== -1 && moduleStart < moduleEnd) {
-  bundle = bundle.slice(0, moduleStart) + '    ' + moduleSource + bundle.slice(moduleEnd);
+  const next = bundle.slice(moduleStart + 1).search(/\n    [A-Za-z_$][\w$]*: function\(e, t, n\) \{/);
+  if (next >= 0) moduleEnd = moduleStart + 1 + next;
+  const comma = bundle.slice(moduleStart, moduleEnd).trim().endsWith(',') ? ',' : '';
+  bundle = bundle.slice(0, moduleStart) + '    ' + moduleSource + comma + bundle.slice(moduleEnd);
   changed.push('模块（替换）');
 } else {
   bundle = bundle.slice(0, moduleEnd) + ',\n    ' + moduleSource + bundle.slice(moduleEnd);

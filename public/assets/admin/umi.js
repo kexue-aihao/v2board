@@ -108471,6 +108471,10 @@
                     batchPortMode: "server_port",
                     batchRenamePrefix: "",
                     batchRenameMode: "full",
+                    batchPolicyMode: "global",
+                    batchPolicyId: "",
+                    batchPolicies: [],
+                    batchPoliciesReady: false,
                     batchRenameSuffix: "",
                     batchRenameSeparator: " | ",
                     batchRenameStart: "1",
@@ -108730,6 +108734,7 @@
                     {key: "rename", label: "批量重命名", icon: "edit"},
                     {key: "ports", label: "批量设置端口", icon: "api"},
                     {key: "rate", label: "批量设置倍率", icon: "calculator"},
+                    {key: "policy", label: "批量设置倍率策略", icon: "schedule", selection: true, run: ()=>this.openBatchPolicy()},
                     {key: "tls", label: "批量填写 SNI/地址", icon: "form"},
                     {key: "inspect", label: "查看 SNI/地址", icon: "search", selection: true, run: ()=>this.openBatchTlsInspection()},
                     {key: "protocol", label: "批量下发协议配置", icon: "code"},
@@ -108784,6 +108789,69 @@
                 if (this.batchBusy) return;
                 this.openBatchDialog("inspect");
                 await this.inspectBatchTls()
+            }
+            async openBatchPolicy() {
+                if (this.batchBusy) return;
+                this.openBatchDialog("policy");
+                this.batchBusy = true;
+                this.setState({batchLoading: true, batchPoliciesReady: false});
+                try {
+                    var data = this.batchData(await Object(batchApi["a"])("/" + window.settings.secure_path + "/rate/policies", {}));
+                    if (!Array.isArray(data.policies) || !data.policies.every(policy=>Number.isInteger(policy.id) && typeof policy.name === "string")) throw new Error("策略列表响应无效");
+                    this.setState({batchPolicies: data.policies, batchPoliciesReady: true});
+                } catch (error) { this.setState({batchError: error.message || "策略读取失败"}); }
+                finally { this.batchBusy = false; this.setState({batchLoading: false}); }
+            }
+            batchPolicyParams() {
+                var nodes = this.selectedBatchNodes(), mode = this.state.batchPolicyMode;
+                if (!nodes.length || nodes.length > 200) throw new Error("请选择 1～200 个节点");
+                if (!this.state.batchPoliciesReady) throw new Error("请先读取策略列表");
+                if (!["global", "off", "policy"].includes(mode)) throw new Error("请选择有效的策略模式");
+                var params = {nodes: nodes, mode: mode};
+                if (mode === "policy") {
+                    params.policy_id = Number(this.state.batchPolicyId);
+                    if (!this.state.batchPolicies.some(policy=>policy.id === params.policy_id)) throw new Error("请选择场景策略");
+                }
+                return params
+            }
+            async previewBatchPolicy() {
+                if (this.batchBusy) return;
+                this.setState({batchPreview: null, batchError: "", batchResult: ""});
+                var params;
+                try { params = this.batchPolicyParams(); }
+                catch (error) { this.setState({batchError: error.message}); return; }
+                this.batchBusy = true; this.setState({batchLoading: true});
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/rate/binding/preview", params, true));
+                    var keys = params.nodes.map(node=>this.batchKey(node)).sort();
+                    if (data.mode !== params.mode || data.policy_id !== (params.policy_id || 0) || !Number.isInteger(data.revision) || data.revision < 1 ||
+                        data.matched_count !== keys.length || !Array.isArray(data.nodes) || data.nodes.length !== keys.length ||
+                        JSON.stringify(data.nodes.map(node=>this.batchKey(node)).sort()) !== JSON.stringify(keys) ||
+                        data.changed_count !== data.nodes.filter(node=>node.changed === true).length ||
+                        !data.nodes.every(node=>typeof node.changed === "boolean" && typeof node.name === "string" && typeof node.old_name === "string" && typeof node.new_name === "string")) throw new Error("策略预览与所选节点不一致");
+                    if (this.state.batchDialog !== "policy" || JSON.stringify(this.batchPolicyParams()) !== JSON.stringify(params)) throw new Error("选择已变更，请重新预览");
+                    this.setState({batchPreview: Object.assign({}, data, {params: params}), batchResult: data.changed_count ? "" : "所选节点已采用目标策略，无需修改"});
+                } catch (error) { this.setState({batchError: error.message || "策略预览失败"}); }
+                finally { this.batchBusy = false; this.setState({batchLoading: false}); }
+            }
+            async applyBatchPolicy() {
+                var preview = this.state.batchPreview;
+                if (this.batchBusy || this.state.batchDialog !== "policy" || !preview || !preview.changed_count) return;
+                try { if (JSON.stringify(this.batchPolicyParams()) !== JSON.stringify(preview.params)) throw new Error("选择已变更，请重新预览"); }
+                catch (error) { this.setState({batchPreview: null, batchError: error.message}); return; }
+                this.batchBusy = true; this.setState({batchLoading: true, batchError: "", batchResult: ""});
+                var saved = false;
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/rate/binding/apply", Object.assign({}, preview.params, {revision: preview.revision, confirm: true}), true));
+                    saved = true;
+                    if (data.mode !== preview.mode || data.policy_id !== preview.policy_id || data.matched_count !== preview.matched_count || data.changed_count !== preview.changed_count) throw new Error("策略保存结果不完整");
+                    var servers = await this.refreshBatchNodeList({_batch_policy: Date.now()});
+                    if (!preview.nodes.every(node=>servers.some(server=>this.batchKey(server) === this.batchKey(node) && server.rate_policy &&
+                        server.rate_policy.mode === preview.mode && server.rate_policy.policy_id === preview.policy_id))) throw new Error("刷新后的策略绑定与预览不一致");
+                    var result = "已保存并核对 " + data.changed_count + " 个节点的倍率策略，下次流量上报采用新配置";
+                    this.setState({batchResult: result}); c["a"].success(result);
+                } catch (error) { this.setState({batchError: (saved ? "保存已返回成功，请刷新核对，勿重复提交：" : "策略保存未确认完成，请重新预览：") + (error.message || "网络错误")}); }
+                finally { this.batchBusy = false; this.setState({batchLoading: false, batchPreview: null}); }
             }
             async inspectBatchTls() {
                 if (this.batchBusy) return;
@@ -109533,6 +109601,38 @@
                         )
                     ))
                 }
+                if (state.batchDialog === "policy") {
+                    return el(R["a"], {title: "批量设置倍率策略", width: "min(820px, 100vw)", visible: true,
+                        maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeBatchDialog()},
+                        el("div", {style: {paddingBottom: 70}},
+                            el("p", {role: "status"}, "已选 " + nodes.length + " 个节点"),
+                            el("p", null, "同一订阅在同一场景内累计流量，跨场景独立判定。基础倍率和时段倍率继续生效。"),
+                            el("p", null, "请配置实际向面板上报流量的节点；父子节点共用上报时，按上报节点的策略计费。"),
+                            el("p", null, el("a", {href: "#/rate", target: "_blank", rel: "noopener noreferrer"}, "管理场景策略")),
+                            el("div", {className: "form-group"}, el("label", {htmlFor: "batch-policy-mode"}, "策略模式"),
+                                el("select", {id: "batch-policy-mode", className: "form-control", disabled: busy, value: state.batchPolicyMode,
+                                    onChange: event=>this.changeBatchField("batchPolicyMode", event.target.value)},
+                                    el("option", {value: "global"}, "继承全局策略"), el("option", {value: "policy"}, "绑定场景策略"), el("option", {value: "off"}, "不参与带宽动态加倍"))),
+                            state.batchPolicyMode === "policy" && el("div", {className: "form-group"}, el("label", {htmlFor: "batch-policy-id"}, "场景策略"),
+                                el("select", {id: "batch-policy-id", className: "form-control", disabled: busy, value: state.batchPolicyId,
+                                    onChange: event=>this.changeBatchField("batchPolicyId", event.target.value)},
+                                    el("option", {value: ""}, "请选择场景策略"), state.batchPolicies.map(policy=>el("option", {key: policy.id, value: String(policy.id)}, policy.name + (policy.enabled ? "" : "（已停用）"))))),
+                            state.batchError && el("p", {role: "alert", style: {color: "#c00000", overflowWrap: "anywhere"}}, state.batchError),
+                            state.batchResult && el("p", {role: "status"}, state.batchResult),
+                            preview && el("div", null,
+                                el("strong", null, "预计改动 " + preview.changed_count + " / " + preview.matched_count + " 个节点"),
+                                el("div", {style: {maxHeight: 320, overflow: "auto", marginTop: 12}},
+                                    el("table", {className: "table", style: {tableLayout: "fixed", width: "100%", overflowWrap: "anywhere"}},
+                                        el("thead", null, el("tr", null, el("th", null, "节点"), el("th", null, "当前策略"), el("th", null, "目标策略"))),
+                                        el("tbody", null, preview.nodes.map(node=>el("tr", {key: this.batchKey(node)},
+                                            el("td", null, node.name, el("small", {style: {display: "block"}}, node.type + " #" + node.id)),
+                                            el("td", null, node.old_name), el("td", null, node.new_name, !node.changed && el("small", null, "（无需修改）")))))))),
+                            el("div", {className: "v2board-drawer-action"},
+                                el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
+                                !state.batchPoliciesReady && el(l["a"], {disabled: busy, onClick: ()=>this.openBatchPolicy(), style: {marginRight: 8}}, "重新读取策略"),
+                                el(l["a"], {loading: busy, disabled: busy || !state.batchPoliciesReady, onClick: ()=>this.previewBatchPolicy(), style: {marginRight: 8}}, "预览改动"),
+                                el(l["a"], {type: "primary", disabled: busy || !preview || !preview.changed_count, onClick: ()=>this.applyBatchPolicy()}, "确认应用"))))
+                }
                 if (state.batchDialog === "rename") {
                     var renameFull = state.batchRenameMode === "full";
                     return el(R["a"], {
@@ -109962,7 +110062,9 @@
                     render: (e,t)=>{
                         return y.a.createElement(y.a.Fragment, null, y.a.createElement(h["a"], {
                             status: D[t.available_status]
-                        }), y.a.createElement("span", null, e))
+                        }), y.a.createElement("span", null, e), t.rate_policy && y.a.createElement("div", {
+                            style: {fontSize: 12, color: "#666", marginTop: 4}
+                        }, "倍率策略：", t.rate_policy.name, t.rate_policy.mode !== "off" && !t.rate_policy.enabled ? "（已停用）" : ""))
                     }
                 }, {
                     title: "\u5730\u5740",
@@ -110132,7 +110234,8 @@
                         }), y.a.createElement(h["a"], {
                             status: D[e.available_status]
                         }), e.name),
-                        description: "".concat(e.host, ":").concat(e.port)
+                        description: y.a.createElement("div", null, "".concat(e.host, ":").concat(e.port),
+                            e.rate_policy && y.a.createElement("div", null, "倍率策略：", e.rate_policy.name, e.rate_policy.mode !== "off" && !e.rate_policy.enabled ? "（已停用）" : ""))
                     }))
                 }) : y.a.createElement(x["a"], {
                     onDragEnd: (e,t)=>{
@@ -121749,7 +121852,7 @@
             super(props);
             this.state = {
                 loading: !0, saving: !1, error: "", notice: "",
-                rules: [], settings: null, states: {total: 0, rows: []}, nodes: [],
+                rules: [], settings: null, policies: [], policiesReady: false, policyForm: null, policyFilter: "", states: {total: 0, rows: []}, nodes: [],
                 onlyStacked: !0, keyword: "", page: 1, limit: 50,
                 form: null, breakdown: null
             };
@@ -121781,13 +121884,14 @@
             this.setState({loading: !0, error: ""});
             var query = "?only_stacked=" + (this.state.onlyStacked ? 1 : 0)
                 + "&keyword=" + encodeURIComponent(this.state.keyword || "")
-                + "&page=" + this.state.page + "&limit=" + this.state.limit;
+                + "&page=" + this.state.page + "&limit=" + this.state.limit + "&policy_id=" + encodeURIComponent(this.state.policyFilter);
             this.api("/rate/fetch" + query).then(function(result) {
                 var data = result.data || {};
                 self.setState({
                     loading: !1,
                     rules: data.rules || [],
                     settings: data.settings || null,
+                    policies: data.policies || [], policiesReady: !!data.policies_ready,
                     states: data.states || {total: 0, rows: []},
                     nodes: data.nodes || []
                 });
@@ -121818,10 +121922,67 @@
                     decay_step: number(settings.decay_step, 1)
                 })
             }).then(function(result) {
-                self.setState({saving: !1, settings: result.data || settings, notice: "参数已保存。下一分钟的 rate:tick 就会按新参数判定。"});
+                self.setState({saving: !1, settings: result.data || settings, notice: "全局参数已保存，计数重新开始；每分钟更新带宽判定。"});
             }).catch(function(error) {
                 self.setState({saving: !1, error: error.message || "保存失败，请重试"});
             });
+        }
+
+        openPolicy(policy) {
+            if (this.state.saving || !this.state.policiesReady) return;
+            this.setState({policyForm: policy ? Object.assign({}, policy) : {
+                name: "", enabled: 1, instant_mbps: 50, sustained_mbps: 10, burst_exempt_minutes: 3,
+                stack_minutes: 5, stack_multiplier: 1.5, decay_step: 1
+            }, error: "", notice: ""});
+        }
+        setPolicy(key, value) {
+            this.setState({policyForm: Object.assign({}, this.state.policyForm, {[key]: value})});
+        }
+        savePolicy() {
+            if (this.state.saving || !this.state.policyForm) return;
+            var self = this, form = this.state.policyForm, body = {name: String(form.name || "").trim(), enabled: enabled(form.enabled) ? 1 : 0};
+            if (!body.name) return void this.setState({error: "请填写场景策略名称"});
+            if (form.id) { body.id = form.id; body.revision = form.revision; }
+            for (var key of ["instant_mbps", "sustained_mbps", "burst_exempt_minutes", "stack_minutes", "stack_multiplier", "decay_step"]) {
+                if (String(form[key]).trim() === "" || !isFinite(Number(form[key]))) return void this.setState({error: "请填写有效的策略参数"});
+                body[key] = Number(form[key]);
+            }
+            this.setState({saving: true, error: "", notice: ""});
+            return this.api("/rate/policy/save", {method: "POST", body: JSON.stringify(body)}).then(function() {
+                self.setState({saving: false, policyForm: null, notice: "场景策略已保存。绑定节点后生效；修改参数后重新计数。"});
+                self.load();
+            }).catch(function(error) { self.setState({saving: false, error: error.message || "策略保存失败"}); });
+        }
+        dropPolicy(policy) {
+            if (this.state.saving) return;
+            if (policy.node_count) return void this.setState({error: "请先在节点管理解除绑定，再删除策略"});
+            if (!window.confirm("确认删除场景策略「" + policy.name + "」？")) return;
+            var self = this;
+            this.setState({saving: true, error: "", notice: ""});
+            return this.api("/rate/policy/drop", {method: "POST", body: JSON.stringify({id: policy.id, revision: policy.revision})}).then(function() {
+                self.setState({saving: false, notice: "场景策略已删除", policyForm: null}); self.load();
+            }).catch(function(error) { self.setState({saving: false, error: error.message || "策略删除失败"}); });
+        }
+        renderPolicies() {
+            var self = this;
+            return h("div", {className: "block block-rounded"}, h("div", {className: "block-content"},
+                h("div", {className: "d-flex justify-content-between align-items-center mb-2"},
+                    h("h5", {className: "font-w600 mb-1"}, "场景倍率策略"),
+                    h(Button["a"], {type: "primary", disabled: this.state.saving || !this.state.policiesReady, onClick: function() { self.openPolicy(null); }}, "新建场景策略")),
+                h("p", {className: "text-muted"}, this.state.policiesReady
+                    ? "在节点管理中多选节点，通过“操作 → 批量设置倍率策略”绑定。每个订阅在同一场景内累计，跨场景独立判定；场景策略与全局策略不叠加。"
+                    : "请先执行 php artisan v2board:update 完成倍率策略升级。"),
+                h(Table["a"], {rowKey: "id", dataSource: this.state.policies, pagination: false, scroll: {x: 800},
+                    locale: {emptyText: "尚未创建场景策略，未绑定的节点继承全局策略"}, columns: [
+                        {title: "策略名称", dataIndex: "name"},
+                        {title: "绑定节点", dataIndex: "node_count", width: 90},
+                        {title: "持续判定", key: "threshold", render: function(v, row) { return row.sustained_mbps + " Mbps / " + row.stack_minutes + " 分钟"; }},
+                        {title: "触发倍率", key: "rate", render: function(v, row) { return rateText(row.stack_multiplier); }},
+                        {title: "状态", key: "enabled", render: function(v, row) { return enabled(row.enabled) ? "启用" : "停用"; }},
+                        {title: "操作", key: "actions", render: function(v, row) { return h("div", null,
+                            h(Button["a"], {disabled: self.state.saving, onClick: function() { self.openPolicy(row); }}, "编辑"),
+                            h(Button["a"], {disabled: self.state.saving || !!row.node_count, onClick: function() { self.dropPolicy(row); }, style: {marginLeft: 8}}, "删除")); }}
+                    ]})));
         }
 
         openForm(rule) {
@@ -121877,7 +122038,7 @@
                     remark: form.remark
                 })
             }).then(function() {
-                self.setState({saving: !1, form: null, notice: "规则已保存，下一分钟的 rate:tick 生效。"});
+                self.setState({saving: !1, form: null, notice: "规则已保存，下次流量上报采用新规则。"});
                 self.load();
             }).catch(function(error) {
                 self.setState({saving: !1, error: error.message || "保存失败，请重试"});
@@ -121896,10 +122057,10 @@
             });
         }
 
-        showBreakdown(userId) {
+        showBreakdown(userId, nodeUserId) {
             var self = this;
             this.setState({saving: !0, error: ""});
-            this.api("/rate/explain", {method: "POST", body: JSON.stringify({user_id: userId})}).then(function(result) {
+            this.api("/rate/explain", {method: "POST", body: JSON.stringify({user_id: userId, node_user_id: nodeUserId})}).then(function(result) {
                 self.setState({saving: !1, breakdown: result.data || null});
             }).catch(function(error) {
                 self.setState({saving: !1, error: error.message || "无法读取倍率构成"});
@@ -121933,14 +122094,15 @@
         stateColumns() {
             var self = this;
             return [
-                {title: "用户", key: "user", render: function(value, row) { return h("div", null, h("div", {className: "font-w600"}, row.email || ("#" + row.user_id)), h("div", {className: "text-muted font-size-sm"}, "#" + row.user_id)); }},
+                {title: "用户 / 订阅", key: "user", render: function(value, row) { return h("div", null, h("div", {className: "font-w600"}, row.email || ("#" + row.node_user_id)), h("div", {className: "text-muted font-size-sm"}, "用户 #" + row.user_id + (row.subscription_id ? " · 订阅 #" + row.subscription_id : ""))); }},
+                {title: "场景策略", key: "policy", render: function(value, row) { return row.policy_name || "全局策略"; }},
                 {title: "实时速率", key: "rate", width: 120, render: function(value, row) { return h("span", null, mbps(row.rate_bps) + " Mbps"); }},
                 {title: "判定", key: "state", width: 110, render: function(value, row) { return h("span", null, STATE_LABELS[row.state] || row.state); }},
-                {title: "持续计数", key: "high", width: 100, render: function(value, row) { return h("span", null, row.high + (self.state.settings ? " / " + self.state.settings.stack_minutes : "")); }},
+                {title: "持续计数", key: "high", width: 100, render: function(value, row) { return h("span", null, row.high + " / " + (row.stack_minutes || (self.state.settings || {}).stack_minutes || "—")); }},
                 {title: "突发计数", key: "burst", width: 100, render: function(value, row) { return h("span", null, row.burst); }},
                 {title: "当前倍率", key: "multiplier", width: 100, render: function(value, row) { return h("span", {className: row.multiplier > 1 ? "text-danger font-w600" : ""}, rateText(row.multiplier)); }},
                 {title: "采样时间", key: "sampled_at", width: 170, render: function(value, row) { return h("span", {className: "text-muted font-size-sm"}, row.sampled_at ? new Date(row.sampled_at * 1000).toLocaleString() : "—"); }},
-                {title: "操作", key: "action", width: 110, render: function(value, row) { return h(Button["a"], {size: "sm", onClick: function() { self.showBreakdown(row.user_id); }}, "倍率构成"); }}
+                {title: "操作", key: "action", width: 110, render: function(value, row) { return h(Button["a"], {size: "sm", disabled: !row.user_id, onClick: function() { self.showBreakdown(row.user_id, row.node_user_id); }}, "倍率构成"); }}
             ];
         }
 
@@ -121982,21 +122144,25 @@
                         h(Button["a"], {style: {marginLeft: 8}, disabled: this.state.saving, onClick: function() { self.closeForm(); }}, "取消")))));
         }
 
-        renderSettings() {
-            var self = this, settings = this.state.settings;
+        renderSettings(policyMode) {
+            var self = this, settings = policyMode ? this.state.policyForm : this.state.settings;
             if (!settings) return null;
+            function set(key, value) { if (policyMode) self.setPolicy(key, value); else self.setSetting(key, value); }
             function field(key, label, copy, step) {
-                return h("div", {className: "col-md-4 mb-3"}, h("label", null, label),
-                    h("input", {type: "number", step: step || "1", min: "0", className: "form-control form-control-sm", value: settings[key], onChange: function(event) { self.setSetting(key, event.target.value); }}),
+                var id = "rate-" + (policyMode ? "policy-" : "global-") + key;
+                return h("div", {className: "col-md-4 mb-3"}, h("label", {htmlFor: id}, label),
+                    h("input", {id: id, disabled: self.state.saving, type: "number", step: step || "1", min: "0", className: "form-control form-control-sm", value: settings[key], onChange: function(event) { set(key, event.target.value); }}),
                     h("div", {className: "text-muted font-size-sm mt-1"}, copy));
             }
             return h("div", {className: "block block-rounded"}, h("div", {className: "block-content"},
-                h("h5", {className: "font-w600 mb-1"}, "峰值判定参数"),
-                h("p", {className: "text-muted font-size-sm"}, "每分钟对每个有流量的用户算一次速率：超过瞬时阈值的分钟算突发，连续突发不超过豁免时长时不计入叠加；持续超过持续阈值累计到门槛后按叠加倍率计费。判定最长有 1 分钟延迟。"),
+                h("h5", {className: "font-w600 mb-1"}, policyMode ? (settings.id ? "编辑场景策略" : "新建场景策略") : "全局策略 · 峰值判定参数"),
+                policyMode && h("div", {className: "mb-3"}, h("label", {htmlFor: "rate-policy-name"}, "策略名称"),
+                    h("input", {id: "rate-policy-name", className: "form-control", maxLength: 80, disabled: this.state.saving, value: settings.name, onChange: function(event) { set("name", event.target.value); }})),
+                h("p", {className: "text-muted font-size-sm"}, "按订阅统计本策略范围内的原始上行和下行流量，每分钟判定一次平均速率。突发豁免期间不增加持续计数，低于持续阈值时计数回落。修改参数后重新计数。"),
                 h("div", {className: "d-flex justify-content-between align-items-center py-2 border-bottom mb-3"},
-                    h("div", null, h("div", {className: "font-w600"}, "启用动态倍率"),
-                        h("div", {className: "text-muted font-size-sm mt-1"}, "关闭时状态照常推进（便于观察），但倍率一律按 1.0 计费。")),
-                    h(Switch["a"], {checked: enabled(settings.enabled), onChange: function(checked) { self.setSetting("enabled", checked ? 1 : 0); }})),
+                    h("div", null, h("div", {className: "font-w600"}, policyMode ? "启用此场景策略" : "启用全局带宽动态倍率"),
+                        h("div", {className: "text-muted font-size-sm mt-1"}, "关闭仅停止本策略的带宽加倍；基础倍率和时段倍率仍生效，其他场景独立启停。")),
+                    h(Switch["a"], {disabled: this.state.saving, checked: enabled(settings.enabled), onChange: function(checked) { set("enabled", checked ? 1 : 0); }})),
                 h("div", {className: "row"},
                     field("instant_mbps", "瞬时阈值（Mbps）", "超过它的分钟算突发，默认 50。", "1"),
                     field("sustained_mbps", "持续阈值（Mbps）", "超过它才开始累计叠加计数，默认 10。", "1"),
@@ -122004,7 +122170,8 @@
                     field("stack_minutes", "叠加门槛（分钟）", "持续计数达到它才开始叠加，默认 5。", "1"),
                     field("stack_multiplier", "叠加倍率", "达到门槛后乘多少倍，默认 1.5。", "0.05"),
                     field("decay_step", "回落步长", "低于持续阈值时计数每轮减多少，默认 1。", "1")),
-                h(Button["a"], {type: "primary", loading: this.state.saving, onClick: function() { self.saveSettings(); }}, "保存参数")));
+                h(Button["a"], {type: "primary", loading: this.state.saving, onClick: function() { if (policyMode) self.savePolicy(); else self.saveSettings(); }}, policyMode ? "保存场景策略" : "保存参数"),
+                policyMode && h(Button["a"], {disabled: this.state.saving, style: {marginLeft: 8}, onClick: function() { self.setState({policyForm: null}); }}, "取消")));
         }
 
         renderBreakdown() {
@@ -122013,12 +122180,12 @@
             var self = this;
             return h("div", {className: "block block-rounded"}, h("div", {className: "block-content"},
                 h("div", {className: "d-flex justify-content-between align-items-center mb-2"},
-                    h("h5", {className: "font-w600 mb-0"}, "倍率构成 · 用户 #" + breakdown.user_id),
+                    h("h5", {className: "font-w600 mb-0"}, "倍率构成 · 用户 #" + breakdown.user_id + (breakdown.subscription_id ? " · 订阅 #" + breakdown.subscription_id : "")),
                     h(Button["a"], {size: "sm", onClick: function() { self.setState({breakdown: null}); }}, "关闭")),
                 h("p", {className: "text-muted font-size-sm"},
                     breakdown.state
                         ? "动态倍率 " + rateText(breakdown.user_multiplier) + "，当前判定「" + (STATE_LABELS[breakdown.state.state] || breakdown.state.state) + "」，持续计数 " + breakdown.state.high + "、突发计数 " + breakdown.state.burst + "。"
-                        : "该用户还没有采样记录。"),
+                        : "按各节点绑定的策略显示当前实际倍率；尚未触发带宽加倍时，该项为 1 倍。"),
                 h(Table["a"], {
                     tableLayout: "auto", rowKey: function(row) { return row.type + ":" + row.id; }, dataSource: breakdown.nodes || [],
                     pagination: !1, scroll: {x: 760},
@@ -122026,8 +122193,9 @@
                     columns: [
                         {title: "节点", key: "node", render: function(value, row) { return h("span", null, row.type + " #" + row.id + " " + row.name); }},
                         {title: "基础倍率", key: "rate", width: 100, render: function(value, row) { return h("span", null, rateText(row.rate)); }},
+                        {title: "场景策略", key: "policy", render: function(value, row) { return row.policy_name || "全局策略"; }},
                         {title: "时段倍率", key: "band", width: 100, render: function(value, row) { return h("span", null, rateText(row.band_multiplier)); }},
-                        {title: "动态倍率", key: "user", width: 100, render: function(value, row) { return h("span", null, rateText(breakdown.user_multiplier)); }},
+                        {title: "动态倍率", key: "user", width: 100, render: function(value, row) { return h("span", null, rateText(row.user_multiplier === undefined ? breakdown.user_multiplier : row.user_multiplier)); }},
                         {title: "实际计费倍率", key: "effective", width: 130, render: function(value, row) { return h("span", {className: "font-w600"}, rateText(row.effective)); }}
                     ]
                 })));
@@ -122052,19 +122220,24 @@
                     }))),
                 this.renderForm(),
                 this.renderSettings(),
+                this.renderPolicies(),
+                this.state.policyForm && this.renderSettings(true),
                 this.renderBreakdown(),
                 h("div", {className: "block block-rounded"}, h("div", {className: "block-content"},
                     h("div", {className: "d-flex justify-content-between align-items-center mb-2"},
                         h("div", null, h("h5", {className: "font-w600 mb-1"}, "正在叠加的用户"),
                             h("p", {className: "text-muted font-size-sm mb-0"}, "每分钟刷新的实时台账。点「倍率构成」可以看到这个数字是怎么算出来的。")),
                         h("div", null,
+                            h("select", {"aria-label": "筛选场景策略", className: "form-control form-control-sm d-inline-block", style: {width: 160, marginRight: 8}, value: state.policyFilter,
+                                onChange: function(event) { self.setState({policyFilter: event.target.value, page: 1}, function() { self.load(); }); }},
+                                h("option", {value: ""}, "全部场景"), h("option", {value: "0"}, "全局策略"), state.policies.map(function(policy) { return h("option", {key: policy.id, value: String(policy.id)}, policy.name); })),
                             h("label", {className: "mr-3 font-w400"},
                                 h("input", {type: "checkbox", className: "mr-1", checked: state.onlyStacked, onChange: function(event) { self.setState({onlyStacked: event.target.checked, page: 1}, function() { self.load(); }); }}),
                                 "只看叠加中的"),
                             h("input", {type: "text", className: "form-control form-control-sm d-inline-block", style: {width: 180}, placeholder: "邮箱或用户 ID", value: state.keyword, onChange: function(event) { self.setState({keyword: event.target.value}); }, onKeyDown: function(event) { if (event.key === "Enter") { self.setState({page: 1}, function() { self.load(); }); } }}),
                             h(Button["a"], {size: "sm", style: {marginLeft: 8}, onClick: function() { self.setState({page: 1}, function() { self.load(); }); }}, "查询"))),
                     h(Table["a"], {
-                        tableLayout: "auto", rowKey: "user_id", dataSource: state.states.rows, scroll: {x: 900},
+                        tableLayout: "auto", rowKey: function(row) { return (row.policy_id || 0) + ":" + (row.node_user_id || row.user_id); }, dataSource: state.states.rows, scroll: {x: 1100},
                         locale: {emptyText: state.onlyStacked ? "当前没有用户被叠加倍率" : "还没有采样记录"},
                         pagination: {current: state.page, pageSize: state.limit, total: number(state.states.total, 0), showSizeChanger: !1,
                             onChange: function(page) { self.setState({page: page}, function() { self.load(); }); }},

@@ -5,6 +5,8 @@ namespace App\Providers;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Observers\SubscriptionTokenObserver;
+use App\Observers\RatePolicyNodeObserver;
+use App\Services\ServerIdService;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -33,6 +35,9 @@ class AppServiceProvider extends ServiceProvider
     public function boot()
     {
         $this->app['view']->addNamespace('theme', public_path() . '/theme');
+        foreach (ServerIdService::TYPES as $entry) {
+            $entry[0]::observe(RatePolicyNodeObserver::class);
+        }
 
         // 这里绝不能碰数据库：Schema::hasTable 会让 v2board:install、key:generate 在空库上
         // 直接炸掉。表是否存在由观察者内部的服务惰性探测，且排在 isDirty 判断之后。

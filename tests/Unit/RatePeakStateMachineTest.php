@@ -23,7 +23,7 @@ class RatePeakStateMachineTest extends TestCase
         'decay_step' => 1
     ];
 
-    private function run(array $sequence, array $params = self::PARAMS): array
+    private function timeline(array $sequence, array $params = self::PARAMS): array
     {
         $machine = new RatePeakStateMachine();
         $state = ['high' => 0, 'burst' => 0];
@@ -38,7 +38,7 @@ class RatePeakStateMachineTest extends TestCase
 
     public function testTwoMinuteBurstIsNeverStacked(): void
     {
-        $timeline = $this->run([100, 100, 0, 0, 0, 0]);
+        $timeline = $this->timeline([100, 100, 0, 0, 0, 0]);
 
         foreach ($timeline as $index => $step) {
             $this->assertSame(1.0, $step['multiplier'], '第 ' . ($index + 1) . ' 分钟不该叠加');
@@ -50,7 +50,7 @@ class RatePeakStateMachineTest extends TestCase
 
     public function testSustainedBurstStopsBeingExemptAfterTheGraceWindow(): void
     {
-        $timeline = $this->run(array_fill(0, 10, 100));
+        $timeline = $this->timeline(array_fill(0, 10, 100));
 
         // 前 3 分钟算突发，第 4 分钟起才开始计入持续
         $this->assertSame(0, $timeline[2]['high']);
@@ -63,7 +63,7 @@ class RatePeakStateMachineTest extends TestCase
 
     public function testSteadyModerateBandwidthStacksAfterFiveMinutes(): void
     {
-        $timeline = $this->run([20, 20, 20, 20, 20, 20]);
+        $timeline = $this->timeline([20, 20, 20, 20, 20, 20]);
 
         $this->assertSame(1.0, $timeline[3]['multiplier']);
         $this->assertSame(1.5, $timeline[4]['multiplier']);
@@ -71,7 +71,7 @@ class RatePeakStateMachineTest extends TestCase
 
     public function testFourMinutesOfModerateBandwidthIsNotEnough(): void
     {
-        $timeline = $this->run([20, 20, 20, 20]);
+        $timeline = $this->timeline([20, 20, 20, 20]);
 
         $this->assertSame(4, $timeline[3]['high']);
         $this->assertSame(1.0, $timeline[3]['multiplier']);
@@ -79,7 +79,7 @@ class RatePeakStateMachineTest extends TestCase
 
     public function testDecayBringsTheUserBackToNormal(): void
     {
-        $timeline = $this->run([20, 20, 20, 20, 20, 0, 0]);
+        $timeline = $this->timeline([20, 20, 20, 20, 20, 0, 0]);
         $this->assertSame(1.5, $timeline[4]['multiplier']);
 
         // 掉到阈值以下就按 decay_step 回落，5 分制的计数一步就跌破门槛
@@ -90,12 +90,12 @@ class RatePeakStateMachineTest extends TestCase
 
     public function testDisabledSwitchTracksStateButNeverCharges(): void
     {
-        $timeline = $this->run([20, 20, 20, 20, 20, 20], array_merge(self::PARAMS, ['enabled' => 0]));
+        $timeline = $this->timeline([20, 20, 20, 20, 20, 20], array_merge(self::PARAMS, ['enabled' => 0]));
 
         $last = end($timeline);
-        // 状态照推（管理页要看「开了会怎样」），但倍率恒为 1
+        // 返回理论倍率供观察；调用方只有 applied 为 true 时才采用它。
         $this->assertSame(RatePeakStateMachine::STATE_STACKED, $last['state']);
-        $this->assertSame(1.0, $last['multiplier']);
+        $this->assertSame(1.5, $last['multiplier']);
         $this->assertFalse($last['applied']);
     }
 
@@ -135,7 +135,7 @@ class RatePeakStateMachineTest extends TestCase
 
     public function testMultiplierIsRoundedToTwoDecimals(): void
     {
-        $timeline = $this->run([20, 20, 20, 20, 20], array_merge(self::PARAMS, ['stack_multiplier' => 1.337]));
+        $timeline = $this->timeline([20, 20, 20, 20, 20], array_merge(self::PARAMS, ['stack_multiplier' => 1.337]));
 
         // v2_stat_user.server_rate 是 decimal(10,2)：账面上乘的倍率必须与统计记的一致
         $this->assertSame(1.34, end($timeline)['multiplier']);

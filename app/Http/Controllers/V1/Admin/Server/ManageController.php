@@ -5,6 +5,7 @@ namespace App\Http\Controllers\V1\Admin\Server;
 use App\Http\Controllers\Controller;
 use App\Services\ServerBatchOperationService;
 use App\Services\ServerService;
+use App\Services\RatePolicyService;
 use App\Services\ServerHostReplacementService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +19,7 @@ class ManageController extends Controller
     {
         $serverService = new ServerService();
         return response([
-            'data' => $serverService->getAllServers()
+            'data' => (new RatePolicyService())->annotate($serverService->getAllServers())
         ])->header('Cache-Control', 'no-store, private');
     }
 

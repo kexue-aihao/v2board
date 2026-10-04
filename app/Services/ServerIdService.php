@@ -94,13 +94,20 @@ class ServerIdService
         $statTypes = self::type($type)[1];
         $table = $server->getTable();
 
-        DB::transaction(function () use ($table, $statTypes, $oldId, $newId) {
-            DB::table($table)->where('id', $oldId)->update(['id' => $newId]);
-            DB::table($table)->where('parent_id', $oldId)->update(['parent_id' => $newId]);
-            DB::table('v2_stat_server')
-                ->where('server_id', $oldId)
-                ->whereIn('server_type', $statTypes)
-                ->update(['server_id' => $newId]);
+        (new RatePolicyService())->mutate(function () use ($table, $type, $statTypes, $oldId, $newId) {
+            DB::transaction(function () use ($table, $type, $statTypes, $oldId, $newId) {
+                DB::table($table)->where('id', $oldId)->update(['id' => $newId]);
+                DB::table($table)->where('parent_id', $oldId)->update(['parent_id' => $newId]);
+                DB::table('v2_stat_server')
+                    ->where('server_id', $oldId)
+                    ->whereIn('server_type', $statTypes)
+                    ->update(['server_id' => $newId]);
+                if ((new RatePolicyService())->ready()) {
+                    DB::table('v2_rate_node_policy')->where('node_type', $type)->where('node_id', $newId)->delete();
+                    DB::table('v2_rate_node_policy')->where('node_type', $type)->where('node_id', $oldId)->update(['node_id' => $newId]);
+                    DB::table(DynamicRateService::TABLE_RULE)->where('scope', 'node')->where('node_type', $type)->where('node_id', $oldId)->update(['node_id' => $newId]);
+                }
+            });
         });
 
         self::migrateCacheKeys($type, $oldId, $newId);

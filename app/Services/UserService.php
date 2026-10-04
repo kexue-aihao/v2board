@@ -288,9 +288,10 @@ class UserService
         //   节点基础倍率 × 时段倍率(规则) × 用户动态倍率(带宽峰值)
         // 只在这里算的原因是它同时看得见节点（$server）、协议和本批上报的用户；
         // 让每个 job 各算一次的话，两次读到的用户倍率可能落在不同的分钟上。
-        $rates = (new RateResolver())->resolveForPush($server, $protocol, array_keys($data));
+        $context = (new RateResolver())->resolveTraffic($server, $protocol, array_keys($data));
+        $rates = $context['rates'];
 
-        TrafficFetchJob::dispatch($data, $server, $protocol, $rates);
+        TrafficFetchJob::dispatch($data, $server, $protocol, $rates, $context['sampling']);
         StatUserJob::dispatch($data, $server, $protocol, 'd', $rates);
         StatServerJob::dispatch($data, $server, $protocol, 'd');
     }

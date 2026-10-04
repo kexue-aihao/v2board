@@ -61,6 +61,11 @@ class AdminRoute
             $router->post('/rate/rule/save', 'V1\\Admin\\RateController@saveRule');
             $router->post('/rate/rule/drop', 'V1\\Admin\\RateController@dropRule');
             $router->post('/rate/settings/save', 'V1\\Admin\\RateController@saveSettings');
+            $router->post('/rate/policy/save', 'V1\\Admin\\RateController@savePolicy');
+            $router->get ('/rate/policies', 'V1\\Admin\\RateController@policyOptions');
+            $router->post('/rate/policy/drop', 'V1\\Admin\\RateController@dropPolicy');
+            $router->post('/rate/binding/preview', 'V1\\Admin\\RateController@previewBinding');
+            $router->post('/rate/binding/apply', 'V1\\Admin\\RateController@applyBinding');
             $router->post('/rate/explain', 'V1\\Admin\\RateController@explain');
 
             // 外部订阅源（下发成过渡节点）

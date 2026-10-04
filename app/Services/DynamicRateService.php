@@ -59,16 +59,19 @@ class DynamicRateService
      */
     public function saveSettings(array $values): array
     {
-        $params = (new RatePeakStateMachine())->normalizeParams($values);
-        $now = time();
-        foreach ($params as $key => $value) {
-            DB::table(self::TABLE_SETTING)->updateOrInsert(
-                ['setting_key' => $key],
-                ['setting_value' => $this->scalarToString($value), 'updated_at' => $now]
-            );
-        }
+        return (new RatePolicyService())->mutate(function () use ($values) {
+            $params = (new RatePeakStateMachine())->normalizeParams($values);
+            $now = time();
+            foreach ($params as $key => $value) {
+                DB::table(self::TABLE_SETTING)->updateOrInsert(
+                    ['setting_key' => $key],
+                    ['setting_value' => $this->scalarToString($value), 'updated_at' => $now]
+                );
+            }
 
-        return $params;
+            (new RatePolicyService())->resetGlobal();
+            return $params;
+        });
     }
 
     // ---------------------------------------------------------------- 规则
@@ -96,22 +99,26 @@ class DynamicRateService
      */
     public function saveRule(array $data, ?int $id = null): int
     {
-        $attributes = $this->normalizeRule($data) + ['updated_at' => time()];
-        if ($id !== null) {
-            $attributes['updated_at'] = time();
-            DB::table(self::TABLE_RULE)->where('id', $id)->update($attributes);
+        return (new RatePolicyService())->mutate(function () use ($data, $id) {
+            $attributes = $this->normalizeRule($data) + ['updated_at' => time()];
+            if ($id !== null) {
+                $attributes['updated_at'] = time();
+                DB::table(self::TABLE_RULE)->where('id', $id)->update($attributes);
 
-            return $id;
-        }
+                return $id;
+            }
 
-        $attributes['created_at'] = time();
+            $attributes['created_at'] = time();
 
-        return (int) DB::table(self::TABLE_RULE)->insertGetId($attributes);
+            return (int) DB::table(self::TABLE_RULE)->insertGetId($attributes);
+        });
     }
 
     public function deleteRule(int $id): bool
     {
-        return DB::table(self::TABLE_RULE)->where('id', $id)->delete() > 0;
+        return (new RatePolicyService())->mutate(function () use ($id) {
+            return DB::table(self::TABLE_RULE)->where('id', $id)->delete() > 0;
+        });
     }
 
     /**
@@ -157,6 +164,7 @@ class DynamicRateService
      */
     public function listStates(array $options = []): array
     {
+        if ((new RatePolicyService())->ready()) return (new RatePolicyService())->listStates($options);
         if (!$this->hasTable(self::TABLE_STATE)) {
             return ['total' => 0, 'rows' => []];
         }
@@ -229,6 +237,7 @@ class DynamicRateService
      */
     public function tick(bool $dryRun = false): array
     {
+        if ((new RatePolicyService())->ready()) return (new RatePolicyService())->tick($dryRun);
         $now = time();
         $elapsed = $this->elapsedSeconds($now, $dryRun);
         $bytes = $this->drainRawCounters($dryRun);
@@ -279,8 +288,9 @@ class DynamicRateService
      *
      * @return array<string, mixed>
      */
-    public function explain(int $userId, ?int $timestamp = null): array
+    public function explain(int $userId, ?int $timestamp = null, ?int $nodeUserId = null): array
     {
+        if ((new RatePolicyService())->ready()) return (new RatePolicyService())->explain($userId, $nodeUserId, $timestamp);
         $timestamp = $timestamp ?: time();
         $matcher = new RateRuleMatcher();
         $rules = $this->rules(true);
@@ -437,6 +447,14 @@ class DynamicRateService
     private function upsertStates(array $rows): void
     {
         if (!$rows) {
+            return;
+        }
+        if (DB::getDriverName() === 'sqlite') {
+            foreach ($rows as $row) {
+                $key = ['user_id' => $row['user_id']];
+                unset($row['user_id']);
+                DB::table(self::TABLE_STATE)->updateOrInsert($key, $row);
+            }
             return;
         }
         foreach (array_chunk($rows, self::UPSERT_CHUNK) as $chunk) {

@@ -37,6 +37,7 @@ class SchemaUpgradeService
         'two_factor_schema' => 'two_factor_schema_v1',
         'server_tls_pin_schema' => 'server_tls_pin_schema_v1',
         'dynamic_rate_schema' => 'dynamic_rate_schema_v1',
+        'rate_policy_schema' => 'rate_policy_schema_v1',
         'external_subscription_schema' => 'external_subscription_schema_v1'
     ];
 
@@ -163,6 +164,9 @@ class SchemaUpgradeService
                 return;
             case 'dynamic_rate_schema':
                 $this->applyDynamicRateSchema();
+                return;
+            case 'rate_policy_schema':
+                RatePolicySchema::install();
                 return;
             case 'external_subscription_schema':
                 $this->applyExternalSubscriptionSchema();

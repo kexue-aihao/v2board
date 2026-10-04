@@ -135,6 +135,95 @@ const successful = h => h.messages.some(message => message.kind === 'success');
 // 组件跑在 vm 沙箱里，它产出的数组/对象与 Node realm 原型不同，deepStrictEqual 会误判。
 const plain = value => JSON.parse(JSON.stringify(value));
 
+const policyOptions = () => ({ body: { data: { policies: [{ id: 3, name: '专线', revision: 1, enabled: 1, node_count: 0 }] } } });
+const policyPreview = (mode = 'policy', overrides = {}) => ({ body: { data: {
+    mode, policy_id: mode === 'policy' ? 3 : 0, revision: 7, matched_count: 2, changed_count: 2,
+    nodes: NODES.slice(0, 2).map(({ type, id, name }) => ({ type, id, name, old_name: '全局策略',
+        new_name: mode === 'policy' ? '专线' : '不参与带宽动态加倍', changed: true })), ...overrides,
+} } });
+
+for (const mode of ['policy', 'off', 'global']) {
+    test('batch policy ' + mode + ' previews, saves the revision, and verifies refreshed bindings', async () => {
+        const preview = policyPreview(mode);
+        const servers = NODES.map(node => ({ ...node, rate_policy: { mode, policy_id: mode === 'policy' ? 3 : 0 } }));
+        const h = seeded({ responses: [policyOptions(), preview, preview, listing(servers)] });
+        await h.component.openBatchPolicy();
+        assert.equal(h.requests[0].url, '/api/v1/test-admin/rate/policies');
+        assert.equal(h.component.state.batchDialog, 'policy');
+        h.component.changeBatchField('batchPolicyMode', mode);
+        h.component.changeBatchField('batchPolicyId', '3');
+        const tree = elements(h.component.renderBatchOperations());
+        assert.equal(tree.some(element => element.props.id === 'batch-policy-id'), mode === 'policy');
+        await h.component.previewBatchPolicy();
+        assert.ok(h.component.state.batchPreview, h.component.state.batchError);
+        assert.equal(h.requests.length, 2);
+        assert.equal(h.requests[1].body.policy_id, mode === 'policy' ? 3 : undefined);
+        await h.component.applyBatchPolicy();
+        assert.equal(h.requests.length, 4);
+        assert.equal(h.requests[2].body.revision, 7);
+        assert.equal(h.requests[2].body.confirm, true);
+        assert.deepEqual(h.requests[2].body.nodes, NODES.slice(0, 2).map(({ type, id, name }) => ({ type, id, name })));
+        assert.equal(successful(h), true, h.component.state.batchError);
+        assert.equal(h.component.state.batchPreview, null);
+    });
+}
+
+test('changing scene selection or node selection invalidates binding confirmation', async () => {
+    for (const change of [h => h.component.changeBatchField('batchPolicyMode', 'off'), h => h.component.changeBatchSelection(['vmess:1'])]) {
+        const h = seeded({ responses: [policyOptions(), policyPreview()] });
+        await h.component.openBatchPolicy();
+        h.component.changeBatchField('batchPolicyMode', 'policy'); h.component.changeBatchField('batchPolicyId', '3');
+        await h.component.previewBatchPolicy();
+        assert.ok(h.component.state.batchPreview);
+        change(h); await h.component.applyBatchPolicy();
+        assert.equal(h.requests.length, 2);
+        assert.equal(h.component.state.batchPreview, null);
+    }
+});
+
+test('policy validation and unchanged preview cannot issue a write', async () => {
+    const h = seeded({ responses: [policyOptions(), policyPreview('global', { changed_count: 0,
+        nodes: policyPreview('global').body.data.nodes.map(node => ({ ...node, changed: false })) })] });
+    await h.component.openBatchPolicy();
+    h.component.changeBatchField('batchPolicyMode', 'policy');
+    await h.component.previewBatchPolicy();
+    assert.match(h.component.state.batchError, /请选择场景策略/);
+    assert.equal(h.requests.length, 1);
+    h.component.changeBatchField('batchPolicyMode', 'global');
+    await h.component.previewBatchPolicy();
+    assert.match(h.component.state.batchResult, /无需修改/);
+    await h.component.applyBatchPolicy();
+    assert.equal(h.requests.length, 2);
+});
+
+test('policy save conflicts and failed persistence never report success or retain confirmation', async () => {
+    for (const responses of [
+        [{ status: 409, body: { message: '倍率配置已变更，请重新预览' } }],
+        [policyPreview(), listing(NODES.map(node => ({ ...node, rate_policy: { mode: 'global', policy_id: 0 } })))],
+    ]) {
+        const h = seeded({ responses: [policyOptions(), policyPreview(), ...responses] });
+        await h.component.openBatchPolicy();
+        h.component.changeBatchField('batchPolicyMode', 'policy'); h.component.changeBatchField('batchPolicyId', '3');
+        await h.component.previewBatchPolicy(); await h.component.applyBatchPolicy();
+        const requests = h.requests.length;
+        await h.component.applyBatchPolicy();
+        assert.equal(successful(h), false);
+        assert.equal(h.component.state.batchPreview, null);
+        assert.ok(h.component.state.batchError);
+        assert.equal(h.requests.length, requests);
+    }
+});
+
+test('policy preview rejects mismatched or duplicate selected identities', async () => {
+    const preview = policyPreview(); preview.body.data.nodes[1] = preview.body.data.nodes[0];
+    const h = seeded({ responses: [policyOptions(), preview] });
+    await h.component.openBatchPolicy();
+    h.component.changeBatchField('batchPolicyMode', 'policy'); h.component.changeBatchField('batchPolicyId', '3');
+    await h.component.previewBatchPolicy(); await h.component.applyBatchPolicy();
+    assert.equal(h.requests.length, 2);
+    assert.match(h.component.state.batchError, /预览与所选节点不一致/);
+});
+
 test('row keys stay unique across node types that share an id', () => {
     const h = harness({});
     assert.notEqual(h.component.batchKey({ type: 'vmess', id: 1 }), h.component.batchKey({ type: 'v2node', id: 1 }));
@@ -776,7 +865,7 @@ test('the search toolbar has one operations dropdown containing all node tools',
     assert.match(flatten(toolbar), /已选 2 个节点/);
     assert.doesNotMatch(flatten(toolbar), /批量|替换节点域名|查看 SNI/);
     assert.deepEqual(operationItems(h).map(item => flatten(item)), [
-        '按 ID 范围选择', '清空选择', '替换节点域名', '批量复制', '批量重命名', '批量设置端口', '批量设置倍率',
+        '按 ID 范围选择', '清空选择', '替换节点域名', '批量复制', '批量重命名', '批量设置端口', '批量设置倍率', '批量设置倍率策略',
         '批量填写 SNI/地址', '查看 SNI/地址', '批量下发协议配置', '批量删除',
     ]);
     assert.deepEqual(plain(h.component.renderNodeOperations().props.trigger), ['click']);
