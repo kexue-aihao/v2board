@@ -5,7 +5,7 @@
  *
  * 与 patch-admin-rate.php 完全同构（那边的注释更详细）：
  *   1. 把 scripts/admin-external-module.js 作为新模块追加进产物（已存在就整块替换，幂等）；
- *   2. 菜单加一项（插在「动态倍率」前面，同属运营配置分组）；
+ *   2. 菜单加一项（插在「签到与娱乐」前面，同属运营配置分组）；
  *   3. 路由加一条。
  */
 
@@ -16,7 +16,7 @@ if ($bundle === false) {
     exit(1);
 }
 
-$menuAnchor = "                    }, {\n                        title: \"动态倍率\",";
+$menuAnchor = "                    }, {\n                        title: \"签到与娱乐\",";
 if (strpos($bundle, 'href: "/external"') === false) {
     $menuItem = <<<'JS'
                     }, {

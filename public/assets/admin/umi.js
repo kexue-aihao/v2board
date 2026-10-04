@@ -21760,13 +21760,6 @@
                             className: "nav-main-link-icon si si-link"
                         })
                     }, {
-                        title: "动态倍率",
-                        type: "item",
-                        href: "/rate",
-                        icon: o.a.createElement("i", {
-                            className: "nav-main-link-icon si si-speedometer"
-                        })
-                    }, {
                         title: "签到与娱乐",
                         type: "item",
                         href: "/reward",
@@ -83889,7 +83882,7 @@
         }, {
             path: "/rate",
             exact: !0,
-            component: n("ratepage").default
+            redirect: "/server/manage?rate=1"
         }, {
             path: "/reward",
             exact: !0,
@@ -108475,6 +108468,7 @@
                     batchPolicyId: "",
                     batchPolicies: [],
                     batchPoliciesReady: false,
+                    rateSettingsVisible: !!(e.location && /(?:^|[?&])rate=1(?:&|$)/.test(e.location.search || "")),
                     batchRenameSuffix: "",
                     batchRenameSeparator: " | ",
                     batchRenameStart: "1",
@@ -108734,6 +108728,7 @@
                     {key: "rename", label: "批量重命名", icon: "edit"},
                     {key: "ports", label: "批量设置端口", icon: "api"},
                     {key: "rate", label: "批量设置倍率", icon: "calculator"},
+                    {key: "rate-settings", label: "动态倍率设置", icon: "setting", run: ()=>this.openRateSettings()},
                     {key: "policy", label: "批量设置倍率策略", icon: "schedule", selection: true, run: ()=>this.openBatchPolicy()},
                     {key: "tls", label: "批量填写 SNI/地址", icon: "form"},
                     {key: "inspect", label: "查看 SNI/地址", icon: "search", selection: true, run: ()=>this.openBatchTlsInspection()},
@@ -108757,6 +108752,24 @@
                     }))
                 }, el(l["a"], {style: {marginLeft: 8}, disabled: busy, loading: this.state.batchLoading || this.state.hostReplaceLoading},
                     el(m["a"], {type: "select"}), "操作", el(m["a"], {type: "caret-down"})))
+            }
+            openRateSettings() {
+                if (this.batchBusy || this.hostReplaceBusy) return;
+                this.closeBatchDialog();
+                this.setState({rateSettingsVisible: true});
+            }
+            renderRateSettings() {
+                if (!this.state.rateSettingsVisible) return null;
+                return y.a.createElement(n("ratepage").default, {
+                    selectedCount: this.selectedBatchNodes().length,
+                    onClose: ()=>this.setState({rateSettingsVisible: false}),
+                    onChanged: ()=>this.props.dispatch({type: "serverManage/getNodes"}),
+                    onBindPolicy: policy=>{
+                        if (this.batchBusy || this.hostReplaceBusy) return;
+                        this.setState({rateSettingsVisible: false, batchPolicyMode: "policy", batchPolicyId: String(policy.id)});
+                        this.openBatchPolicy();
+                    }
+                });
             }
             openBatchDialog(dialog) {
                 if (this.batchBusy) return;
@@ -109608,7 +109621,7 @@
                             el("p", {role: "status"}, "已选 " + nodes.length + " 个节点"),
                             el("p", null, "同一订阅在同一场景内累计流量，跨场景独立判定。基础倍率和时段倍率继续生效。"),
                             el("p", null, "请配置实际向面板上报流量的节点；父子节点共用上报时，按上报节点的策略计费。"),
-                            el("p", null, el("a", {href: "#/rate", target: "_blank", rel: "noopener noreferrer"}, "管理场景策略")),
+                            el("p", null, el(l["a"], {disabled: busy, onClick: ()=>this.openRateSettings()}, "管理场景策略")),
                             el("div", {className: "form-group"}, el("label", {htmlFor: "batch-policy-mode"}, "策略模式"),
                                 el("select", {id: "batch-policy-mode", className: "form-control", disabled: busy, value: state.batchPolicyMode,
                                     onChange: event=>this.changeBatchField("batchPolicyMode", event.target.value)},
@@ -110209,7 +110222,7 @@
                             }
                         })
                     }
-                }, A ? "\u4fdd\u5b58\u6392\u5e8f" : "\u7f16\u8f91\u6392\u5e8f")), Object(L["f"])() ? y.a.createElement(o["a"], {
+                }, A ? "\u4fdd\u5b58\u6392\u5e8f" : "\u7f16\u8f91\u6392\u5e8f")), this.renderRateSettings(), Object(L["f"])() ? y.a.createElement(o["a"], {
                     className: "v2board-table",
                     itemLayout: "vertical",
                     dataSource: this.filteredServers(),
@@ -121834,7 +121847,7 @@
     ratepage: function(e, t, n) {
     "use strict";
     n.r(t);
-    var React = n("q1tI"), ReactDefault = n.n(React), Table = n("wCAj"), Button = n("2/Rp"), Page = n("Bl7J"), Spin = n("v32e"), Switch = n("Sdc0"), h = ReactDefault.a.createElement;
+    var React = n("q1tI"), ReactDefault = n.n(React), Table = n("wCAj"), Button = n("2/Rp"), Spin = n("v32e"), Switch = n("Sdc0"), h = ReactDefault.a.createElement;
 
     var WEEKDAYS = [[1, "一"], [2, "二"], [3, "三"], [4, "四"], [5, "五"], [6, "六"], [7, "日"]];
     var STATE_LABELS = {normal: "正常", burst: "突发豁免", high: "高带宽", stacked: "已叠加"};
@@ -121858,6 +121871,7 @@
             };
         }
         componentDidMount() { this.load(); }
+        notifyChanged() { if (this.props.onChanged) this.props.onChanged(); }
 
         api(path, options) {
             options = options || {};
@@ -121923,6 +121937,7 @@
                 })
             }).then(function(result) {
                 self.setState({saving: !1, settings: result.data || settings, notice: "全局参数已保存，计数重新开始；每分钟更新带宽判定。"});
+                self.notifyChanged();
             }).catch(function(error) {
                 self.setState({saving: !1, error: error.message || "保存失败，请重试"});
             });
@@ -121950,6 +121965,7 @@
             this.setState({saving: true, error: "", notice: ""});
             return this.api("/rate/policy/save", {method: "POST", body: JSON.stringify(body)}).then(function() {
                 self.setState({saving: false, policyForm: null, notice: "场景策略已保存。绑定节点后生效；修改参数后重新计数。"});
+                self.notifyChanged();
                 self.load();
             }).catch(function(error) { self.setState({saving: false, error: error.message || "策略保存失败"}); });
         }
@@ -121960,7 +121976,7 @@
             var self = this;
             this.setState({saving: true, error: "", notice: ""});
             return this.api("/rate/policy/drop", {method: "POST", body: JSON.stringify({id: policy.id, revision: policy.revision})}).then(function() {
-                self.setState({saving: false, notice: "场景策略已删除", policyForm: null}); self.load();
+                self.setState({saving: false, notice: "场景策略已删除", policyForm: null}); self.notifyChanged(); self.load();
             }).catch(function(error) { self.setState({saving: false, error: error.message || "策略删除失败"}); });
         }
         renderPolicies() {
@@ -121981,6 +121997,10 @@
                         {title: "状态", key: "enabled", render: function(v, row) { return enabled(row.enabled) ? "启用" : "停用"; }},
                         {title: "操作", key: "actions", render: function(v, row) { return h("div", null,
                             h(Button["a"], {disabled: self.state.saving, onClick: function() { self.openPolicy(row); }}, "编辑"),
+                            self.props.onBindPolicy && h(Button["a"], {
+                                disabled: self.state.saving || !self.props.selectedCount || self.props.selectedCount > 200,
+                                onClick: function() { if (!self.state.saving && self.props.selectedCount > 0 && self.props.selectedCount <= 200) self.props.onBindPolicy(row); }, style: {marginLeft: 8}
+                            }, "应用到所选节点"),
                             h(Button["a"], {disabled: self.state.saving || !!row.node_count, onClick: function() { self.dropPolicy(row); }, style: {marginLeft: 8}}, "删除")); }}
                     ]})));
         }
@@ -122243,7 +122263,12 @@
                             onChange: function(page) { self.setState({page: page}, function() { self.load(); }); }},
                         columns: this.stateColumns()
                     }))));
-            return h(Page["a"], Object.assign({}, this.props, {title: "动态倍率"}), h(Spin["a"], {loading: state.loading}, content));
+            return h("section", {id: "node-rate-settings", "aria-label": "动态倍率设置", style: {padding: 15}},
+                h("div", {className: "d-flex justify-content-between align-items-center mb-3"},
+                    h("div", null, h("h4", {className: "mb-1"}, "动态倍率设置"),
+                        h("p", {className: "text-muted mb-0"}, "已选 " + (this.props.selectedCount || 0) + " 个节点；选择场景策略可直接应用到所选节点。")),
+                    h(Button["a"], {disabled: state.saving, onClick: function() { if (!self.state.saving && self.props.onClose) self.props.onClose(); }}, "收起设置")),
+                h(Spin["a"], {loading: state.loading}, content));
         }
     }
     t.default = RatePage;

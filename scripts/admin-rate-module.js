@@ -1,7 +1,7 @@
 ratepage: function(e, t, n) {
     "use strict";
     n.r(t);
-    var React = n("q1tI"), ReactDefault = n.n(React), Table = n("wCAj"), Button = n("2/Rp"), Page = n("Bl7J"), Spin = n("v32e"), Switch = n("Sdc0"), h = ReactDefault.a.createElement;
+    var React = n("q1tI"), ReactDefault = n.n(React), Table = n("wCAj"), Button = n("2/Rp"), Spin = n("v32e"), Switch = n("Sdc0"), h = ReactDefault.a.createElement;
 
     var WEEKDAYS = [[1, "一"], [2, "二"], [3, "三"], [4, "四"], [5, "五"], [6, "六"], [7, "日"]];
     var STATE_LABELS = {normal: "正常", burst: "突发豁免", high: "高带宽", stacked: "已叠加"};
@@ -25,6 +25,7 @@ ratepage: function(e, t, n) {
             };
         }
         componentDidMount() { this.load(); }
+        notifyChanged() { if (this.props.onChanged) this.props.onChanged(); }
 
         api(path, options) {
             options = options || {};
@@ -90,6 +91,7 @@ ratepage: function(e, t, n) {
                 })
             }).then(function(result) {
                 self.setState({saving: !1, settings: result.data || settings, notice: "全局参数已保存，计数重新开始；每分钟更新带宽判定。"});
+                self.notifyChanged();
             }).catch(function(error) {
                 self.setState({saving: !1, error: error.message || "保存失败，请重试"});
             });
@@ -117,6 +119,7 @@ ratepage: function(e, t, n) {
             this.setState({saving: true, error: "", notice: ""});
             return this.api("/rate/policy/save", {method: "POST", body: JSON.stringify(body)}).then(function() {
                 self.setState({saving: false, policyForm: null, notice: "场景策略已保存。绑定节点后生效；修改参数后重新计数。"});
+                self.notifyChanged();
                 self.load();
             }).catch(function(error) { self.setState({saving: false, error: error.message || "策略保存失败"}); });
         }
@@ -127,7 +130,7 @@ ratepage: function(e, t, n) {
             var self = this;
             this.setState({saving: true, error: "", notice: ""});
             return this.api("/rate/policy/drop", {method: "POST", body: JSON.stringify({id: policy.id, revision: policy.revision})}).then(function() {
-                self.setState({saving: false, notice: "场景策略已删除", policyForm: null}); self.load();
+                self.setState({saving: false, notice: "场景策略已删除", policyForm: null}); self.notifyChanged(); self.load();
             }).catch(function(error) { self.setState({saving: false, error: error.message || "策略删除失败"}); });
         }
         renderPolicies() {
@@ -148,6 +151,10 @@ ratepage: function(e, t, n) {
                         {title: "状态", key: "enabled", render: function(v, row) { return enabled(row.enabled) ? "启用" : "停用"; }},
                         {title: "操作", key: "actions", render: function(v, row) { return h("div", null,
                             h(Button["a"], {disabled: self.state.saving, onClick: function() { self.openPolicy(row); }}, "编辑"),
+                            self.props.onBindPolicy && h(Button["a"], {
+                                disabled: self.state.saving || !self.props.selectedCount || self.props.selectedCount > 200,
+                                onClick: function() { if (!self.state.saving && self.props.selectedCount > 0 && self.props.selectedCount <= 200) self.props.onBindPolicy(row); }, style: {marginLeft: 8}
+                            }, "应用到所选节点"),
                             h(Button["a"], {disabled: self.state.saving || !!row.node_count, onClick: function() { self.dropPolicy(row); }, style: {marginLeft: 8}}, "删除")); }}
                     ]})));
         }
@@ -410,7 +417,12 @@ ratepage: function(e, t, n) {
                             onChange: function(page) { self.setState({page: page}, function() { self.load(); }); }},
                         columns: this.stateColumns()
                     }))));
-            return h(Page["a"], Object.assign({}, this.props, {title: "动态倍率"}), h(Spin["a"], {loading: state.loading}, content));
+            return h("section", {id: "node-rate-settings", "aria-label": "动态倍率设置", style: {padding: 15}},
+                h("div", {className: "d-flex justify-content-between align-items-center mb-3"},
+                    h("div", null, h("h4", {className: "mb-1"}, "动态倍率设置"),
+                        h("p", {className: "text-muted mb-0"}, "已选 " + (this.props.selectedCount || 0) + " 个节点；选择场景策略可直接应用到所选节点。")),
+                    h(Button["a"], {disabled: state.saving, onClick: function() { if (!self.state.saving && self.props.onClose) self.props.onClose(); }}, "收起设置")),
+                h(Spin["a"], {loading: state.loading}, content));
         }
     }
     t.default = RatePage;

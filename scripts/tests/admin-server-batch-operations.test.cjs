@@ -35,13 +35,14 @@ const NODES = [
     { type: 'trojan', id: 7, name: 'trojan-a', show: 1 },
 ];
 
-function harness({ responses = [], servers = NODES, contentType = 'application/json; charset=utf-8', mobile = false, clipboardAvailable = true, clipboardError = false } = {}) {
+function harness({ responses = [], servers = NODES, contentType = 'application/json; charset=utf-8', mobile = false, clipboardAvailable = true, clipboardError = false, location } = {}) {
     const requests = [], messages = [], actions = [], clipboardWrites = [];
     class Component {
         constructor(props) { this.props = props; }
         setState(update, callback) { this.state = Object.assign({}, this.state, update); if (callback) callback(); }
     }
     const modules = {
+        ratepage: { default: 'RateSettings' },
         q1tI: { Component, createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
         '/MKj': { c: () => ComponentClass => ComponentClass },
         yWgo: { e: () => null, c: () => 'test-auth', g: () => {}, f: () => mobile },
@@ -83,6 +84,7 @@ function harness({ responses = [], servers = NODES, contentType = 'application/j
     const exports = {};
     vm.runInContext('(' + moduleSource('uzXD', 'v32e') + ')', context)({}, exports, requireModule);
     const component = new exports.default({
+        location,
         dispatch: action => actions.push(action),
         serverManage: { servers, fetchLoading: false, sortMode: false },
         serverGroup: { groups: [] },
@@ -865,7 +867,7 @@ test('the search toolbar has one operations dropdown containing all node tools',
     assert.match(flatten(toolbar), /已选 2 个节点/);
     assert.doesNotMatch(flatten(toolbar), /批量|替换节点域名|查看 SNI/);
     assert.deepEqual(operationItems(h).map(item => flatten(item)), [
-        '按 ID 范围选择', '清空选择', '替换节点域名', '批量复制', '批量重命名', '批量设置端口', '批量设置倍率', '批量设置倍率策略',
+        '按 ID 范围选择', '清空选择', '替换节点域名', '批量复制', '批量重命名', '批量设置端口', '批量设置倍率', '动态倍率设置', '批量设置倍率策略',
         '批量填写 SNI/地址', '查看 SNI/地址', '批量下发协议配置', '批量删除',
     ]);
     assert.deepEqual(plain(h.component.renderNodeOperations().props.trigger), ['click']);
@@ -876,7 +878,7 @@ test('menu actions enforce selection and disable operations while sorting or loa
     const h = harness({});
     for (const item of operationItems(h)) {
         const label = flatten(item);
-        assert.equal(item.props.disabled, !['按 ID 范围选择', '替换节点域名'].includes(label), label);
+        assert.equal(item.props.disabled, !['按 ID 范围选择', '替换节点域名', '动态倍率设置'].includes(label), label);
         if (item.props.disabled) item.props.onClick();
     }
     assert.equal(h.component.state.batchDialog, '');
@@ -895,6 +897,51 @@ test('menu actions enforce selection and disable operations while sorting or loa
         assert.ok(operationItems(h).every(item => item.props.disabled));
     }
     assert.equal(h.requests.length, 0);
+});
+
+test('dynamic rate settings open inline without selecting nodes and preserve selection when collapsed', () => {
+    const h = harness();
+    assert.equal(h.component.renderRateSettings(), null);
+    operation(h, '动态倍率设置').props.onClick();
+    let settings = elements(h.component.render()).find(element => element.type === 'RateSettings');
+    assert.equal(settings.props.selectedCount, 0);
+    h.component.changeBatchSelection(['vmess:1']);
+    settings = h.component.renderRateSettings();
+    assert.equal(settings.props.selectedCount, 1);
+    settings.props.onChanged();
+    assert.equal(h.actions.at(-1).type, 'serverManage/getNodes');
+    settings.props.onClose();
+    assert.equal(h.component.renderRateSettings(), null);
+    assert.deepEqual(plain(h.component.state.batchSelection), ['vmess:1']);
+    assert.equal(h.requests.length, 0);
+});
+
+test('scene management stays in the node page and applies a scene to the retained selection', async () => {
+    const h = seeded({ responses: [policyOptions()] });
+    h.component.openBatchDialog('policy');
+    h.component.state.batchPreview = policyPreview().body.data;
+    const manage = elements(h.component.renderBatchOperations()).find(element => element.props.onClick && flatten(element) === '管理场景策略');
+    assert.equal(manage.props.href, undefined);
+    assert.equal(manage.props.target, undefined);
+    manage.props.onClick();
+    assert.equal(h.component.state.batchDialog, '');
+    assert.equal(h.component.state.batchPreview, null);
+    const settings = h.component.renderRateSettings();
+    assert.equal(settings.props.selectedCount, 2);
+    settings.props.onBindPolicy({ id: 3 });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.component.renderRateSettings(), null);
+    assert.equal(h.component.state.batchDialog, 'policy');
+    assert.equal(h.component.state.batchPolicyMode, 'policy');
+    assert.equal(h.component.state.batchPolicyId, '3');
+    assert.deepEqual(plain(h.component.state.batchSelection), ['v2node:1', 'vmess:1']);
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.requests[0].url, '/api/v1/test-admin/rate/policies');
+});
+
+test('legacy rate bookmarks expand settings inside node management', () => {
+    const h = harness({ location: { search: '?rate=1' } });
+    assert.equal(h.component.renderRateSettings().type, 'RateSettings');
 });
 
 test('menu items open the matching panels and clearing selection invalidates old previews', () => {

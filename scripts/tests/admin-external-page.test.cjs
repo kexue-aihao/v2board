@@ -7,6 +7,28 @@ const { test } = require('node:test');
 // 「外部订阅源」页跑在产物里的整段模块上，所以从 umi.js 里抠出来跑：模块里任何一个拼错的
 // 模块 id、或 render 里引用了不存在的字段，都会在这里炸，而不是等运维点开菜单才发现。
 const bundle = fs.readFileSync(path.join(__dirname, '../../public/assets/admin/umi.js'), 'utf8');
+
+test('external menu patch works without a separate rate sidebar and saves menu-only changes', () => {
+    const menu = bundle.match(/                    }, \{\n                        title: "外部订阅源",[\s\S]*?                        \}\)\n/);
+    assert.ok(menu);
+    let patched = bundle.replace(menu[0], '');
+    const patcherDir = path.join(__dirname, '..');
+    const patcher = fs.readFileSync(path.join(patcherDir, 'apply-admin-external.cjs'), 'utf8');
+    vm.runInNewContext(patcher, {
+        __dirname: patcherDir,
+        require(id) {
+            if (id !== 'fs') return require(id);
+            return {
+                readFileSync(file, encoding) { return file.endsWith('umi.js') ? patched : fs.readFileSync(file, encoding); },
+                writeFileSync(file, value) { assert.ok(file.endsWith('umi.js')); patched = value; }
+            };
+        },
+        console: { log() {} },
+        process: { exit() { assert.fail('A missing external menu must be written even when its module is unchanged'); } }
+    });
+    assert.equal(patched, bundle);
+    assert.doesNotMatch(patched, /href: "\/rate"/);
+});
 /**
  * 从产物里抠出某个模块的源码。边界不写死下一个模块名 —— 后面的补丁还会往产物尾部追加模块，
  * 写死「到模块对象结尾」的话，下次追加就会把两个模块一起抠出来（clean-gateway 上踩过这个坑）。

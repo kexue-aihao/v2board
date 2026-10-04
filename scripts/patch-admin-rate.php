@@ -1,14 +1,14 @@
 <?php
 
 /**
- * 给管理端加「动态倍率」页（/rate）。
+ * 更新节点管理内嵌的动态倍率设置。
  *
  * 与 patch-admin-reward.php 同一套做法：
  *   1. 把 scripts/admin-rate-module.js 作为一个新模块追加进产物（已存在就整块替换，幂等）；
- *   2. 菜单加一项（挂在「签到与娱乐」前面，同属运营配置分组）；
- *   3. 路由加一条。
+ *   2. 移除旧版独立侧栏入口；
+ *   3. 旧 /rate 地址重定向到节点管理内嵌配置。
  *
- * 三处都先判存在再写，所以部署时反复跑不会重复插入。
+ * 重复执行不再新增菜单，不覆盖节点管理或其他模块。
  */
 
 $bundlePath = __DIR__ . '/../public/assets/admin/umi.js';
@@ -17,11 +17,10 @@ if ($bundle === false) {
     fwrite(STDERR, "Unable to read admin bundle.\n");
     exit(1);
 }
+$bundle = str_replace("\r\n", "\n", $bundle);
 
-// 1) 菜单项：插在「签到与娱乐」之前，复用同一分组下的图标写法
-$menuAnchor = "                    }, {\n                        title: \"签到与娱乐\",";
-if (strpos($bundle, 'href: "/rate"') === false) {
-    $menuItem = <<<'JS'
+// 1) 移除旧版独立侧栏入口。
+$menuItem = <<<'JS'
                     }, {
                         title: "动态倍率",
                         type: "item",
@@ -30,27 +29,32 @@ if (strpos($bundle, 'href: "/rate"') === false) {
                             className: "nav-main-link-icon si si-speedometer"
                         })
 JS;
-    if (strpos($bundle, $menuAnchor) === false) {
-        fwrite(STDERR, "Admin rate menu anchor not found.\n");
-        exit(1);
-    }
-    $bundle = str_replace($menuAnchor, $menuItem . "\n" . $menuAnchor, $bundle);
+$bundle = str_replace($menuItem . "\n", '', $bundle);
+if (strpos($bundle, 'href: "/rate"') !== false) {
+    fwrite(STDERR, "Unrecognized legacy rate menu.\n");
+    exit(1);
 }
 
-// 2) 路由
+// 2) 旧书签回到节点管理并展开内嵌配置。
 $routeAnchor = "        }, {\n            path: \"/reward\",";
-if (strpos($bundle, 'path: "/rate"') === false) {
-    $routeItem = <<<'JS'
+$oldRoute = <<<'JS'
         }, {
             path: "/rate",
             exact: !0,
             component: n("ratepage").default
 JS;
+$routeItem = str_replace('component: n("ratepage").default', 'redirect: "/server/manage?rate=1"', $oldRoute);
+$bundle = str_replace($oldRoute, $routeItem, $bundle);
+if (strpos($bundle, 'path: "/rate"') === false) {
     if (strpos($bundle, $routeAnchor) === false) {
         fwrite(STDERR, "Admin rate route anchor not found.\n");
         exit(1);
     }
     $bundle = str_replace($routeAnchor, $routeItem . "\n" . $routeAnchor, $bundle);
+}
+if (strpos($bundle, $routeItem) === false || strpos($bundle, 'this.renderRateSettings()') === false) {
+    fwrite(STDERR, "Node management rate settings integration or redirect is missing.\n");
+    exit(1);
 }
 
 // 3) 模块本体
@@ -61,7 +65,7 @@ if ($moduleSource === false
     fwrite(STDERR, "Admin rate module source is invalid.\n");
     exit(1);
 }
-$moduleSource = trim($moduleSource);
+$moduleSource = trim(str_replace("\r\n", "\n", $moduleSource));
 $moduleStart = strpos($bundle, "    ratepage: function(e, t, n) {");
 $moduleEndMarker = "\n});\n\n(function () {\n";
 $moduleEnd = strpos($bundle, $moduleEndMarker);
@@ -83,4 +87,4 @@ if (file_put_contents($bundlePath, $bundle) === false) {
     fwrite(STDERR, "Unable to write admin bundle.\n");
     exit(1);
 }
-fwrite(STDOUT, "Admin dynamic rate page patched.\n");
+fwrite(STDOUT, "Node dynamic rate settings patched.\n");

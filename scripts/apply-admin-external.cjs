@@ -9,10 +9,11 @@ const path = require('path');
 const bundlePath = path.join(__dirname, '../public/assets/admin/umi.js');
 const modulePath = path.join(__dirname, 'admin-external-module.js');
 let bundle = fs.readFileSync(bundlePath, 'utf8');
+const before = bundle;
 const changed = [];
 
 // 1) 菜单
-const menuAnchor = '                    }, {\n                        title: "动态倍率",';
+const menuAnchor = '                    }, {\n                        title: "签到与娱乐",';
 if (bundle.indexOf('href: "/external"') === -1) {
   const menuItem = [
     '                    }, {',
@@ -53,7 +54,6 @@ const moduleStart = bundle.indexOf('    externalpage: function(e, t, n) {');
 const moduleEndMarker = '\n});\n\n(function () {\n';
 const moduleEnd = bundle.indexOf(moduleEndMarker);
 if (moduleEnd === -1) throw new Error('Admin module boundary not found.');
-const before = bundle;
 if (moduleStart !== -1 && moduleStart < moduleEnd) {
   bundle = bundle.slice(0, moduleStart) + '    ' + moduleSource + bundle.slice(moduleEnd);
   changed.push('模块（替换）');

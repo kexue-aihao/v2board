@@ -36,7 +36,7 @@ const FETCH_PAYLOAD = {
     }
 };
 
-function harness() {
+function harness(props = {}) {
     const requests = [];
     class Component {
         constructor(props) { this.props = props; this.state = {}; }
@@ -72,7 +72,7 @@ function harness() {
     const exports = {};
     vm.runInContext('(' + moduleSource('ratepage') + ')', context)({}, exports, requireModule);
 
-    return { component: new exports.default({}), requests };
+    return { component: new exports.default(props), requests };
 }
 
 /** 把渲染出来的元素树摊平成文本。 */
@@ -94,7 +94,7 @@ function findAll(node, predicate, out) {
     return out;
 }
 
-test('the dynamic rate page module is present and renders before any data arrives', () => {
+test('dynamic rate settings render inline without a separate page or sidebar entry', () => {
     const h = harness();
     const text = flatten(h.component.render());
 
@@ -103,6 +103,44 @@ test('the dynamic rate page module is present and renders before any data arrive
     assert.match(text, /正在叠加的用户/);
     // 参数区块要有数据才渲染，所以这里不要求它出现
     assert.equal(h.requests.length, 0, '渲染本身不该发请求');
+    assert.equal(h.component.render().type, 'section');
+    assert.equal(h.component.render().props.id, 'node-rate-settings');
+    assert.equal(findAll(h.component.render(), node => node.type === 'Page').length, 0);
+    assert.doesNotMatch(bundle, /href: "\/rate"/);
+    assert.match(bundle, /path: "\/rate",\s*exact: !0,\s*redirect: "\/server\/manage\?rate=1"/);
+});
+
+test('inline scene actions use the current node selection and saved edits refresh node labels', async () => {
+    const bound = [], changes = [];
+    const h = harness({ selectedCount: 2, onBindPolicy: policy => bound.push(policy.id), onChanged: () => changes.push('refresh') });
+    h.component.load(); await new Promise(resolve => setImmediate(resolve));
+    const policyTable = findAll(h.component.renderPolicies(), node => node.type === 'Table')[0];
+    const actions = () => policyTable.props.columns.find(column => column.key === 'actions').render(null, h.component.state.policies[0]);
+    const bind = () => findAll(actions(), node => node.type === 'Button' && flatten(node) === '应用到所选节点')[0];
+    assert.equal(bind().props.disabled, false);
+    bind().props.onClick();
+    assert.deepEqual(bound, [3]);
+    for (const selectedCount of [0, 201]) {
+        h.component.props.selectedCount = selectedCount;
+        assert.equal(bind().props.disabled, true);
+        bind().props.onClick();
+    }
+    assert.deepEqual(bound, [3]);
+    h.component.openPolicy(h.component.state.policies[0]); h.component.setPolicy('name', '改名后的策略');
+    await h.component.savePolicy();
+    assert.deepEqual(changes, ['refresh']);
+});
+
+test('inline settings cannot collapse during an in-flight save', () => {
+    let closed = 0;
+    const h = harness({ onClose: () => closed++ });
+    const close = () => findAll(h.component.render(), node => node.type === 'Button' && flatten(node) === '收起设置')[0];
+    h.component.setState({saving: true});
+    assert.equal(close().props.disabled, true);
+    close().props.onClick();
+    assert.equal(closed, 0);
+    h.component.setState({saving: false}); close().props.onClick();
+    assert.equal(closed, 1);
 });
 
 test('policy create and edit post a named independent policy with its revision', async () => {
