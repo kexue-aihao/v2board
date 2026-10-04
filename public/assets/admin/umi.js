@@ -108454,6 +108454,9 @@
                     hostReplacePreview: null,
                     batchDialog: "",
                     batchSelection: [],
+                    batchIdRange: "",
+                    batchIdType: "all",
+                    batchIdSelectionMode: "replace",
                     batchLoading: !1,
                     batchError: "",
                     batchResult: "",
@@ -108670,6 +108673,84 @@
             }
             changeBatchSelection(keys) {
                 this.setState({batchSelection: keys || [], batchPreview: null, batchError: "", batchResult: ""})
+            }
+            filteredServers() {
+                var servers = this.props.serverManage.servers || [], keyword = this.state.searchKey;
+                return keyword ? servers.filter(server=>JSON.stringify(server).indexOf(keyword) !== -1) : servers
+            }
+            batchRangeSelection() {
+                var input = this.state.batchIdRange.trim(), type = this.state.batchIdType, mode = this.state.batchIdSelectionMode;
+                if (!input) return {error: "请输入节点 ID 或范围", nodes: [], keys: []};
+                if (input.length > 1000) return {error: "ID 范围内容过长，请缩小选择范围", nodes: [], keys: []};
+                var ranges = [], parts = input.replace(/，/g, ",").split(",");
+                for (var part of parts) {
+                    var match = /^([1-9][0-9]*)(?:\s*-\s*([1-9][0-9]*))?$/.exec(part.trim());
+                    if (!match) return {error: "请输入正整数 ID 或范围，例如 1-10,15,20-30", nodes: [], keys: []};
+                    var start = Number(match[1]), end = Number(match[2] || match[1]);
+                    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end) {
+                        return {error: "ID 范围无效：起始 ID 不能大于结束 ID，且 ID 须为有效正整数", nodes: [], keys: []}
+                    }
+                    ranges.push([start, end]);
+                }
+                if (!["all", "shadowsocks", "vmess", "vless", "trojan", "tuic", "hysteria", "anytls", "v2node"].includes(type) ||
+                    !["replace", "append"].includes(mode)) return {error: "请选择有效的节点类型和选择方式", nodes: [], keys: []};
+                var seen = new Set(), nodes = this.filteredServers().filter(server=>{
+                    var id = Number(server.id), key = this.batchKey(server);
+                    if (seen.has(key) || !Number.isSafeInteger(id) || (type !== "all" && server.type !== type) ||
+                        !ranges.some(range=>id >= range[0] && id <= range[1])) return false;
+                    seen.add(key);
+                    return true
+                });
+                if (!nodes.length) return {error: "当前搜索条件和 ID 范围内没有匹配的节点", nodes: [], keys: []};
+                var keys = mode === "append" ? this.selectedBatchNodes().map(node=>this.batchKey(node)) : [];
+                keys = Array.from(new Set(keys.concat(nodes.map(node=>this.batchKey(node)))));
+                return {nodes: nodes, keys: keys, error: keys.length > 200 ? "选择后将有 " + keys.length + " 个节点，超过每批 200 个的上限，请缩小范围" : ""}
+            }
+            applyBatchRangeSelection() {
+                if (this.batchBusy || this.hostReplaceBusy || this.props.serverManage.sortMode || this.props.serverManage.fetchLoading) return;
+                var selection = this.batchRangeSelection();
+                if (selection.error) {
+                    this.setState({batchError: selection.error});
+                    return
+                }
+                this.changeBatchSelection(selection.keys);
+                this.closeBatchDialog();
+                c["a"].success("已选择 " + selection.keys.length + " 个节点")
+            }
+            renderNodeOperations() {
+                var el = y.a.createElement, count = this.selectedBatchNodes().length;
+                var busy = !!(this.state.batchLoading || this.state.hostReplaceLoading || this.props.serverManage.sortMode || this.props.serverManage.fetchLoading);
+                var items = [
+                    {key: "select-range", label: "按 ID 范围选择", icon: "select", run: ()=>this.openBatchDialog("select-range")},
+                    {key: "clear-selection", label: "清空选择", icon: "close-circle", disabled: !count, run: ()=>this.changeBatchSelection([])},
+                    {key: "selection-divider", divider: true},
+                    {key: "host", label: "替换节点域名", icon: "swap", run: ()=>this.startHostReplace()},
+                    {key: "copy", label: "批量复制", icon: "copy"},
+                    {key: "rename", label: "批量重命名", icon: "edit"},
+                    {key: "ports", label: "批量设置端口", icon: "api"},
+                    {key: "rate", label: "批量设置倍率", icon: "calculator"},
+                    {key: "tls", label: "批量填写 SNI/地址", icon: "form"},
+                    {key: "inspect", label: "查看 SNI/地址", icon: "search", selection: true, run: ()=>this.openBatchTlsInspection()},
+                    {key: "protocol", label: "批量下发协议配置", icon: "code"},
+                    {key: "delete-divider", divider: true},
+                    {key: "delete", label: "批量删除", icon: "delete"}
+                ];
+                return el(d["a"], {
+                    trigger: ["click"], disabled: busy,
+                    overlay: el(p["a"], {style: {maxHeight: "70vh", overflowY: "auto"}}, items.map(item=>{
+                        if (item.divider) return el(p["a"].Divider, {key: item.key});
+                        var disabled = busy || !!item.disabled || ((!item.run || !!item.selection) && (!count || count > 200));
+                        return el(p["a"].Item, {
+                            key: item.key, disabled: disabled,
+                            style: item.key === "delete" && !disabled ? {color: "#c00000"} : undefined,
+                            onClick: ()=>{
+                                if (disabled || this.batchBusy || this.hostReplaceBusy) return;
+                                if (item.run) item.run(); else this.openBatchDialog(item.key);
+                            }
+                        }, el(m["a"], {type: item.icon, style: {marginRight: 8}}), item.label)
+                    }))
+                }, el(l["a"], {style: {marginLeft: 8}, disabled: busy, loading: this.state.batchLoading || this.state.hostReplaceLoading},
+                    el(m["a"], {type: "select"}), "操作", el(m["a"], {type: "caret-down"})))
             }
             openBatchDialog(dialog) {
                 if (this.batchBusy) return;
@@ -109356,6 +109437,44 @@
                 var state = this.state, preview = state.batchPreview, busy = state.batchLoading;
                 var el = y.a.createElement;
                 var nodes = this.selectedBatchNodes();
+                if (state.batchDialog === "select-range") {
+                    var selection = this.batchRangeSelection();
+                    return el(R["a"], {
+                        title: "按 ID 范围选择节点", width: "min(720px, 100vw)", visible: !0,
+                        onClose: ()=>this.closeBatchDialog()
+                    }, el("div", {style: {paddingBottom: 70}},
+                        el("p", null, "仅匹配当前搜索结果中的节点，范围包含起止 ID，支持跨页选择。"),
+                        el("p", null, "不同类型的同一个 ID 会分别计入；可通过节点类型限定范围。"),
+                        el("div", {className: "form-group"}, el("label", {htmlFor: "batch-id-type"}, "节点类型"), el("select", {
+                            id: "batch-id-type", className: "form-control", value: state.batchIdType,
+                            onChange: event=>this.changeBatchField("batchIdType", event.target.value)
+                        }, [["all", "全部类型"], ["v2node", "V2node"], ["shadowsocks", "Shadowsocks"], ["vmess", "VMess"], ["vless", "VLESS"],
+                            ["trojan", "Trojan"], ["tuic", "TUIC"], ["hysteria", "Hysteria"], ["anytls", "AnyTLS"]].map(option=>el("option", {key: option[0], value: option[0]}, option[1])))),
+                        el("div", {className: "form-group"}, el("label", {htmlFor: "batch-id-range"}, "节点 ID 范围"), el(s["a"], {
+                            id: "batch-id-range", value: state.batchIdRange, maxLength: 1000, placeholder: "例如 1-10,15,20-30",
+                            onChange: event=>this.changeBatchField("batchIdRange", event.target.value)
+                        })),
+                        el("div", {className: "form-group"}, el("label", {htmlFor: "batch-id-selection-mode"}, "选择方式"), el("select", {
+                            id: "batch-id-selection-mode", className: "form-control", value: state.batchIdSelectionMode,
+                            onChange: event=>this.changeBatchField("batchIdSelectionMode", event.target.value)
+                        }, el("option", {value: "replace"}, "替换当前选择"), el("option", {value: "append"}, "追加到当前选择（保留已有选择）"))),
+                        el("p", {role: "status"}, "当前已选 " + nodes.length + " 个节点；范围匹配 " + selection.nodes.length + " 个，应用后共选 " + selection.keys.length + " 个（每批最多 200 个）。"),
+                        (state.batchError || state.batchIdRange.trim() && selection.error) && el("p", {role: "alert", style: {color: "#c00000"}}, state.batchError || selection.error),
+                        !selection.error && el("div", {style: {maxHeight: 280, overflow: "auto"}},
+                            el("table", {className: "table", style: {wordBreak: "break-all"}},
+                                el("thead", null, el("tr", null, el("th", null, "节点类型"), el("th", null, "ID"), el("th", null, "名称"))),
+                                el("tbody", null, selection.nodes.map(node=>el("tr", {key: this.batchKey(node)},
+                                    el("td", null, node.type), el("td", null, node.id), el("td", null, node.name)
+                                )))
+                            )
+                        ),
+                        el("div", {className: "v2board-drawer-action"},
+                            el(l["a"], {onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "取消"),
+                            el(l["a"], {type: "primary", disabled: !!selection.error || busy || this.props.serverManage.fetchLoading || this.props.serverManage.sortMode,
+                                onClick: ()=>this.applyBatchRangeSelection()}, "选择节点")
+                        )
+                    ))
+                }
                 if (state.batchDialog === "inspect") {
                     return el(R["a"], {
                         title: "查看节点 SNI / Server Address", width: "min(980px, 100vw)", visible: !0,
@@ -109704,7 +109823,7 @@
                 ));
             }
             render() {
-                var e, t, n, r, v, _ = this.props.serverManage, E = _.servers, O = _.fetchLoading, A = _.sortMode, R = this.props.serverGroup.groups, N = this.state.searchKey, D = {
+                var e, t, n, r, v, _ = this.props.serverManage, E = _.servers, O = _.fetchLoading, A = _.sortMode, R = this.props.serverGroup.groups, D = {
                     0: "error",
                     1: "warning",
                     2: "processing"
@@ -109933,71 +110052,16 @@
                 }))), y.a.createElement(s["a"], {
                     placeholder: "\u8f93\u5165\u4efb\u610f\u5173\u952e\u5b57\u641c\u7d22",
                     style: {
-                        width: 200
+                        width: 200,
+                        maxWidth: "calc(100vw - 220px)"
                     },
                     className: "ml-2",
                     onChange: e=>this.setState({
                         searchKey: e.target.value
                     })
-                }), y.a.createElement(l["a"], {
-                    style: {
-                        marginLeft: 8
-                    },
-                    loading: this.state.hostReplaceLoading,
-                    disabled: A,
-                    onClick: ()=>this.startHostReplace()
-                }, "替换节点域名"), y.a.createElement(l["a"], {
-                    style: {
-                        marginLeft: 8
-                    },
-                    loading: this.state.batchLoading && this.state.batchDialog === "copy",
-                    disabled: A || !this.selectedBatchNodes().length,
-                    onClick: ()=>this.openBatchDialog("copy")
-                }, this.selectedBatchNodes().length ? "批量复制 (" + this.selectedBatchNodes().length + ")" : "批量复制"), y.a.createElement(l["a"], {
-                    style: {
-                        marginLeft: 8
-                    },
-                    loading: this.state.batchLoading && this.state.batchDialog === "tls",
-                    disabled: A || !this.selectedBatchNodes().length,
-                    onClick: ()=>this.openBatchDialog("tls")
-                }, "批量填写 SNI/地址"), !Object(L["f"])() && y.a.createElement(l["a"], {
-                    style: {marginLeft: 8},
-                    loading: this.state.batchLoading && this.state.batchDialog === "rename",
-                    disabled: A || !this.selectedBatchNodes().length,
-                    onClick: ()=>this.openBatchDialog("rename")
-                }, y.a.createElement(m["a"], {type: "edit"}), "批量重命名", this.selectedBatchNodes().length ? " (" + this.selectedBatchNodes().length + ")" : ""), !Object(L["f"])() && y.a.createElement(l["a"], {
-                    style: {
-                        marginLeft: 8
-                    },
-                    loading: this.state.batchLoading && this.state.batchDialog === "inspect",
-                    disabled: A || !this.selectedBatchNodes().length,
-                    onClick: ()=>this.openBatchTlsInspection()
-                }, "查看 SNI/地址"), !Object(L["f"])() && y.a.createElement(l["a"], {
-                    style: {
-                        marginLeft: 8
-                    },
-                    loading: this.state.batchLoading && this.state.batchDialog === "rate",
-                    disabled: A || !this.selectedBatchNodes().length,
-                    onClick: ()=>this.openBatchDialog("rate")
-                }, "批量设置倍率"), !Object(L["f"])() && y.a.createElement(l["a"], {
-                    style: {marginLeft: 8},
-                    loading: this.state.batchLoading && this.state.batchDialog === "ports",
-                    disabled: A || this.state.batchLoading || !this.selectedBatchNodes().length,
-                    onClick: ()=>this.openBatchDialog("ports")
-                }, "批量设置端口"), y.a.createElement(l["a"], {
-                    style: {
-                        marginLeft: 8
-                    },
-                    disabled: A || !this.selectedBatchNodes().length,
-                    onClick: ()=>this.openBatchDialog("protocol")
-                }, "批量下发协议配置"), y.a.createElement(l["a"], {
-                    style: {
-                        marginLeft: 8
-                    },
-                    type: "danger",
-                    disabled: A || !this.selectedBatchNodes().length,
-                    onClick: ()=>this.openBatchDialog("delete")
-                }, "批量删除"), !Object(L["f"])() && y.a.createElement(l["a"], {
+                }), this.renderNodeOperations(), y.a.createElement("span", {
+                    role: "status", style: {display: "inline-block", marginLeft: 12}
+                }, "已选 " + this.selectedBatchNodes().length + " 个节点" + (this.selectedBatchNodes().length > 200 ? "（每批最多 200 个）" : "")), !Object(L["f"])() && y.a.createElement(l["a"], {
                     style: {
                         float: "right"
                     },
@@ -110015,7 +110079,7 @@
                 }, A ? "\u4fdd\u5b58\u6392\u5e8f" : "\u7f16\u8f91\u6392\u5e8f")), Object(L["f"])() ? y.a.createElement(o["a"], {
                     className: "v2board-table",
                     itemLayout: "vertical",
-                    dataSource: N ? E.filter(e=>-1 !== JSON.stringify(e).indexOf(N)) : E,
+                    dataSource: this.filteredServers(),
                     renderItem: e=>y.a.createElement(o["a"].Item, {
                         className: "v2board_node_mobile ".concat(e.parent_id ? "child_node" : ""),
                         actions: [y.a.createElement(y.a.Fragment, null, this.getTypeTag(e.type, e.parent_id ? e.id + " => " + e.parent_id : e.id), y.a.createElement(g["a"], null, y.a.createElement(m["a"], {
@@ -110029,7 +110093,12 @@
                             type: "vertical"
                         }), y.a.createElement("span", null, I(e)))
                     }, y.a.createElement(o["a"].Item.Meta, {
-                        title: y.a.createElement(y.a.Fragment, null, y.a.createElement(h["a"], {
+                        title: y.a.createElement(y.a.Fragment, null, y.a.createElement("input", {
+                            type: "checkbox", "aria-label": "选择节点 " + e.type + " #" + e.id + " " + e.name,
+                            style: {marginRight: 8}, checked: this.state.batchSelection.indexOf(this.batchKey(e)) >= 0,
+                            disabled: !!(A || this.state.batchLoading || this.state.hostReplaceLoading),
+                            onChange: event=>this.changeBatchSelection(event.target.checked ? this.state.batchSelection.concat(this.batchKey(e)) : this.state.batchSelection.filter(key=>key !== this.batchKey(e)))
+                        }), y.a.createElement(h["a"], {
                             status: D[e.available_status]
                         }), e.name),
                         description: "".concat(e.host, ":").concat(e.port)
@@ -110053,7 +110122,7 @@
                     ,
                     disableRightClick: A,
                     tableLayout: "auto",
-                    dataSource: N ? E.filter(e=>-1 !== JSON.stringify(e).indexOf(N)) : E,
+                    dataSource: this.filteredServers(),
                     // 不同类型之间 id 会重复，行键必须带上类型，否则多选会串行
                     rowKey: e=>this.batchKey(e),
                     rowSelection: A ? void 0 : {

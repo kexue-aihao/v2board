@@ -558,9 +558,171 @@ function elements(tree) {
     return [tree, ...elements(tree.children)];
 }
 
-test('the inspection button is desktop only and needs a selection outside sort mode', () => {
+function operationItems(h) {
+    return elements(h.component.renderNodeOperations().props.overlay).filter(element => element.props.onClick);
+}
+
+function operation(h, label) {
+    return operationItems(h).find(element => flatten(element.children) === label);
+}
+
+test('the search toolbar has one operations dropdown containing all node tools', () => {
     const h = seeded({});
-    const button = () => elements(h.component.render()).find(element => flatten(element.children) === '查看 SNI/地址');
+    const toolbar = elements(h.component.render()).find(element => element.props.className === 'v2board-table-action');
+    const searchIndex = toolbar.children.findIndex(element => element && element.props.placeholder === '输入任意关键字搜索');
+    assert.ok(searchIndex >= 0);
+    assert.equal(flatten(toolbar.children[searchIndex + 1]), '操作');
+    assert.ok(toolbar.children[searchIndex + 1].props.overlay);
+    assert.match(flatten(toolbar), /已选 2 个节点/);
+    assert.doesNotMatch(flatten(toolbar), /批量|替换节点域名|查看 SNI/);
+    assert.deepEqual(operationItems(h).map(item => flatten(item)), [
+        '按 ID 范围选择', '清空选择', '替换节点域名', '批量复制', '批量重命名', '批量设置端口', '批量设置倍率',
+        '批量填写 SNI/地址', '查看 SNI/地址', '批量下发协议配置', '批量删除',
+    ]);
+    assert.deepEqual(plain(h.component.renderNodeOperations().props.trigger), ['click']);
+    assert.equal(h.requests.length, 0);
+});
+
+test('menu actions enforce selection and disable operations while sorting or loading', () => {
+    const h = harness({});
+    for (const item of operationItems(h)) {
+        const label = flatten(item);
+        assert.equal(item.props.disabled, !['按 ID 范围选择', '替换节点域名'].includes(label), label);
+        if (item.props.disabled) item.props.onClick();
+    }
+    assert.equal(h.component.state.batchDialog, '');
+    for (const change of [
+        () => { h.component.props.serverManage.sortMode = true; },
+        () => { h.component.props.serverManage.fetchLoading = true; },
+        () => { h.component.state.batchLoading = true; },
+        () => { h.component.state.hostReplaceLoading = true; },
+    ]) {
+        h.component.props.serverManage.sortMode = false;
+        h.component.props.serverManage.fetchLoading = false;
+        h.component.state.batchLoading = false;
+        h.component.state.hostReplaceLoading = false;
+        change();
+        assert.equal(h.component.renderNodeOperations().props.disabled, true);
+        assert.ok(operationItems(h).every(item => item.props.disabled));
+    }
+    assert.equal(h.requests.length, 0);
+});
+
+test('menu items open the matching panels and clearing selection invalidates old previews', () => {
+    const h = seeded({});
+    for (const [label, dialog] of [
+        ['批量复制', 'copy'], ['批量重命名', 'rename'], ['批量设置端口', 'ports'], ['批量设置倍率', 'rate'],
+        ['批量填写 SNI/地址', 'tls'], ['批量下发协议配置', 'protocol'], ['批量删除', 'delete'], ['按 ID 范围选择', 'select-range'],
+    ]) {
+        operation(h, label).props.onClick();
+        assert.equal(h.component.state.batchDialog, dialog);
+        h.component.closeBatchDialog();
+    }
+    operation(h, '替换节点域名').props.onClick();
+    assert.equal(h.component.state.hostReplaceVisible, true);
+    h.component.state.batchPreview = { stale: true };
+    operation(h, '清空选择').props.onClick();
+    assert.equal(h.component.state.batchSelection.length, 0);
+    assert.equal(h.component.state.batchPreview, null);
+    assert.equal(h.requests.length, 0);
+});
+
+function rangeHarness(options, input, type = 'all', mode = 'replace') {
+    const h = seeded(options);
+    operation(h, '按 ID 范围选择').props.onClick();
+    h.component.changeBatchField('batchIdRange', input);
+    h.component.changeBatchField('batchIdType', type);
+    h.component.changeBatchField('batchIdSelectionMode', mode);
+    return h;
+}
+
+test('ID ranges are inclusive, numeric, deduplicated, and cross pages without expanding missing IDs', () => {
+    const servers = [...NODES, ...[2, 10, 11, 20].map(id => ({ type: 'v2node', id, name: 'node-' + id }))];
+    const h = rangeHarness({ servers }, '1 - 10，7,9-11');
+    h.component.state.pageSize = 1;
+    const selection = h.component.batchRangeSelection();
+    assert.equal(selection.error, '');
+    assert.deepEqual(plain(selection.keys), ['v2node:1', 'vmess:1', 'trojan:7', 'v2node:2', 'v2node:10', 'v2node:11']);
+    assert.match(flatten(h.component.renderBatchOperations()), /范围匹配 6 个/);
+    h.component.applyBatchRangeSelection();
+    assert.deepEqual(plain(h.component.state.batchSelection), plain(selection.keys));
+    assert.equal(h.component.state.batchDialog, '');
+    assert.equal(h.requests.length, 0);
+});
+
+test('ID selection can restrict node type even when IDs overlap', () => {
+    const h = rangeHarness({}, '1-1', 'vmess');
+    assert.deepEqual(plain(h.component.batchRangeSelection().keys), ['vmess:1']);
+    h.component.applyBatchRangeSelection();
+    assert.deepEqual(plain(h.component.selectedBatchNodes()), [{ type: 'vmess', id: 1, name: 'vmess-a' }]);
+});
+
+test('ID selection matches the current search results and preserves hidden selections only in append mode', () => {
+    const h = rangeHarness({}, '1-10');
+    h.component.state.searchKey = 'vmess-a';
+    assert.deepEqual(plain(h.component.filteredServers()).map(node => node.type), ['vmess']);
+    assert.deepEqual(plain(h.component.batchRangeSelection().keys), ['vmess:1']);
+    h.component.changeBatchField('batchIdSelectionMode', 'append');
+    h.component.changeBatchSelection(['v2node:1', 'vmess:1', 'missing:100']);
+    assert.deepEqual(plain(h.component.batchRangeSelection().keys), ['v2node:1', 'vmess:1']);
+    h.component.applyBatchRangeSelection();
+    assert.deepEqual(plain(h.component.state.batchSelection), ['v2node:1', 'vmess:1']);
+    assert.equal(h.requests.length, 0);
+});
+
+test('invalid or empty ranges never clear an existing selection', () => {
+    for (const input of ['', ' ', '0', '-1', '01', '1.5', '1e2', '2-1', '1-', '1--2', '1,', '1,,2', 'all', '9007199254740992', '9'.repeat(1001), '300-400']) {
+        const h = rangeHarness({}, input);
+        assert.ok(h.component.batchRangeSelection().error, input);
+        h.component.applyBatchRangeSelection();
+        assert.deepEqual(plain(h.component.state.batchSelection), ['v2node:1', 'vmess:1'], input);
+        assert.equal(h.component.state.batchDialog, 'select-range');
+        assert.equal(h.requests.length, 0);
+    }
+});
+
+test('range selection enforces the batch cap including retained selections', () => {
+    const servers = Array.from({ length: 201 }, (_, index) => ({ type: 'vmess', id: index + 1, name: 'node' }));
+    const h = rangeHarness({ servers }, '1-9007199254740991');
+    assert.match(h.component.batchRangeSelection().error, /超过每批 200/);
+    h.component.applyBatchRangeSelection();
+    assert.deepEqual(plain(h.component.state.batchSelection), ['v2node:1', 'vmess:1']);
+    h.component.changeBatchField('batchIdRange', '1-200');
+    h.component.applyBatchRangeSelection();
+    assert.equal(h.component.selectedBatchNodes().length, 200);
+    h.component.openBatchDialog('select-range');
+    h.component.changeBatchField('batchIdRange', '201');
+    h.component.changeBatchField('batchIdSelectionMode', 'append');
+    assert.match(h.component.batchRangeSelection().error, /201.*超过/);
+    h.component.applyBatchRangeSelection();
+    assert.equal(h.component.selectedBatchNodes().length, 200);
+});
+
+test('range selection uses the latest list and canceling makes no change', () => {
+    const h = rangeHarness({}, '1-7');
+    assert.equal(h.component.batchRangeSelection().nodes.length, 3);
+    h.component.props.serverManage.servers = [NODES[1]];
+    assert.equal(h.component.batchRangeSelection().nodes.length, 1);
+    h.component.closeBatchDialog();
+    assert.deepEqual(plain(h.component.state.batchSelection), ['v2node:1', 'vmess:1']);
+    assert.equal(h.requests.length, 0);
+});
+
+test('ID selection works on mobile and feeds the existing batch port request', async () => {
+    const h = rangeHarness({ mobile: true, responses: [portPreview()] }, '1');
+    h.component.changeBatchSelection(['trojan:7']);
+    h.component.applyBatchRangeSelection();
+    operation(h, '批量设置端口').props.onClick();
+    h.component.changeBatchField('batchServerPort', '8443');
+    await h.component.previewBatchPorts();
+    assert.deepEqual(h.requests[0].body.nodes, [
+        { type: 'v2node', id: 1, name: 'reality-a' }, { type: 'vmess', id: 1, name: 'vmess-a' },
+    ]);
+});
+
+test('the inspection menu item needs a selection outside sort mode on desktop and mobile', () => {
+    const h = seeded({});
+    const button = () => operation(h, '查看 SNI/地址');
     assert.equal(button().props.disabled, false);
     h.component.props.serverManage.sortMode = true;
     assert.equal(button().props.disabled, true);
@@ -568,7 +730,7 @@ test('the inspection button is desktop only and needs a selection outside sort m
     h.component.changeBatchSelection([]);
     assert.equal(button().props.disabled, true);
     const mobile = seeded({ mobile: true });
-    assert.doesNotMatch(flatten(mobile.component.render()), /查看 SNI\/地址/);
+    assert.equal(operation(mobile, '查看 SNI/地址').props.disabled, false);
     assert.equal(h.requests.length, 0);
 });
 
@@ -725,9 +887,9 @@ function rateHarness(options, rate = '1.5') {
     return h;
 }
 
-test('the batch rate button is desktop only and opening the drawer makes no request', () => {
+test('the batch rate menu item opens the drawer without a request', () => {
     const h = seeded({});
-    const button = () => elements(h.component.render()).find(element => flatten(element.children) === '批量设置倍率');
+    const button = () => operation(h, '批量设置倍率');
     assert.equal(button().props.disabled, false);
     button().props.onClick();
     assert.equal(h.component.state.batchDialog, 'rate');
@@ -740,7 +902,7 @@ test('the batch rate button is desktop only and opening the drawer makes no requ
     h.component.changeBatchSelection([]);
     assert.equal(button().props.disabled, true);
     const mobile = seeded({ mobile: true });
-    assert.doesNotMatch(flatten(mobile.component.render()), /批量设置倍率/);
+    assert.equal(operation(mobile, '批量设置倍率').props.disabled, false);
 });
 
 const portPreview = (overrides = {}) => ({ body: { data: Object.assign({
@@ -762,9 +924,9 @@ function portHarness(options, port = '8443') {
     return h;
 }
 
-test('batch server port uses the desktop selection and opens without making requests', () => {
+test('batch server port uses the selection and opens from the menu without making requests', () => {
     const h = seeded({});
-    const button = () => elements(h.component.render()).find(element => flatten(element.children) === '批量设置端口');
+    const button = () => operation(h, '批量设置端口');
     assert.equal(button().props.disabled, false);
     button().props.onClick();
     assert.equal(h.component.state.batchDialog, 'ports');
@@ -777,7 +939,7 @@ test('batch server port uses the desktop selection and opens without making requ
     h.component.props.serverManage.sortMode = false;
     h.component.changeBatchSelection([]);
     assert.equal(button().props.disabled, true);
-    assert.doesNotMatch(flatten(seeded({ mobile: true }).component.render()), /批量设置端口/);
+    assert.equal(operation(seeded({ mobile: true }), '批量设置端口').props.disabled, false);
 });
 
 test('server port previews saved values, confirms with the snapshot, then rereads selected nodes', async () => {
@@ -961,7 +1123,7 @@ function multiPortHarness(mode, { connectionPort = '7443', staleConnectionPort =
 
 test('one port button exposes three modes with only the relevant inputs', () => {
     const h = portHarness({});
-    assert.equal(elements(h.component.render()).filter(element => flatten(element.children) === '批量设置端口').length, 1);
+    assert.equal(operationItems(h).filter(element => flatten(element.children) === '批量设置端口').length, 1);
     let tree = elements(h.component.renderBatchOperations());
     const selector = tree.find(element => element.props.id === 'batch-port-mode');
     assert.deepEqual(plain(selector.children).map(option => option.props.value), ['server_port', 'port', 'both']);
