@@ -136,6 +136,7 @@ class ServerBatchOperationService
         return $format + [
             'matched_count' => count($nodes),
             'changed_count' => count(array_filter($nodes, function (array $node) { return $node['changed']; })),
+            'skipped_count' => count(array_filter($nodes, function (array $node) { return !$node['applicable']; })),
             'nodes' => $nodes,
         ];
     }
@@ -144,7 +145,6 @@ class ServerBatchOperationService
     {
         return DB::transaction(function () use ($selection, $format) {
             $entries = $this->resolve($selection);
-            $plan = $this->renamePlan($entries, $format);
             $expectedNames = [];
             foreach ($selection as $item) {
                 $key = $item['type'] . ':' . $item['id'];
@@ -152,6 +152,9 @@ class ServerBatchOperationService
                     $expectedNames[$key] = (string) ($item['name'] ?? '');
                 }
             }
+            // Derive partial edits from the preview snapshot so that retries cannot
+            // reinterpret the new prefix/suffix or silently accept concurrent edits.
+            $plan = $this->renamePlan($entries, $format, $expectedNames);
 
             // Keep the preview's node-to-number mapping and reject concurrent renames.
             foreach ($plan as $node) {
@@ -188,36 +191,56 @@ class ServerBatchOperationService
                 'requested_count' => count($selection),
                 'matched_count' => count($entries),
                 'updated_count' => count($updated),
+                'skipped_count' => count(array_filter($plan, function (array $node) { return !$node['applicable']; })),
                 'nodes' => $updated,
             ];
         });
     }
 
-    private function renamePlan(array $entries, array $format): array
+    private function renamePlan(array $entries, array $format, array $expectedNames = []): array
     {
-        if ($format['start_number'] + count($entries) - 1 > self::MAX_RENAME_NUMBER) {
+        $mode = $format['mode'] ?? 'full';
+        if (!in_array($mode, ['full', 'prefix', 'suffix', 'affixes'], true) || ($mode !== 'full' && $format['separator'] === '')) {
+            abort(422, __('请选择有效的重命名方式并填写分隔符'));
+        }
+        if ($mode === 'full' && $format['start_number'] + count($entries) - 1 > self::MAX_RENAME_NUMBER) {
             abort(422, __('结束序号不能超过 :max', ['max' => self::MAX_RENAME_NUMBER]));
         }
         $nodes = [];
         foreach ($entries as $index => $entry) {
-            $number = $format['start_number'] + $index;
-            $parts = [
-                $format['prefix'],
-                str_pad((string) $number, $format['number_width'], '0', STR_PAD_LEFT),
-                $format['suffix'],
-            ];
-            $name = implode($format['separator'], array_values(array_filter($parts, function (string $part) { return $part !== ''; })));
+            $server = $entry['server'];
+            $source = $expectedNames[$entry['type'] . ':' . $server->id] ?? (string) $server->name;
+            $number = null;
+            $applicable = true;
+            if ($mode === 'full') {
+                $number = $format['start_number'] + $index;
+                $parts = [
+                    $format['prefix'],
+                    str_pad((string) $number, $format['number_width'], '0', STR_PAD_LEFT),
+                    $format['suffix'],
+                ];
+                $name = implode($format['separator'], array_values(array_filter($parts, function (string $part) { return $part !== ''; })));
+            } else {
+                $parts = explode($format['separator'], $source);
+                $applicable = count($parts) >= 3;
+                if ($applicable) {
+                    if ($mode === 'prefix' || $mode === 'affixes') $parts[0] = $format['prefix'];
+                    if ($mode === 'suffix' || $mode === 'affixes') $parts[count($parts) - 1] = $format['suffix'];
+                }
+                $name = implode($format['separator'], $parts);
+            }
             if (mb_strlen($name, 'UTF-8') > 255) {
                 abort(422, __('生成的节点名称不能超过 255 个字符'));
             }
-            $server = $entry['server'];
             $nodes[] = [
                 'id' => (int) $server->id,
                 'type' => $entry['type'],
                 'name' => (string) $server->name,
                 'new_name' => $name,
                 'number' => $number,
-                'changed' => (string) $server->name !== $name,
+                'applicable' => $applicable,
+                'skip_reason' => $applicable ? null : '名称按当前分隔符拆分后不足三段，无法识别前缀、中间内容和后缀',
+                'changed' => $applicable && (string) $server->name !== $name,
             ];
         }
 

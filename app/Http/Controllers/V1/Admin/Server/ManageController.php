@@ -285,24 +285,31 @@ class ManageController extends Controller
 
     private function validateRename(Request $request, bool $requireConfirmation): array
     {
+        $mode = $request->validate(['mode' => 'sometimes|required|in:full,prefix,suffix,affixes'])['mode'] ?? 'full';
         $rules = [
-            'prefix' => ['present', 'nullable', 'string', 'max:255', 'not_regex:/[\x00-\x1F\x7F]/u'],
-            'suffix' => ['present', 'nullable', 'string', 'max:255', 'not_regex:/[\x00-\x1F\x7F]/u'],
             'separator' => ['present', 'nullable', 'string', 'max:32', 'not_regex:/[\x00-\x1F\x7F]/u'],
-            'start_number' => 'required|integer|min:1|max:' . ServerBatchOperationService::MAX_RENAME_NUMBER,
-            'number_width' => 'required|integer|min:1|max:9',
+            'start_number' => $mode === 'full' ? 'required|integer|min:1|max:' . ServerBatchOperationService::MAX_RENAME_NUMBER : 'prohibited',
+            'number_width' => $mode === 'full' ? 'required|integer|min:1|max:9' : 'prohibited',
         ];
+        foreach (['prefix', 'suffix'] as $field) {
+            $rules[$field] = $mode === 'full' || $mode === 'affixes' || $mode === $field
+                ? [$mode === 'full' ? 'present' : 'required', 'nullable', 'string', 'max:255', 'not_regex:/[\x00-\x1F\x7F]/u']
+                : 'prohibited';
+        }
         if ($requireConfirmation) {
             $rules['nodes.*.name'] = 'present|nullable|string|max:255';
         }
         $params = $this->validateSelection($request, $requireConfirmation, $rules);
-        $params['format'] = [
-            'prefix' => (string) ($params['prefix'] ?? ''),
-            'suffix' => (string) ($params['suffix'] ?? ''),
-            'separator' => (string) ($params['separator'] ?? ''),
-            'start_number' => (int) $params['start_number'],
-            'number_width' => (int) $params['number_width'],
-        ];
+        $params['format'] = ['mode' => $mode, 'separator' => (string) ($params['separator'] ?? '')];
+        foreach (['prefix', 'suffix'] as $field) {
+            if ($mode === 'full' || $mode === 'affixes' || $mode === $field) {
+                $params['format'][$field] = (string) ($params[$field] ?? '');
+            }
+        }
+        if ($mode === 'full') {
+            $params['format']['start_number'] = (int) $params['start_number'];
+            $params['format']['number_width'] = (int) $params['number_width'];
+        }
 
         return $params;
     }

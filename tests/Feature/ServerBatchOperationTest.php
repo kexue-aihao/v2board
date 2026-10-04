@@ -287,6 +287,150 @@ class ServerBatchOperationTest extends TestCase
         }
     }
 
+    /** @dataProvider partialRenameModes */
+    public function testPartialRenamePreservesTheOtherFieldsAndOriginalNumbersAcrossEveryNodeType(string $mode, array $fields, string $expected): void
+    {
+        $selection = [];
+        $before = [];
+        foreach (self::TYPES as $type) {
+            $this->seedNode($type, 1, '🇭🇰 Hong Kong | 007 | 专线 | v1');
+            $this->seedNode($type, 2, 'unselected');
+            $selection[] = ['type' => $type, 'id' => 1];
+            $before[$type] = (array) DB::table('v2_server_' . $type)->where('id', 1)->first();
+        }
+        $params = ['mode' => $mode, 'separator' => ' | '] + $fields;
+        $preview = $this->postJson($this->url . '/rename/preview', $params + ['nodes' => $selection])->assertOk()
+            ->assertJsonPath('data.mode', $mode)->assertJsonPath('data.changed_count', 8)->assertJsonPath('data.skipped_count', 0);
+        foreach ($preview->json('data.nodes') as $node) {
+            $this->assertSame($expected, $node['new_name']);
+            $this->assertNull($node['number']);
+            $this->assertTrue($node['applicable']);
+            $this->assertSame($before[$node['type']], (array) DB::table('v2_server_' . $node['type'])->where('id', 1)->first());
+        }
+        $apply = $params + ['nodes' => $preview->json('data.nodes'), 'confirm' => true];
+        $this->postJson($this->url . '/rename/apply', $apply)->assertOk()->assertJsonPath('data.updated_count', 8);
+        foreach (self::TYPES as $type) {
+            $after = (array) DB::table('v2_server_' . $type)->where('id', 1)->first();
+            $before[$type]['name'] = $expected;
+            unset($before[$type]['updated_at'], $after['updated_at']);
+            $this->assertSame($before[$type], $after);
+            $this->assertDatabaseHas('v2_server_' . $type, ['id' => 2, 'name' => 'unselected']);
+        }
+        // Applying the same preview again must be harmless.
+        $this->postJson($this->url . '/rename/apply', $apply)->assertOk()->assertJsonPath('data.updated_count', 0);
+    }
+
+    public static function partialRenameModes(): array
+    {
+        return [
+            ['prefix', ['prefix' => '🇯🇵 Tokyo'], '🇯🇵 Tokyo | 007 | 专线 | v1'],
+            ['suffix', ['suffix' => 'v2'], '🇭🇰 Hong Kong | 007 | 专线 | v2'],
+            ['affixes', ['prefix' => '🇯🇵 Tokyo', 'suffix' => 'v2'], '🇯🇵 Tokyo | 007 | 专线 | v2'],
+        ];
+    }
+
+    public function testPartialRenameSkipsNamesWithoutThreeFieldsAndKeepsTheRestOfTheBatch(): void
+    {
+        $this->seedNode('vmess', 1, 'HK | 019 | old');
+        $this->seedNode('vmess', 2, 'HK | 020');
+        $this->seedNode('vmess', 3, 'plain-name');
+        $params = ['mode' => 'suffix', 'suffix' => 'new', 'separator' => ' | '];
+        $preview = $this->postJson($this->url . '/rename/preview', $params + [
+            'nodes' => [['type' => 'vmess', 'id' => 1], ['type' => 'vmess', 'id' => 2], ['type' => 'vmess', 'id' => 3]],
+        ])->assertOk()->assertJsonPath('data.matched_count', 3)->assertJsonPath('data.changed_count', 1)->assertJsonPath('data.skipped_count', 2)
+            ->assertJsonPath('data.nodes.1.applicable', false)->assertJsonPath('data.nodes.1.changed', false);
+        $this->assertNotEmpty($preview->json('data.nodes.1.skip_reason'));
+        $this->postJson($this->url . '/rename/apply', $params + ['nodes' => $preview->json('data.nodes'), 'confirm' => true])
+            ->assertOk()->assertJsonPath('data.updated_count', 1)->assertJsonPath('data.skipped_count', 2);
+        $this->assertDatabaseHas('v2_server_vmess', ['id' => 1, 'name' => 'HK | 019 | new']);
+        $this->assertDatabaseHas('v2_server_vmess', ['id' => 2, 'name' => 'HK | 020']);
+        $this->assertDatabaseHas('v2_server_vmess', ['id' => 3, 'name' => 'plain-name']);
+    }
+
+    public function testPartialRenameTreatsCustomSeparatorsLiterallyAndPreservesSpacesAndEmptyMiddleFields(): void
+    {
+        foreach ([
+            ['  HK.*0009.*old  ', '.*', '  HK.*0009.*new'],
+            ['HK 009 old', ' ', 'HK 009 new'],
+            ['HK |  |  tag  | old', ' | ', 'HK |  |  tag  | new'],
+        ] as $index => [$name, $separator, $expected]) {
+            $this->seedNode('trojan', $index + 1, $name);
+            $this->postJson($this->url . '/rename/apply', [
+                'mode' => 'suffix', 'suffix' => 'new', 'separator' => $separator, 'confirm' => true,
+                'nodes' => [['type' => 'trojan', 'id' => $index + 1, 'name' => $name]],
+            ])->assertOk();
+            $this->assertDatabaseHas('v2_server_trojan', ['id' => $index + 1, 'name' => $expected]);
+        }
+    }
+
+    public function testPartialRenameRejectsConcurrentChangesEvenWhenTheEditedPrefixAlreadyMatches(): void
+    {
+        $this->seedNode('trojan', 1, 'HK | 007 | v1');
+        $this->seedNode('vmess', 1, 'HK | 042 | v1');
+        $params = ['mode' => 'prefix', 'prefix' => 'Tokyo', 'separator' => ' | '];
+        $preview = $this->postJson($this->url . '/rename/preview', $params + [
+            'nodes' => [['type' => 'trojan', 'id' => 1], ['type' => 'vmess', 'id' => 1]],
+        ])->assertOk();
+        DB::table('v2_server_vmess')->where('id', 1)->update(['name' => 'Tokyo | 042 | changed-elsewhere']);
+        $this->postJson($this->url . '/rename/apply', $params + ['nodes' => $preview->json('data.nodes'), 'confirm' => true])->assertStatus(409);
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'name' => 'HK | 007 | v1']);
+        $this->assertDatabaseHas('v2_server_vmess', ['id' => 1, 'name' => 'Tokyo | 042 | changed-elsewhere']);
+    }
+
+    public function testPartialRenameDoesNotReinterpretNewPrefixesOnRetry(): void
+    {
+        $this->seedNode('trojan', 1, 'HK | 007 | v1');
+        $params = [
+            'mode' => 'prefix', 'prefix' => 'Tokyo | Premium', 'separator' => ' | ', 'confirm' => true,
+            'nodes' => [['type' => 'trojan', 'id' => 1, 'name' => 'HK | 007 | v1']],
+        ];
+        $this->postJson($this->url . '/rename/apply', $params)->assertOk()->assertJsonPath('data.updated_count', 1);
+        $this->postJson($this->url . '/rename/apply', $params)->assertOk()->assertJsonPath('data.updated_count', 0);
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'name' => 'Tokyo | Premium | 007 | v1']);
+    }
+
+    public function testPartialRenameValidatesModeFieldsSeparatorAndResultLength(): void
+    {
+        $this->seedNode('trojan', 1, 'HK | 007 | v1');
+        $nodes = [['type' => 'trojan', 'id' => 1, 'name' => 'HK | 007 | v1']];
+        foreach (['preview', 'apply'] as $action) {
+            foreach ([
+                ['mode' => 'unknown', 'separator' => ' | '], ['mode' => 'prefix', 'separator' => ' | '],
+                ['mode' => 'prefix', 'prefix' => '', 'separator' => ' | '],
+                ['mode' => 'suffix', 'suffix' => 'new', 'separator' => ''],
+                ['mode' => 'suffix', 'suffix' => 'new'],
+                ['mode' => 'prefix', 'prefix' => 'new', 'suffix' => 'must-not-change', 'separator' => ' | '],
+                ['mode' => 'affixes', 'prefix' => 'new', 'separator' => ' | '],
+                ['mode' => 'prefix', 'prefix' => "new\nline", 'separator' => ' | '],
+                ['mode' => 'prefix', 'prefix' => str_repeat('港', 250), 'separator' => ' | '],
+                ['mode' => 'prefix', 'prefix' => 'new', 'separator' => ' | ', 'start_number' => 1],
+            ] as $params) {
+                $this->postJson($this->url . '/rename/' . $action, $params + ['nodes' => $nodes, 'confirm' => true])->assertStatus(422);
+            }
+        }
+        $params = ['mode' => 'suffix', 'suffix' => 'new', 'separator' => ' | ', 'nodes' => $nodes];
+        $this->postJson($this->url . '/rename/apply', $params)->assertStatus(422)->assertJsonValidationErrors('confirm');
+        unset($params['nodes'][0]['name']);
+        $this->postJson($this->url . '/rename/apply', $params + ['confirm' => true])->assertStatus(422)->assertJsonValidationErrors('nodes.0.name');
+        $this->withMiddleware(Admin::class);
+        $this->postJson($this->url . '/rename/preview', $params)->assertStatus(403);
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'name' => 'HK | 007 | v1']);
+    }
+
+    public function testPartialRenamePersistenceFailureRollsBackEveryNode(): void
+    {
+        $this->seedNode('trojan', 1, 'HK | 007 | v1');
+        $this->seedNode('vmess', 1, 'HK | 042 | v1');
+        DB::statement('CREATE TRIGGER restore_partial_name AFTER UPDATE OF name ON v2_server_vmess
+            BEGIN UPDATE v2_server_vmess SET name = OLD.name WHERE id = NEW.id; END');
+        $this->postJson($this->url . '/rename/apply', [
+            'mode' => 'affixes', 'prefix' => 'Tokyo', 'suffix' => 'v2', 'separator' => ' | ', 'confirm' => true,
+            'nodes' => [['type' => 'trojan', 'id' => 1, 'name' => 'HK | 007 | v1'], ['type' => 'vmess', 'id' => 1, 'name' => 'HK | 042 | v1']],
+        ])->assertStatus(500);
+        $this->assertDatabaseHas('v2_server_trojan', ['id' => 1, 'name' => 'HK | 007 | v1']);
+        $this->assertDatabaseHas('v2_server_vmess', ['id' => 1, 'name' => 'HK | 042 | v1']);
+    }
+
     public function testBatchCopyRequiresConfirmationAndRejectsEmptySelection(): void
     {
         $this->seedNode('vmess', 1, 'vmess-node');

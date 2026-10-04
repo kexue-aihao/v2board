@@ -116,16 +116,16 @@ const tlsApplied = () => ({ body: { data: { requested_count: 2, updated_count: 2
     { id: 1, type: 'vmess', name: 'vmess-a', server_name: 'new-sni.example', dest: null, changes: ['server_name'] },
 ] } } });
 const renamePreview = (overrides = {}) => ({ body: { data: Object.assign({
-    prefix: 'Hong Kong', suffix: 'v1', separator: ' | ', start_number: 1, number_width: 1,
-    matched_count: 2, changed_count: 2,
+    mode: 'full', prefix: 'Hong Kong', suffix: 'v1', separator: ' | ', start_number: 1, number_width: 1,
+    matched_count: 2, changed_count: 2, skipped_count: 0,
     nodes: [
-        { id: 1, type: 'v2node', name: 'reality-a', new_name: 'Hong Kong | 1 | v1', number: 1, changed: true },
-        { id: 1, type: 'vmess', name: 'vmess-a', new_name: 'Hong Kong | 2 | v1', number: 2, changed: true },
+        { id: 1, type: 'v2node', name: 'reality-a', new_name: 'Hong Kong | 1 | v1', number: 1, changed: true, applicable: true },
+        { id: 1, type: 'vmess', name: 'vmess-a', new_name: 'Hong Kong | 2 | v1', number: 2, changed: true, applicable: true },
     ],
 }, overrides) } });
 const renameApplied = () => ({ body: { data: {
-    prefix: 'Hong Kong', suffix: 'v1', separator: ' | ', start_number: 1, number_width: 1,
-    requested_count: 2, matched_count: 2, updated_count: 2,
+    mode: 'full', prefix: 'Hong Kong', suffix: 'v1', separator: ' | ', start_number: 1, number_width: 1,
+    requested_count: 2, matched_count: 2, updated_count: 2, skipped_count: 0,
     nodes: [
         { id: 1, type: 'v2node', old_name: 'reality-a', name: 'Hong Kong | 1 | v1' },
         { id: 1, type: 'vmess', old_name: 'vmess-a', name: 'Hong Kong | 2 | v1' },
@@ -187,7 +187,7 @@ test('batch rename previews and applies the exact formatted names', async () => 
     assert.equal(h.requests[0].url, '/api/v1/test-admin/server/manage/rename/preview');
     assert.deepEqual(h.requests[0].body, {
         nodes: [{ type: 'v2node', id: 1, name: 'reality-a' }, { type: 'vmess', id: 1, name: 'vmess-a' }],
-        prefix: 'Hong Kong', suffix: 'v1', separator: ' | ', start_number: 1, number_width: 1,
+        mode: 'full', prefix: 'Hong Kong', suffix: 'v1', separator: ' | ', start_number: 1, number_width: 1,
     });
     await h.component.applyBatchRename();
     assert.equal(h.requests.length, 3);
@@ -202,13 +202,213 @@ test('batch rename previews and applies the exact formatted names', async () => 
 test('editing the rename format invalidates a preview without writing', async () => {
     const h = seeded({ responses: [renamePreview()] });
     h.component.openBatchDialog('rename');
+    h.component.changeBatchField('batchRenamePrefix', 'Hong Kong');
+    h.component.changeBatchField('batchRenameSuffix', 'v1');
     await h.component.previewBatchRename();
+    assert.ok(h.component.state.batchPreview);
     h.component.changeBatchField('batchRenameSuffix', 'v2');
     await h.component.applyBatchRename();
     assert.equal(h.requests.length, 1);
     assert.equal(h.component.state.batchPreview, null);
     assert.equal(h.component.state.batchError, '');
 });
+
+const FIELD_RENAME_NODES = [
+    { ...NODES[0], name: 'Hong Kong | 007 | v1' },
+    { ...NODES[1], name: 'Tokyo | 042 | 专线 | premium' },
+    NODES[2],
+];
+const FIELD_RENAME_CASES = [
+    { mode: 'prefix', fields: { prefix: 'Singapore' }, names: ['Singapore | 007 | v1', 'Singapore | 042 | 专线 | premium'] },
+    { mode: 'suffix', fields: { suffix: 'v2' }, names: ['Hong Kong | 007 | v2', 'Tokyo | 042 | 专线 | v2'] },
+    { mode: 'affixes', fields: { prefix: 'Singapore', suffix: 'v2' }, names: ['Singapore | 007 | v2', 'Singapore | 042 | 专线 | v2'] },
+];
+
+function fieldRenamePreview(scenario = FIELD_RENAME_CASES[0], includeSkipped = false) {
+    const selected = FIELD_RENAME_NODES.slice(0, includeSkipped ? 3 : 2);
+    return { body: { data: {
+        mode: scenario.mode, separator: ' | ', ...scenario.fields,
+        matched_count: selected.length, changed_count: 2, skipped_count: includeSkipped ? 1 : 0,
+        nodes: selected.map((node, index) => ({
+            type: node.type, id: node.id, name: node.name, new_name: scenario.names[index] || node.name,
+            number: null, changed: index < 2, applicable: index < 2,
+            skip_reason: index < 2 ? null : '名称按当前分隔符拆分后不足三段，无法识别前缀、中间内容和后缀',
+        })),
+    } } };
+}
+
+function fieldRenameApplied(preview) {
+    const { nodes, changed_count, ...format } = preview.body.data;
+    return { body: { data: {
+        ...format, requested_count: nodes.length, updated_count: changed_count,
+        nodes: nodes.filter(node => node.changed).map(node => ({
+            type: node.type, id: node.id, old_name: node.name, name: node.new_name,
+        })),
+    } } };
+}
+
+function fieldRenameHarness(responses, scenario = FIELD_RENAME_CASES[0], includeSkipped = false) {
+    const h = seeded({ responses, servers: FIELD_RENAME_NODES },
+        includeSkipped ? ['v2node:1', 'vmess:1', 'trojan:7'] : undefined);
+    h.component.openBatchDialog('rename');
+    h.component.changeBatchField('batchRenameMode', scenario.mode);
+    // Values in hidden inputs must never be sent or validated in partial modes.
+    h.component.changeBatchField('batchRenamePrefix', scenario.fields.prefix || 'invalid\n');
+    h.component.changeBatchField('batchRenameSuffix', scenario.fields.suffix || 'invalid\n');
+    h.component.changeBatchField('batchRenameStart', 'invalid');
+    h.component.changeBatchField('batchRenameWidth', 'invalid');
+    return h;
+}
+
+for (const scenario of FIELD_RENAME_CASES) {
+    test('partial rename ' + scenario.mode + ' preserves numbering and untouched name fields through save and refresh', async () => {
+        const preview = fieldRenamePreview(scenario);
+        const refreshed = FIELD_RENAME_NODES.map((node, index) => ({ ...node, name: scenario.names[index] || node.name }));
+        const h = fieldRenameHarness([preview, fieldRenameApplied(preview), listing(refreshed)], scenario);
+        await h.component.previewBatchRename();
+        assert.ok(h.component.state.batchPreview, h.component.state.batchError);
+        const expected = {
+            mode: scenario.mode, separator: ' | ', ...scenario.fields,
+            nodes: FIELD_RENAME_NODES.slice(0, 2).map(({ type, id, name }) => ({ type, id, name })),
+        };
+        assert.deepEqual(h.requests[0].body, expected);
+        const table = elements(h.component.renderBatchOperations()).find(element => element.type === 'table');
+        for (const name of scenario.names) assert.ok(flatten(table).includes(name));
+        assert.deepEqual(elements(table).filter(element => element.type === 'th').map(flatten), ['原名称', '新名称']);
+        const inputGrid = elements(h.component.renderBatchOperations()).find(element => element.props.style?.display === 'grid');
+        assert.equal(elements(inputGrid).some(element => element.type === 'table'), false, 'preview must span the drawer below the input grid');
+        await h.component.applyBatchRename();
+        assert.equal(h.requests.length, 3);
+        assert.deepEqual(h.requests[1].body, { ...expected, confirm: true });
+        assert.equal(successful(h), true, h.component.state.batchError);
+        assert.deepEqual(plain(h.actions[0].payload.servers), refreshed);
+        assert.equal(h.component.state.batchPreview, null);
+    });
+}
+
+test('rename mode dropdown displays only the editable fields and keeps full numbering available', () => {
+    const h = fieldRenameHarness([]);
+    for (const mode of ['full', 'prefix', 'suffix', 'affixes']) {
+        let tree = elements(h.component.renderBatchOperations());
+        tree.find(element => element.props.id === 'batch-rename-mode').props.onChange({ target: { value: mode } });
+        tree = elements(h.component.renderBatchOperations());
+        for (const [id, visible] of [
+            ['prefix', mode !== 'suffix'], ['suffix', mode !== 'prefix'],
+            ['start', mode === 'full'], ['width', mode === 'full'],
+        ]) assert.equal(tree.some(element => element.props.id === 'batch-rename-' + id), visible, mode + ':' + id);
+        const selector = tree.find(element => element.props.id === 'batch-rename-mode');
+        assert.deepEqual(selector.children.map(element => element.props.value), ['full', 'prefix', 'suffix', 'affixes']);
+    }
+});
+
+for (const [field, value] of [
+    ['batchRenameMode', 'suffix'], ['batchRenamePrefix', 'Shanghai'], ['batchRenameSeparator', '|'],
+]) {
+    test('changing ' + field + ' invalidates a partial rename preview', async () => {
+        const h = fieldRenameHarness([fieldRenamePreview()]);
+        await h.component.previewBatchRename();
+        assert.ok(h.component.state.batchPreview);
+        h.component.changeBatchField(field, value);
+        await h.component.applyBatchRename();
+        assert.equal(h.requests.length, 1);
+        assert.equal(h.component.state.batchPreview, null);
+    });
+}
+
+test('partial rename shows and skips unmatched names while updating matching nodes', async () => {
+    const scenario = FIELD_RENAME_CASES[1];
+    const preview = fieldRenamePreview(scenario, true);
+    const h = fieldRenameHarness([preview, fieldRenameApplied(preview), listing([
+        { ...FIELD_RENAME_NODES[0], name: scenario.names[0] },
+        { ...FIELD_RENAME_NODES[1], name: scenario.names[1] }, NODES[2],
+    ])], scenario, true);
+    await h.component.previewBatchRename();
+    assert.match(flatten(h.component.renderBatchOperations()), /预计改动 2 \/ 3 个节点，跳过 1 个/);
+    assert.match(flatten(h.component.renderBatchOperations()), /trojan-a.*跳过：.*不足三段/);
+    await h.component.applyBatchRename();
+    assert.equal(successful(h), true, h.component.state.batchError);
+    assert.match(h.component.state.batchResult, /跳过 1 个格式不匹配/);
+});
+
+test('all unmatched names disable apply and make no write request', async () => {
+    const preview = fieldRenamePreview();
+    Object.assign(preview.body.data, { changed_count: 0, skipped_count: 2,
+        nodes: NODES.slice(0, 2).map(({ type, id, name }) => ({
+            type, id, name, new_name: name, number: null, applicable: false, changed: false, skip_reason: '不足三段',
+        })),
+    });
+    const h = fieldRenameHarness([preview]);
+    h.component.props.serverManage.servers = NODES;
+    await h.component.previewBatchRename();
+    assert.ok(h.component.state.batchPreview, h.component.state.batchError);
+    assert.match(h.component.state.batchResult, /核对预览中跳过的名称及分隔符/);
+    const confirm = elements(h.component.renderBatchOperations()).find(element => flatten(element.children) === '确认应用');
+    assert.equal(confirm.props.disabled, true);
+    await h.component.applyBatchRename();
+    assert.equal(h.requests.length, 1);
+    assert.equal(successful(h), false);
+});
+
+for (const [description, alter] of [
+    ['changed sequence', data => { data.nodes[0].new_name = 'Singapore | 1 | v1'; }],
+    ['changed untouched suffix', data => { data.nodes[0].new_name = 'Singapore | 007 | v2'; }],
+    ['missing skip explanation', data => { data.nodes[2].skip_reason = null; }],
+    ['wrong skipped count', data => { data.skipped_count = 0; }],
+]) {
+    test('partial rename rejects preview with ' + description, async () => {
+        const preview = fieldRenamePreview(FIELD_RENAME_CASES[0], true);
+        alter(preview.body.data);
+        const h = fieldRenameHarness([preview], FIELD_RENAME_CASES[0], true);
+        await h.component.previewBatchRename();
+        await h.component.applyBatchRename();
+        assert.equal(h.component.state.batchPreview, null);
+        assert.match(h.component.state.batchError, /预览结果不完整/);
+        assert.equal(h.requests.length, 1);
+        assert.equal(successful(h), false);
+    });
+}
+
+test('partial rename uses current preview names as its save snapshot', async () => {
+    const preview = fieldRenamePreview();
+    preview.body.data.nodes[0].name = 'Hong Kong | 009 | v3';
+    preview.body.data.nodes[0].new_name = 'Singapore | 009 | v3';
+    const h = fieldRenameHarness([preview, fieldRenameApplied(preview), listing([
+        { ...FIELD_RENAME_NODES[0], name: 'Singapore | 009 | v3' },
+        { ...FIELD_RENAME_NODES[1], name: 'Singapore | 042 | 专线 | premium' }, NODES[2],
+    ])]);
+    await h.component.previewBatchRename();
+    await h.component.applyBatchRename();
+    assert.equal(h.requests[1].body.nodes[0].name, 'Hong Kong | 009 | v3');
+    assert.equal(successful(h), true, h.component.state.batchError);
+});
+
+test('partial rename detects an altered untouched field after save and prevents blind retry', async () => {
+    const preview = fieldRenamePreview();
+    const h = fieldRenameHarness([preview, fieldRenameApplied(preview), listing([
+        { ...FIELD_RENAME_NODES[0], name: 'Singapore | 007 | other' },
+        { ...FIELD_RENAME_NODES[1], name: 'Singapore | 042 | 专线 | premium' }, NODES[2],
+    ])]);
+    await h.component.previewBatchRename();
+    await h.component.applyBatchRename();
+    await h.component.applyBatchRename();
+    assert.equal(h.requests.length, 3);
+    assert.equal(successful(h), false);
+    assert.match(h.component.state.batchError, /勿重复提交.*重新读取的节点名称与预览不一致/);
+});
+
+for (const [field, value, message] of [
+    ['batchRenamePrefix', '  ', /填写新的前缀/],
+    ['batchRenameSeparator', '', /填写原名称分隔符/],
+    ['batchRenamePrefix', 'bad\nname', /控制字符/],
+]) {
+    test('partial rename rejects invalid ' + field + ' before preview', async () => {
+        const h = fieldRenameHarness([]);
+        h.component.changeBatchField(field, value);
+        await h.component.previewBatchRename();
+        assert.equal(h.requests.length, 0);
+        assert.match(h.component.state.batchError, message);
+    });
+}
 
 test('copies that come back visible are reported instead of claiming success', async () => {
     // 副本必须落库为隐藏；列表里若是 show=1 说明落库没生效或读到的是旧列表
