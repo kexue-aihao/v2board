@@ -37,9 +37,6 @@ class PlanController extends Controller
     public function save(PlanSave $request)
     {
         $params = $request->validated();
-        if (\Illuminate\Support\Facades\Schema::hasTable('v2_subscription') && Subscription::where('plan_id', $request->input('id'))->exists()) {
-            abort(500, 'subscription records prevent plan deletion');
-        }
         if ($request->input('id')) {
             $plan = Plan::find($request->input('id'));
             if (!$plan) {
@@ -80,6 +77,9 @@ class PlanController extends Controller
 
     public function drop(Request $request)
     {
+        if (Schema::hasTable('v2_subscription') && Subscription::where('plan_id', $request->input('id'))->exists()) {
+            abort(500, __('该套餐下存在订阅，无法删除'));
+        }
         if (Schema::hasTable('v2_reseller_plan') && ResellerPlan::where('base_plan_id', $request->input('id'))->exists()) {
             abort(500, __('该套餐已被倒卖商引用，无法删除'));
         }
