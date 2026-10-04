@@ -115,6 +115,22 @@ const tlsApplied = () => ({ body: { data: { requested_count: 2, updated_count: 2
     { id: 1, type: 'v2node', name: 'reality-a', server_name: 'new-sni.example', dest: 'new-dest.example', changes: ['server_name', 'dest'] },
     { id: 1, type: 'vmess', name: 'vmess-a', server_name: 'new-sni.example', dest: null, changes: ['server_name'] },
 ] } } });
+const renamePreview = (overrides = {}) => ({ body: { data: Object.assign({
+    prefix: 'Hong Kong', suffix: 'v1', separator: ' | ', start_number: 1, number_width: 1,
+    matched_count: 2, changed_count: 2,
+    nodes: [
+        { id: 1, type: 'v2node', name: 'reality-a', new_name: 'Hong Kong | 1 | v1', number: 1, changed: true },
+        { id: 1, type: 'vmess', name: 'vmess-a', new_name: 'Hong Kong | 2 | v1', number: 2, changed: true },
+    ],
+}, overrides) } });
+const renameApplied = () => ({ body: { data: {
+    prefix: 'Hong Kong', suffix: 'v1', separator: ' | ', start_number: 1, number_width: 1,
+    requested_count: 2, matched_count: 2, updated_count: 2,
+    nodes: [
+        { id: 1, type: 'v2node', old_name: 'reality-a', name: 'Hong Kong | 1 | v1' },
+        { id: 1, type: 'vmess', old_name: 'vmess-a', name: 'Hong Kong | 2 | v1' },
+    ],
+} } });
 const successful = h => h.messages.some(message => message.kind === 'success');
 // 组件跑在 vm 沙箱里，它产出的数组/对象与 Node realm 原型不同，deepStrictEqual 会误判。
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -154,6 +170,44 @@ test('turning off regeneration is passed through and never guessed', async () =>
     h.component.changeBatchField('batchCopyRegenerate', false);
     await h.component.runBatchCopy();
     assert.equal(h.requests[0].body.regenerate_reality_keys, false);
+});
+
+test('batch rename previews and applies the exact formatted names', async () => {
+    const h = seeded({ responses: [renamePreview(), renameApplied(), listing([
+        { type: 'v2node', id: 1, name: 'Hong Kong | 1 | v1', show: 1 },
+        { type: 'vmess', id: 1, name: 'Hong Kong | 2 | v1', show: 1 },
+        NODES[2],
+    ])] });
+    h.component.changeBatchField('batchRenamePrefix', 'Hong Kong');
+    h.component.changeBatchField('batchRenameSuffix', 'v1');
+    h.component.changeBatchField('batchRenameSeparator', ' | ');
+    h.component.openBatchDialog('rename');
+    await h.component.previewBatchRename();
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.requests[0].url, '/api/v1/test-admin/server/manage/rename/preview');
+    assert.deepEqual(h.requests[0].body, {
+        nodes: [{ type: 'v2node', id: 1, name: 'reality-a' }, { type: 'vmess', id: 1, name: 'vmess-a' }],
+        prefix: 'Hong Kong', suffix: 'v1', separator: ' | ', start_number: 1, number_width: 1,
+    });
+    await h.component.applyBatchRename();
+    assert.equal(h.requests.length, 3);
+    assert.equal(h.requests[1].url, '/api/v1/test-admin/server/manage/rename/apply');
+    assert.equal(h.requests[1].body.confirm, true);
+    assert.equal(h.requests[1].body.nodes[0].name, 'reality-a');
+    assert.match(h.requests[2].url, /\/getNodes\?_batch_rename=\d+/);
+    assert.equal(h.component.state.batchPreview, null);
+    assert.equal(successful(h), true);
+});
+
+test('editing the rename format invalidates a preview without writing', async () => {
+    const h = seeded({ responses: [renamePreview()] });
+    h.component.openBatchDialog('rename');
+    await h.component.previewBatchRename();
+    h.component.changeBatchField('batchRenameSuffix', 'v2');
+    await h.component.applyBatchRename();
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.component.state.batchPreview, null);
+    assert.equal(h.component.state.batchError, '');
 });
 
 test('copies that come back visible are reported instead of claiming success', async () => {
@@ -325,6 +379,11 @@ test('both dialogs render without touching the network', () => {
     h.component.openBatchDialog('tls');
     const tlsDialog = h.component.renderBatchOperations();
     assert.ok(tlsDialog, 'tls dialog must render');
+
+    h.component.openBatchDialog('rename');
+    const renameDialog = h.component.renderBatchOperations();
+    assert.ok(renameDialog, 'rename dialog must render');
+    assert.equal(renameDialog.props.title, '批量重命名节点');
 
     h.component.closeBatchDialog();
     assert.equal(h.component.renderBatchOperations(), null);

@@ -24,4 +24,15 @@ class TrimStrings extends Middleware
         'new_password',
         'current_password',
     ];
+
+    protected function transform($key, $value)
+    {
+        // The spaces in a naming separator (such as " | ") are intentional.
+        if (request()->is('api/v1/*/server/manage/rename/*') &&
+            (in_array($key, ['prefix', 'suffix', 'separator'], true) || preg_match('/\Anodes\.[0-9]+\.name\z/', $key))) {
+            return $value;
+        }
+
+        return parent::transform($key, $value);
+    }
 }

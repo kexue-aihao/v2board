@@ -91,6 +91,22 @@ class ManageController extends Controller
         ]);
     }
 
+    public function previewRename(Request $request)
+    {
+        $params = $this->validateRename($request, false);
+        return response([
+            'data' => (new ServerBatchOperationService())->previewRename($params['nodes'], $params['format'])
+        ])->header('Cache-Control', 'no-store, private');
+    }
+
+    public function applyRename(Request $request)
+    {
+        $params = $this->validateRename($request, true);
+        return response([
+            'data' => (new ServerBatchOperationService())->applyRename($params['nodes'], $params['format'])
+        ]);
+    }
+
     public function previewRate(Request $request)
     {
         $params = $this->validateRate($request, false);
@@ -233,6 +249,30 @@ class ManageController extends Controller
         }
 
         return $request->validate($rules);
+    }
+
+    private function validateRename(Request $request, bool $requireConfirmation): array
+    {
+        $rules = [
+            'prefix' => ['present', 'nullable', 'string', 'max:255', 'not_regex:/[\x00-\x1F\x7F]/u'],
+            'suffix' => ['present', 'nullable', 'string', 'max:255', 'not_regex:/[\x00-\x1F\x7F]/u'],
+            'separator' => ['present', 'nullable', 'string', 'max:32', 'not_regex:/[\x00-\x1F\x7F]/u'],
+            'start_number' => 'required|integer|min:1|max:' . ServerBatchOperationService::MAX_RENAME_NUMBER,
+            'number_width' => 'required|integer|min:1|max:9',
+        ];
+        if ($requireConfirmation) {
+            $rules['nodes.*.name'] = 'present|nullable|string|max:255';
+        }
+        $params = $this->validateSelection($request, $requireConfirmation, $rules);
+        $params['format'] = [
+            'prefix' => (string) ($params['prefix'] ?? ''),
+            'suffix' => (string) ($params['suffix'] ?? ''),
+            'separator' => (string) ($params['separator'] ?? ''),
+            'start_number' => (int) $params['start_number'],
+            'number_width' => (int) $params['number_width'],
+        ];
+
+        return $params;
     }
 
     private function validateRate(Request $request, bool $requireConfirmation): array

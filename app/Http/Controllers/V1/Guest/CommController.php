@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\TelegramPasswordResetService;
 use App\Services\TelegramRegistrationService;
 use App\Services\ArithmeticVerificationService;
+use App\Services\SiteStatusService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -27,17 +28,11 @@ class CommController extends Controller
             $themeConfig = config("theme.{$theme}", []);
         }
 
-        $siteStatus = (string)config('v2board.site_status', 'normal');
-        if (!in_array($siteStatus, ['normal', 'maintenance', 'shutdown'], true)) {
-            $siteStatus = 'normal';
-        }
-
-        $siteStatusTitle = trim(strip_tags((string)config('v2board.site_status_title', '')));
-        $siteStatusMessage = trim(strip_tags((string)config('v2board.site_status_message', '')));
-        $siteStatusRecoveryAt = config('v2board.site_status_recovery_at');
-        $siteStatusRecoveryAt = $siteStatusRecoveryAt === null || $siteStatusRecoveryAt === ''
-            ? null
-            : (int)$siteStatusRecoveryAt;
+        $runtimeStatus = SiteStatusService::current();
+        $siteStatus = $runtimeStatus['site_status'];
+        $siteStatusTitle = trim(strip_tags($runtimeStatus['site_status_title']));
+        $siteStatusMessage = trim(strip_tags($runtimeStatus['site_status_message']));
+        $siteStatusRecoveryAt = $runtimeStatus['site_status_recovery_at'];
 
         return response([
             'data' => [

@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\SiteStatusService;
 use Closure;
 
 class SiteStatus
@@ -10,7 +11,7 @@ class SiteStatus
 
     public function handle($request, Closure $next)
     {
-        $mode = (string)config('v2board.site_status', 'normal');
+        $mode = SiteStatusService::current()['site_status'];
         if (!in_array($mode, self::MODES, true) || $mode === 'normal' || $this->isExempt($request)) {
             return $next($request);
         }

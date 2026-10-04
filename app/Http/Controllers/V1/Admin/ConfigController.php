@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\UserTwoFactor;
 use App\Services\SubscribeAccountRiskService;
 use App\Services\SubscribeAuditRetentionService;
+use App\Services\SiteStatusService;
 use App\Services\TelegramBindingService;
 use App\Services\TelegramService;
 use App\Services\PaymentReturnUrlService;
@@ -384,7 +385,8 @@ class ConfigController extends Controller
                 $data['reward_' . $game . '_payout_multiplier'] = number_format((float)$data['reward_' . $game . '_payout_multiplier'], 2, '.', '');
             }
         }
-        $config = config('v2board');
+        $previousConfig = (array)config('v2board', []);
+        $config = $previousConfig;
         foreach (ConfigSave::RULES as $k => $v) {
             if (!in_array($k, array_keys(ConfigSave::RULES))) {
                 unset($config[$k]);
@@ -425,7 +427,12 @@ class ConfigController extends Controller
             }
         }
         Artisan::call('config:cache');
-        if(Cache::has('WEBMANPID')) {
+        SiteStatusService::sync($config);
+
+        // Site status is consumed through SiteStatusService on every request,
+        // so toggling maintenance mode must not stop a Webman process that may
+        // not be managed by Supervisor and therefore would not restart itself.
+        if (!SiteStatusService::onlyStatusChanges($previousConfig, $config) && Cache::has('WEBMANPID')) {
             $pid = Cache::get('WEBMANPID');
             Cache::forget('WEBMANPID');
             return response([

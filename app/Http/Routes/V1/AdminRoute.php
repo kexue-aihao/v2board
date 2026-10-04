@@ -41,6 +41,8 @@ class AdminRoute
             $router->post('/server/manage/host/preview', 'V1\\Admin\\Server\\ManageController@previewHostReplacement');
             $router->post('/server/manage/host/replace', 'V1\\Admin\\Server\\ManageController@replaceHost');
             $router->post('/server/manage/nodes/copy', 'V1\\Admin\\Server\\ManageController@copyNodes');
+            $router->post('/server/manage/rename/preview', 'V1\\Admin\\Server\\ManageController@previewRename');
+            $router->post('/server/manage/rename/apply', 'V1\\Admin\\Server\\ManageController@applyRename');
             $router->post('/server/manage/rate/preview', 'V1\\Admin\\Server\\ManageController@previewRate');
             $router->post('/server/manage/rate/apply', 'V1\\Admin\\Server\\ManageController@applyRate');
             $router->post('/server/manage/tls-fields/inspect', 'V1\\Admin\\Server\\ManageController@inspectTlsFields');

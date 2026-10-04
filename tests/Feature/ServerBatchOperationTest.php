@@ -195,6 +195,96 @@ class ServerBatchOperationTest extends TestCase
         }
     }
 
+    public function testBatchRenamePreviewKeepsTheSeparatorAndDoesNotWrite(): void
+    {
+        $this->seedNode('vmess', 1, 'old-a');
+        $this->seedNode('vmess', 2, 'old-b');
+        $selection = [
+            ['type' => 'vmess', 'id' => 1, 'name' => 'old-a'],
+            ['type' => 'vmess', 'id' => 2, 'name' => 'old-b'],
+        ];
+        $before = DB::table('v2_server_vmess')->get()->toArray();
+
+        $response = $this->postJson($this->url . '/rename/preview', [
+            'nodes' => $selection,
+            'prefix' => 'Hong Kong',
+            'suffix' => 'v1',
+            'separator' => ' | ',
+            'start_number' => 1,
+            'number_width' => 1,
+        ])->assertOk()->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('data.matched_count', 2)
+            ->assertJsonPath('data.changed_count', 2)
+            ->assertJsonPath('data.nodes.0.new_name', 'Hong Kong | 1 | v1')
+            ->assertJsonPath('data.nodes.1.new_name', 'Hong Kong | 2 | v1');
+
+        $this->assertSame(' | ', $response->json('data.separator'));
+        $this->assertEquals($before, DB::table('v2_server_vmess')->get()->toArray());
+    }
+
+    public function testBatchRenameAppliesInSelectionOrderAndSupportsZeroPadding(): void
+    {
+        $this->seedNode('v2node', 1, 'old-v2');
+        $this->seedNode('vmess', 1, 'old-vmess');
+        $selection = [
+            ['type' => 'v2node', 'id' => 1, 'name' => 'old-v2'],
+            ['type' => 'vmess', 'id' => 1, 'name' => 'old-vmess'],
+        ];
+
+        $this->postJson($this->url . '/rename/apply', [
+            'nodes' => $selection,
+            'prefix' => 'Hong Kong',
+            'suffix' => 'v1',
+            'separator' => ' | ',
+            'start_number' => 7,
+            'number_width' => 3,
+            'confirm' => true,
+        ])->assertOk()->assertJsonPath('data.updated_count', 2)
+            ->assertJsonPath('data.nodes.0.name', 'Hong Kong | 007 | v1')
+            ->assertJsonPath('data.nodes.1.name', 'Hong Kong | 008 | v1');
+
+        $this->assertSame('Hong Kong | 007 | v1', (string) DB::table('v2_server_v2node')->where('id', 1)->value('name'));
+        $this->assertSame('Hong Kong | 008 | v1', (string) DB::table('v2_server_vmess')->where('id', 1)->value('name'));
+        $this->assertSame(0, DB::transactionLevel());
+    }
+
+    public function testBatchRenameRejectsAChangedNameAfterPreview(): void
+    {
+        $this->seedNode('trojan', 1, 'before');
+        $selection = [['type' => 'trojan', 'id' => 1, 'name' => 'before']];
+        $format = ['prefix' => 'Hong Kong', 'suffix' => 'v1', 'separator' => ' | ', 'start_number' => 1, 'number_width' => 1];
+        $this->postJson($this->url . '/rename/preview', array_merge(['nodes' => $selection], $format))->assertOk();
+        DB::table('v2_server_trojan')->where('id', 1)->update(['name' => 'changed-elsewhere']);
+
+        $this->postJson($this->url . '/rename/apply', array_merge(['nodes' => $selection, 'confirm' => true], $format))
+            ->assertStatus(409);
+        $this->assertSame('changed-elsewhere', (string) DB::table('v2_server_trojan')->where('id', 1)->value('name'));
+    }
+
+    public function testBatchRenameRollsBackWhenOneNodeCannotBeSaved(): void
+    {
+        $this->seedNode('shadowsocks', 1, 'ss-old');
+        $this->seedNode('vmess', 1, 'vmess-old');
+        $dispatcher = \App\Models\ServerVmess::getEventDispatcher();
+        \App\Models\ServerVmess::setEventDispatcher(clone $dispatcher);
+        \App\Models\ServerVmess::saving(function () { return false; });
+        try {
+            $this->postJson($this->url . '/rename/apply', [
+                'nodes' => [
+                    ['type' => 'shadowsocks', 'id' => 1, 'name' => 'ss-old'],
+                    ['type' => 'vmess', 'id' => 1, 'name' => 'vmess-old'],
+                ],
+                'prefix' => 'Hong Kong', 'suffix' => 'v1', 'separator' => ' | ',
+                'start_number' => 1, 'number_width' => 1, 'confirm' => true,
+            ])->assertStatus(500)->assertJsonPath('message', '节点名称保存失败，本次操作已回滚');
+            $this->assertSame('ss-old', (string) DB::table('v2_server_shadowsocks')->where('id', 1)->value('name'));
+            $this->assertSame('vmess-old', (string) DB::table('v2_server_vmess')->where('id', 1)->value('name'));
+            $this->assertSame(0, DB::transactionLevel());
+        } finally {
+            \App\Models\ServerVmess::setEventDispatcher($dispatcher);
+        }
+    }
+
     public function testBatchCopyRequiresConfirmationAndRejectsEmptySelection(): void
     {
         $this->seedNode('vmess', 1, 'vmess-node');

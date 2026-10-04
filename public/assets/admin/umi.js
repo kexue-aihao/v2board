@@ -108463,6 +108463,11 @@
                     batchServerName: "",
                     batchDest: "",
                     batchRate: "",
+                    batchRenamePrefix: "",
+                    batchRenameSuffix: "",
+                    batchRenameSeparator: " | ",
+                    batchRenameStart: "1",
+                    batchRenameWidth: "1",
                     batchPreview: null,
                     batchDeleteConfirmed: !1,
                     batchNetwork: "",
@@ -108809,6 +108814,115 @@
                 } finally {
                     this.batchBusy = !1;
                     this.setState({batchLoading: !1, batchStage: ""});
+                }
+            }
+            batchRenameFormat() {
+                var state = this.state, format = {
+                    prefix: state.batchRenamePrefix, suffix: state.batchRenameSuffix, separator: state.batchRenameSeparator,
+                    start_number: Number(state.batchRenameStart), number_width: Number(state.batchRenameWidth)
+                };
+                if (!/^[0-9]{1,9}$/.test(state.batchRenameStart) || format.start_number < 1 ||
+                    !/^[1-9]$/.test(state.batchRenameWidth)) {
+                    throw new Error("起始序号须为 1～999999999 的整数，序号位数须为 1～9")
+                }
+                if ([format.prefix, format.suffix, format.separator].some(value=>typeof value !== "string" || /[\x00-\x1f\x7f]/.test(value)) ||
+                    Array.from(format.prefix).length > 255 || Array.from(format.suffix).length > 255 || Array.from(format.separator).length > 32) {
+                    throw new Error("前缀和后缀各最多 255 个字符，分隔符最多 32 个字符，不能包含换行或控制字符")
+                }
+                return format
+            }
+            batchRenameName(format, index) {
+                return [format.prefix, String(format.start_number + index).padStart(format.number_width, "0"), format.suffix]
+                    .filter(part=>part !== "").join(format.separator)
+            }
+            batchRenameMatches(format) {
+                try {
+                    return JSON.stringify(this.batchRenameFormat()) === JSON.stringify(format)
+                } catch (error) {
+                    return !1
+                }
+            }
+            async previewBatchRename() {
+                if (this.batchBusy) return;
+                var nodes = this.selectedBatchNodes(), format;
+                this.setState({batchPreview: null, batchError: "", batchResult: ""});
+                try {
+                    if (!nodes.length || nodes.length > 200) throw new Error(nodes.length ? "一次最多重命名 200 个节点" : "请先在列表中勾选要重命名的节点");
+                    format = this.batchRenameFormat();
+                    if (format.start_number + nodes.length - 1 > 999999999) throw new Error("结束序号不能超过 999999999");
+                    if (nodes.some((node, index)=>Array.from(this.batchRenameName(format, index)).length > 255)) throw new Error("生成的节点名称不能超过 255 个字符");
+                } catch (error) {
+                    this.setState({batchError: error.message});
+                    return
+                }
+                var keys = nodes.map(node=>this.batchKey(node)), params = Object.assign({nodes: nodes}, format);
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在预览名称"});
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/rename/preview", params, !0));
+                    if (!Object.keys(format).every(key=>data[key] === format[key]) || !Array.isArray(data.nodes) ||
+                        data.matched_count !== nodes.length || data.nodes.length !== nodes.length ||
+                        !Number.isInteger(data.changed_count) || data.changed_count !== data.nodes.filter(node=>node.changed === !0).length ||
+                        !data.nodes.every((node, index)=>this.batchKey(node) === keys[index] && typeof node.name === "string" &&
+                            node.number === format.start_number + index && node.new_name === this.batchRenameName(format, index) &&
+                            typeof node.changed === "boolean" && node.changed === (node.name !== node.new_name))) {
+                        throw new Error("名称预览结果不完整或与所选节点不一致，请重新预览")
+                    }
+                    if (this.state.batchDialog !== "rename" || !this.batchRenameMatches(format) ||
+                        JSON.stringify(this.selectedBatchNodes().map(node=>this.batchKey(node))) !== JSON.stringify(keys)) {
+                        throw new Error("命名规则或节点顺序已变更，请重新预览")
+                    }
+                    // Use the server's current names as the snapshot checked when applying.
+                    params.nodes = data.nodes.map(node=>({type: node.type, id: node.id, name: node.name}));
+                    this.setState({batchPreview: Object.assign({}, data, {params: params, format: format}),
+                        batchResult: data.changed_count ? "" : "所选节点名称与目标值一致，无需修改"});
+                } catch (error) {
+                    this.setState({batchError: error.message || "名称预览失败，请稍后重试"});
+                } finally {
+                    this.batchBusy = !1;
+                    this.setState({batchLoading: !1, batchStage: ""});
+                }
+            }
+            async applyBatchRename() {
+                if (this.batchBusy) return;
+                var preview = this.state.batchPreview;
+                if (this.state.batchDialog !== "rename" || !preview || !preview.changed_count) return;
+                var keys = preview.params.nodes.map(node=>this.batchKey(node));
+                if (!this.batchRenameMatches(preview.format) ||
+                    JSON.stringify(this.selectedBatchNodes().map(node=>this.batchKey(node))) !== JSON.stringify(keys)) {
+                    this.setState({batchError: "命名规则或节点顺序已变更，请重新预览", batchPreview: null});
+                    return
+                }
+                this.batchBusy = !0;
+                this.setState({batchLoading: !0, batchStage: "正在保存名称", batchError: "", batchResult: ""});
+                var saved = !1;
+                try {
+                    var data = this.batchData(await Object(batchApi["b"])("/" + window.settings.secure_path + "/server/manage/rename/apply", Object.assign({}, preview.params, {confirm: !0}), !0));
+                    saved = !0;
+                    if (!Object.keys(preview.format).every(key=>data[key] === preview.format[key]) ||
+                        data.requested_count !== keys.length || data.matched_count !== keys.length ||
+                        !Number.isInteger(data.updated_count) || data.updated_count < 0 || data.updated_count > preview.changed_count ||
+                        !Array.isArray(data.nodes) || data.nodes.length !== data.updated_count) {
+                        throw new Error("名称保存结果不完整，请刷新列表核对")
+                    }
+                    var updatedKeys = data.nodes.map(node=>this.batchKey(node));
+                    if (!data.nodes.every((node, index)=>updatedKeys.indexOf(updatedKeys[index]) === index &&
+                        preview.nodes.some(target=>target.changed && this.batchKey(target) === updatedKeys[index] && node.name === target.new_name))) {
+                        throw new Error("名称保存结果与预览不一致，请刷新列表核对")
+                    }
+                    this.setState({batchStage: "正在重新读取并核对名称"});
+                    var servers = await this.refreshBatchNodeList({_batch_rename: Date.now()});
+                    if (!preview.nodes.every(node=>servers.some(server=>this.batchKey(server) === this.batchKey(node) && server.name === node.new_name))) {
+                        throw new Error("重新读取的节点名称与预览不一致")
+                    }
+                    var result = "已核对 " + data.matched_count + " 个节点名称，本次重命名 " + data.updated_count + " 个节点";
+                    this.setState({batchResult: result});
+                    c["a"].success(result);
+                } catch (error) {
+                    this.setState({batchError: (saved ? "接口已返回保存成功，但名称核对失败。请刷新列表检查，勿重复提交：" : "名称保存未确认完成，请核对列表后重新预览：") + (error.message || "网络请求失败")});
+                } finally {
+                    this.batchBusy = !1;
+                    this.setState({batchLoading: !1, batchStage: "", batchPreview: null});
                 }
             }
             batchRateEquals(value, target) {
@@ -109158,6 +109272,59 @@
                             el(l["a"], {disabled: busy || !preview, onClick: ()=>this.copyBatchTlsInspection()}, "复制结果")
                         )
                     ))
+                }
+                if (state.batchDialog === "rename") {
+                    return el(R["a"], {
+                        title: "批量重命名节点", width: "min(820px, 100vw)", visible: !0,
+                        maskClosable: !busy, closable: !busy, keyboard: !busy, onClose: ()=>this.closeBatchDialog()
+                    }, el("div", {style: {paddingBottom: 70}},
+                        el("p", {role: "status"}, "已选 " + nodes.length + " 个节点"),
+                        el("div", {style: {display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0 16px"}},
+                            el("div", {className: "form-group"}, el("label", {htmlFor: "batch-rename-prefix"}, "前缀"), el(s["a"], {
+                                id: "batch-rename-prefix", value: state.batchRenamePrefix, disabled: busy, maxLength: 255, placeholder: "Hong Kong",
+                                onChange: event=>this.changeBatchField("batchRenamePrefix", event.target.value)
+                            })),
+                            el("div", {className: "form-group"}, el("label", {htmlFor: "batch-rename-suffix"}, "后缀"), el(s["a"], {
+                                id: "batch-rename-suffix", value: state.batchRenameSuffix, disabled: busy, maxLength: 255, placeholder: "v1",
+                                onChange: event=>this.changeBatchField("batchRenameSuffix", event.target.value)
+                            })),
+                            el("div", {className: "form-group"}, el("label", {htmlFor: "batch-rename-separator"}, "分隔符"), el(s["a"], {
+                                id: "batch-rename-separator", value: state.batchRenameSeparator, disabled: busy, maxLength: 32,
+                                onChange: event=>this.changeBatchField("batchRenameSeparator", event.target.value)
+                            })),
+                            el("div", {className: "form-group"}, el("label", {htmlFor: "batch-rename-start"}, "起始序号"), el(s["a"], {
+                                id: "batch-rename-start", value: state.batchRenameStart, type: "number", min: 1, max: 999999999, step: 1, disabled: busy,
+                                onChange: event=>this.changeBatchField("batchRenameStart", event.target.value)
+                            })),
+                            el("div", {className: "form-group"}, el("label", {htmlFor: "batch-rename-width"}, "序号位数"), el("select", {
+                                id: "batch-rename-width", className: "form-control", style: {height: 32, width: "100%"}, value: state.batchRenameWidth, disabled: busy,
+                                onChange: event=>this.changeBatchField("batchRenameWidth", event.target.value)
+                            }, [1, 2, 3, 4, 5, 6, 7, 8, 9].map(width=>el("option", {key: width, value: String(width)},
+                                width === 1 ? "不补零" : width + " 位（" + "1".padStart(width, "0") + "）")))
+                        ),
+                        state.batchError && el("p", {role: "alert", style: {color: "#c00000", whiteSpace: "pre-wrap", overflowWrap: "anywhere"}}, state.batchError),
+                        state.batchResult && el("p", {role: "status"}, state.batchResult),
+                        state.batchStage && el("p", {role: "status"}, state.batchStage),
+                        preview && el("div", null,
+                            el("strong", null, "预计改动 " + preview.changed_count + " / " + preview.matched_count + " 个节点"),
+                            el("div", {style: {maxHeight: 320, overflow: "auto", marginTop: 12}},
+                                el("table", {className: "table", style: {tableLayout: "fixed", width: "100%", overflowWrap: "anywhere", whiteSpace: "pre-wrap"}},
+                                    el("thead", null, el("tr", null,
+                                        el("th", {style: {width: 64}}, "序号"), el("th", null, "原名称"), el("th", null, "新名称"))),
+                                    el("tbody", null, preview.nodes.map(node=>el("tr", {key: this.batchKey(node)},
+                                        el("td", null, node.number),
+                                        el("td", null, node.name, el("div", {style: {fontSize: 12, color: "#666"}}, node.type + " #" + node.id)),
+                                        el("td", null, node.new_name, !node.changed && el("div", null, "无需修改"))
+                                    )))
+                                )
+                            )
+                        ),
+                        el("div", {className: "v2board-drawer-action"},
+                            el(l["a"], {disabled: busy, onClick: ()=>this.closeBatchDialog(), style: {marginRight: 8}}, "关闭"),
+                            el(l["a"], {loading: busy, onClick: ()=>this.previewBatchRename(), style: {marginRight: 8}}, "预览改动"),
+                            el(l["a"], {type: "primary", disabled: busy || !preview || !preview.changed_count, onClick: ()=>this.applyBatchRename()}, "确认应用")
+                        )
+                    )))
                 }
                 if (state.batchDialog === "rate") {
                     return el(R["a"], {
@@ -109631,6 +109798,11 @@
                     disabled: A || !this.selectedBatchNodes().length,
                     onClick: ()=>this.openBatchDialog("tls")
                 }, "批量填写 SNI/地址"), !Object(L["f"])() && y.a.createElement(l["a"], {
+                    style: {marginLeft: 8},
+                    loading: this.state.batchLoading && this.state.batchDialog === "rename",
+                    disabled: A || !this.selectedBatchNodes().length,
+                    onClick: ()=>this.openBatchDialog("rename")
+                }, y.a.createElement(m["a"], {type: "edit"}), "批量重命名", this.selectedBatchNodes().length ? " (" + this.selectedBatchNodes().length + ")" : ""), !Object(L["f"])() && y.a.createElement(l["a"], {
                     style: {
                         marginLeft: 8
                     },

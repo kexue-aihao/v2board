@@ -26,6 +26,7 @@ use ParagonIE_Sodium_Compat as SodiumCompat;
 class ServerBatchOperationService
 {
     public const MAX_SELECTION = 200;
+    public const MAX_RENAME_NUMBER = 999999999;
     // 节点 rate 为 varchar(11)，统计倍率为 decimal(10,2)，统一接收普通十进制数。
     public const RATE_PATTERN = '/\A[0-9]{1,8}(?:\.[0-9]{1,2})?\z/';
 
@@ -126,6 +127,101 @@ class ServerBatchOperationService
                 'nodes' => $created,
             ];
         });
+    }
+
+    public function previewRename(array $selection, array $format): array
+    {
+        $nodes = $this->renamePlan($this->load($selection), $format);
+
+        return $format + [
+            'matched_count' => count($nodes),
+            'changed_count' => count(array_filter($nodes, function (array $node) { return $node['changed']; })),
+            'nodes' => $nodes,
+        ];
+    }
+
+    public function applyRename(array $selection, array $format): array
+    {
+        return DB::transaction(function () use ($selection, $format) {
+            $entries = $this->resolve($selection);
+            $plan = $this->renamePlan($entries, $format);
+            $expectedNames = [];
+            foreach ($selection as $item) {
+                $key = $item['type'] . ':' . $item['id'];
+                if (!array_key_exists($key, $expectedNames)) {
+                    $expectedNames[$key] = (string) ($item['name'] ?? '');
+                }
+            }
+
+            // Keep the preview's node-to-number mapping and reject concurrent renames.
+            foreach ($plan as $node) {
+                $expected = $expectedNames[$node['type'] . ':' . $node['id']];
+                if ($node['name'] !== $expected && $node['name'] !== $node['new_name']) {
+                    abort(409, __('节点名称已变更，请重新预览：:type #:id', ['type' => $node['type'], 'id' => $node['id']]));
+                }
+            }
+
+            $updated = [];
+            foreach ($entries as $index => $entry) {
+                $node = $plan[$index];
+                if (!$node['changed']) {
+                    continue;
+                }
+                $server = $entry['server'];
+                $server->name = $node['new_name'];
+                if (!$server->save()) {
+                    abort(500, __('节点名称保存失败，本次操作已回滚'));
+                }
+                $persisted = $server->fresh();
+                if (!$persisted || (string) $persisted->name !== $node['new_name']) {
+                    abort(500, __('节点名称保存后复核不一致，本次操作已回滚'));
+                }
+                $updated[] = [
+                    'id' => (int) $persisted->id,
+                    'type' => $entry['type'],
+                    'old_name' => $node['name'],
+                    'name' => (string) $persisted->name,
+                ];
+            }
+
+            return $format + [
+                'requested_count' => count($selection),
+                'matched_count' => count($entries),
+                'updated_count' => count($updated),
+                'nodes' => $updated,
+            ];
+        });
+    }
+
+    private function renamePlan(array $entries, array $format): array
+    {
+        if ($format['start_number'] + count($entries) - 1 > self::MAX_RENAME_NUMBER) {
+            abort(422, __('结束序号不能超过 :max', ['max' => self::MAX_RENAME_NUMBER]));
+        }
+        $nodes = [];
+        foreach ($entries as $index => $entry) {
+            $number = $format['start_number'] + $index;
+            $parts = [
+                $format['prefix'],
+                str_pad((string) $number, $format['number_width'], '0', STR_PAD_LEFT),
+                $format['suffix'],
+            ];
+            $name = implode($format['separator'], array_values(array_filter($parts, function (string $part) { return $part !== ''; })));
+            if (mb_strlen($name, 'UTF-8') > 255) {
+                abort(422, __('生成的节点名称不能超过 255 个字符'));
+            }
+            $server = $entry['server'];
+            $nodes[] = [
+                'id' => (int) $server->id,
+                'type' => $entry['type'],
+                'name' => (string) $server->name,
+                'new_name' => $name,
+                'number' => $number,
+                'changed' => (string) $server->name !== $name,
+            ];
+        }
+
+        return $nodes;
     }
 
     /** 预览基础倍率，保留当前保存值供管理员逐节点核对。 */
