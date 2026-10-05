@@ -1,0 +1,196 @@
+#!/bin/bash
+# No real database, Git mutation, or service operations. The client stub uses
+# files so state survives command substitutions used in production.
+set -Eeuo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+export DB_TEST_REPO="$PWD"
+db_test_dir="$(mktemp -d)"
+export db_test_dir
+trap 'rm -rf -- "$db_test_dir"' EXIT
+source scripts/deploy-common.sh
+
+cat > "$db_test_dir/admin-client.sh" <<'STUB'
+set -eu
+sql="$(cat)"
+case "$sql" in
+    *'SHOW GRANTS;'*)
+        echo query >> "$db_test_dir/calls"
+        [ ! -f "$db_test_dir/connection-fail" ] || exit 1
+        printf 'v2board-db:%s:%s\n' "$(cat "$db_test_dir/identity")" "$(cat "$db_test_dir/trust")"
+        cat "$db_test_dir/grants"
+        ;;
+    *' = 1;'*)
+        echo enable >> "$db_test_dir/calls"
+        echo 1 > "$db_test_dir/trust"
+        [ ! -f "$db_test_dir/enable-fail" ] || exit 1
+        ;;
+    *' = 0;'*)
+        echo restore >> "$db_test_dir/calls"
+        [ ! -f "$db_test_dir/restore-fail" ] || exit 1
+        echo 0 > "$db_test_dir/trust"
+        echo 0
+        ;;
+    *) exit 2 ;;
+esac
+STUB
+
+cat > "$db_test_dir/php-stub.sh" <<'STUB'
+deploy_php() {
+    case "$*" in
+        'scripts/check-db-trigger-capability.php')
+            if [ -f "$db_test_dir/ready" ] || [ "$(cat "$db_test_dir/trust")" = 1 ]; then
+                echo ready
+            else
+                printf 'needs-trust|%064d\n' 1
+            fi
+            ;;
+        'artisan v2board:update')
+            echo migrate >> "$db_test_dir/calls"
+            case "$(cat "$db_test_dir/migration")" in
+                exit) exit 29 ;;
+                term) kill -TERM "$$" ;;
+                *) return "$(cat "$db_test_dir/migration")" ;;
+            esac
+            ;;
+        *) return 0 ;;
+    esac
+}
+STUB
+source "$db_test_dir/php-stub.sh"
+
+reset_case() {
+    rm -f "$db_test_dir/ready" "$db_test_dir/connection-fail" "$db_test_dir/enable-fail" "$db_test_dir/restore-fail"
+    : > "$db_test_dir/calls"
+    printf '%064d\n' 1 > "$db_test_dir/identity"
+    echo 'GRANT ALL PRIVILEGES ON *.* TO test' > "$db_test_dir/grants"
+    echo 0 > "$db_test_dir/trust"
+    echo 0 > "$db_test_dir/migration"
+    DB_TRIGGER_TRUST_CHANGED=0
+    export V2BOARD_DB_ADMIN_CMD='bash "$db_test_dir/admin-client.sh"'
+}
+fails=0
+check() {
+    if [ "$2" = "$3" ]; then echo "PASS $1"
+    else echo "FAIL $1: expected [$2], got [$3]"; fails=$((fails + 1)); fi
+}
+run_status() { rc=0; "$@" > "$db_test_dir/output" 2>&1 || rc=$?; }
+
+reset_case
+unset V2BOARD_DB_ADMIN_CMD
+run_status deploy_check_db_trigger_capability
+check 'missing admin path fails preflight' 1 "$rc"
+check 'preflight does not change database' 0 "$(cat "$db_test_dir/trust")"
+touch "$db_test_dir/ready"
+run_status deploy_schema_update
+check 'existing triggers need no admin' 0 "$rc"
+check 'no unnecessary global writes' migrate "$(cat "$db_test_dir/calls")"
+
+reset_case
+run_status deploy_check_db_trigger_capability
+check 'valid admin passes read-only preflight' 0 "$rc"
+check 'preflight only queries' query "$(cat "$db_test_dir/calls")"
+echo 'GRANT SELECT, SYSTEM_VARIABLES_ADMIN ON *.* TO test' > "$db_test_dir/grants"
+run_status deploy_check_db_trigger_capability
+check 'dynamic variable privilege accepted' 0 "$rc"
+echo 'GRANT ALL PRIVILEGES ON app.* TO test' > "$db_test_dir/grants"
+run_status deploy_check_db_trigger_capability
+check 'database-level grant rejected' 1 "$rc"
+echo 'GRANT SUPER ON *.* TO test' > "$db_test_dir/grants"
+printf '%064d\n' 2 > "$db_test_dir/identity"
+run_status deploy_check_db_trigger_capability
+check 'wrong instance rejected before writes' 1 "$rc"
+reset_case
+touch "$db_test_dir/connection-fail"
+run_status deploy_check_db_trigger_capability
+check 'invalid admin connection fails' 1 "$rc"
+
+reset_case
+run_status deploy_schema_update
+check 'migration succeeds' 0 "$rc"
+check 'original OFF restored' 0 "$(cat "$db_test_dir/trust")"
+check 'enable brackets migration' $'query\nenable\nmigrate\nrestore' "$(cat "$db_test_dir/calls")"
+reset_case
+echo 17 > "$db_test_dir/migration"
+run_status deploy_schema_update
+check 'migration error propagated' 17 "$rc"
+check 'restore on migration failure' 0 "$(cat "$db_test_dir/trust")"
+reset_case
+echo 1 > "$db_test_dir/trust"
+run_status deploy_schema_update
+check 'original ON preserved' 1 "$(cat "$db_test_dir/trust")"
+check 'original ON needs no writes' migrate "$(cat "$db_test_dir/calls")"
+reset_case
+touch "$db_test_dir/restore-fail"
+run_status deploy_schema_update
+check 'restore failure fails deployment' 1 "$rc"
+check 'restore failure retains cleanup state' 1 "$DB_TRIGGER_TRUST_CHANGED"
+reset_case
+touch "$db_test_dir/enable-fail"
+run_status deploy_schema_update
+check 'ambiguous enable failure aborts migration' 1 "$rc"
+check 'ambiguous enable failure still restores' 0 "$(cat "$db_test_dir/trust")"
+check 'no migration after prepare failure' $'query\nenable\nrestore' "$(cat "$db_test_dir/calls")"
+
+# Exercise update.sh's EXIT and signal traps with only external actions stubbed.
+fixture="$db_test_dir/site"
+mkdir -p "$fixture/scripts" "$fixture/.git" "$fixture/public/theme/signature/assets/static/js"
+cp update.sh "$fixture/update.sh"
+touch "$fixture/.env" "$fixture/public/theme/signature/assets/static/js/index.test.js"
+cat > "$fixture/scripts/deploy-common.sh" <<'STUB'
+source "$DB_TEST_REPO/scripts/deploy-common.sh"
+source "$db_test_dir/php-stub.sh"
+deploy_setup() { PHP_CMD=(php); }
+deploy_check_runtime() { :; }
+deploy_check_webman_runtime() { :; }
+deploy_stop_webman() { WEBMAN_STOPPED=1; echo stop >> "$db_test_dir/calls"; }
+deploy_start_webman() { WEBMAN_RESTARTED=1; echo start >> "$db_test_dir/calls"; }
+deploy_download_composer() { :; }
+deploy_install_composer() { :; }
+deploy_patch_adapterman() { :; }
+deploy_check_mmdb() { :; }
+deploy_install_cron() { :; }
+deploy_chown() { :; }
+git() {
+    case "$*" in
+        'symbolic-ref --quiet --short HEAD') echo debug ;;
+        'rev-parse --verify HEAD:update.sh')
+            if [ -f "$db_test_dir/reset-done" ]; then echo new; else echo revision; fi ;;
+        'reset --hard origin/debug')
+            if [ -f "$db_test_dir/reexec" ]; then
+                touch "$db_test_dir/reset-done" "$db_test_dir/connection-fail"
+            fi ;;
+        'rev-parse HEAD'|'rev-parse origin/debug') echo revision ;;
+    esac
+}
+STUB
+reset_case
+unset V2BOARD_DB_ADMIN_CMD
+run_status bash "$fixture/update.sh"
+check 'update preflight aborts' 1 "$rc"
+check 'preflight never stops Webman' '' "$(cat "$db_test_dir/calls")"
+reset_case
+DEPLOY_CHECK_ONLY=1 run_status bash "$fixture/update.sh"
+check 'check-only succeeds with admin' 0 "$rc"
+check 'check-only never writes' query "$(cat "$db_test_dir/calls")"
+reset_case
+run_status bash "$fixture/update.sh"
+check 'update succeeds' 0 "$rc"
+check 'update restores before restart' $'query\nstop\nquery\nenable\nmigrate\nrestore\nstart' "$(cat "$db_test_dir/calls")"
+for failure in 17 exit term; do
+    reset_case
+    echo "$failure" > "$db_test_dir/migration"
+    run_status bash "$fixture/update.sh"
+    case "$failure" in 17) expected=17 ;; exit) expected=29 ;; term) expected=143 ;; esac
+    check "update propagates $failure" "$expected" "$rc"
+    check "update restores on $failure" 0 "$(cat "$db_test_dir/trust")"
+    check "update restarts on $failure" start "$(tail -n 1 "$db_test_dir/calls")"
+done
+
+reset_case
+touch "$db_test_dir/reexec"
+run_status bash "$fixture/update.sh"
+check 'reexec preflight fails on changed environment' 1 "$rc"
+check 'reexec preserves stopped Webman cleanup' start "$(tail -n 1 "$db_test_dir/calls")"
+
+test "$fails" = 0
+echo 'All database trigger deployment checks passed.'

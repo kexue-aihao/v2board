@@ -1,5 +1,9 @@
 # v2board部署教程
 
+升级时出现 MySQL/MariaDB `1419`（创建审计触发器权限不足），参见
+[数据库触发器部署兼容](docs/deployment-db-triggers.md)。`update.sh` 支持停服前检查和
+迁移期间临时设置；普通数据库账号仍需提供可用的管理员连接或由数据库管理员预设参数。
+
 - 1.第一步安装aapanel
 
   

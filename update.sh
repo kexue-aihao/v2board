@@ -6,12 +6,27 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/deploy-common.sh"
 
-WEBMAN_STOPPED=0
+WEBMAN_STOPPED="${WEBMAN_STOPPED:-0}"
 WEBMAN_RESTARTED=0
+DB_TRIGGER_TRUST_CHANGED=0
 # 只在从没走到启动那一步时才兜底重启，否则一次失败的启动会被 trap 再跑一遍，
 # 同样的报错刷两遍还是失败。
 WEBMAN_START_ATTEMPTED=0
-trap 'if [ "$WEBMAN_STOPPED" = 1 ] && [ "$WEBMAN_RESTARTED" = 0 ] && [ "$WEBMAN_START_ATTEMPTED" = 0 ]; then deploy_start_webman || true; fi' EXIT
+deploy_update_cleanup() {
+    local status=$?
+    trap - EXIT
+    if ! deploy_db_trigger_restore; then
+        status=1
+    fi
+    if [ "$WEBMAN_STOPPED" = 1 ] && [ "$WEBMAN_RESTARTED" = 0 ] && [ "$WEBMAN_START_ATTEMPTED" = 0 ]; then
+        deploy_start_webman || true
+    fi
+    exit "$status"
+}
+trap deploy_update_cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 # 失败时要讲清楚三件事：死在哪一步、留下了什么半成品状态、怎么恢复。
 #
@@ -38,7 +53,7 @@ trap 'if [ "$WEBMAN_STOPPED" = 1 ] && [ "$WEBMAN_RESTARTED" = 0 ] && [ "$WEBMAN_
 # 不会递归刷屏。**刻意不写 `set +e`** —— trap 里的 set 是会留下来的，那会让
 # `set -e` 在后面全程失效：失败一次之后脚本继续往下跑，最后还以退出码 0 结束，
 # 比现在这种静默掐断更糟（这个坑也是实测出来的）。
-DEPLOY_MUTATED=0
+DEPLOY_MUTATED="${DEPLOY_MUTATED:-0}"
 DEPLOY_CURRENT_STEP="（还没进入部署主体，在前置检查阶段）"
 # 包一层只为把步骤名记牢并打出来。参数原样透传，退出码原样返回。
 deploy_step() {
@@ -90,6 +105,7 @@ command -v git >/dev/null 2>&1 || {
 deploy_step deploy_setup
 deploy_step deploy_check_runtime
 deploy_step deploy_check_webman_runtime
+deploy_step deploy_check_db_trigger_capability
 
 if [ "${DEPLOY_CHECK_ONLY:-0}" = "1" ]; then
     echo "Deployment preflight passed. No files, database, services, or cron entries were changed."
@@ -123,6 +139,9 @@ UPDATE_SCRIPT_AFTER="$(git rev-parse --verify HEAD:update.sh 2>/dev/null || true
 # skipped on the first deployment that contains it.
 if [ "$UPDATE_SCRIPT_BEFORE" != "$UPDATE_SCRIPT_AFTER" ] && [ "${V2BOARD_UPDATE_REEXECUTED:-0}" != "1" ]; then
     echo "update.sh changed during deployment; continuing with the checked-out script."
+    # Carry the stopped service and its manager into the new script, including
+    # when a new preflight rejects the database before reaching stop again.
+    export WEBMAN_STOPPED WEBMAN_MANAGER SUPERVISORCTL_BIN SUPERVISOR_TARGET DEPLOY_MUTATED
     V2BOARD_UPDATE_REEXECUTED=1 exec bash "$ROOT_DIR/update.sh" "$@"
 fi
 
@@ -172,7 +191,7 @@ if [ "${LEGACY_DB_UPDATE:-0}" = "1" ]; then
 fi
 # Always run the idempotent schema migrations. Legacy mode only prepares
 # historical installations; it does not include newer reward schema changes.
-deploy_step deploy_php artisan v2board:update
+deploy_step deploy_schema_update
 deploy_step deploy_php artisan audit:backfill-summaries --chunk=1000
 deploy_step deploy_php artisan optimize:clear
 deploy_step deploy_php scripts/refresh-telegram-webhook.php

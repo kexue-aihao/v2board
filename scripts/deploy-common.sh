@@ -193,6 +193,171 @@ deploy_check_runtime() {
     done
 }
 
+# CREATE TRIGGER is rejected with MySQL error 1419 when binary logging is on,
+# the application account lacks SUPER, and
+# log_bin_trust_function_creators is off.  Check this before stopping Webman so
+# a deployment with no database-admin path leaves the running site untouched.
+deploy_db_trigger_status() {
+    local output
+
+    output="$(deploy_php scripts/check-db-trigger-capability.php 2>&1)" || {
+        echo "$output" >&2
+        return 1
+    }
+    case "$output" in
+        ready)
+            printf '%s\n' "$output"
+            ;;
+        *)
+            if [[ "$output" =~ ^needs-trust\|[a-f0-9]{64}$ ]]; then
+                printf '%s\n' "$output"
+            else
+                echo "ERROR: unexpected database trigger capability output: $output" >&2
+                return 1
+            fi
+            ;;
+    esac
+}
+
+deploy_check_db_trigger_capability() {
+    local status
+
+    status="$(deploy_db_trigger_status)" || return 1
+    if [ "$status" = ready ]; then
+        echo "Database audit triggers: no binlog compatibility change required."
+        return 0
+    fi
+
+    if [ -z "${V2BOARD_DB_ADMIN_CMD:-}" ]; then
+        echo "ERROR: Audit triggers are missing; MySQL binlog is enabled and log_bin_trust_function_creators=OFF (error 1419)." >&2
+        echo "Provide a database-admin command through V2BOARD_DB_ADMIN_CMD, for example:" >&2
+        echo "  V2BOARD_DB_ADMIN_CMD='mysql --defaults-extra-file=/root/v2board-db-admin.cnf --batch --skip-column-names' bash ./update.sh" >&2
+        echo "The command must accept SQL on stdin and be able to SET GLOBAL log_bin_trust_function_creators." >&2
+        echo "Or ask a database administrator to set that variable temporarily before rerunning the deployment." >&2
+        return 1
+    fi
+    deploy_db_admin_check "${status#*|}" || return 1
+    echo "Database admin command supplied; the deployment will temporarily enable trust for the migration." >&2
+}
+
+deploy_db_admin_check() {
+    local expected="$1" output identity line grants=0
+    local grant_pattern='^GRANT (.*) ON \*\.\* TO '
+    local privilege_pattern='(^|, *)(SUPER|SYSTEM_VARIABLES_ADMIN|ALL PRIVILEGES)(,|$)'
+    output="$(deploy_db_admin_sql "SELECT CONCAT('v2board-db:', SHA2(CONCAT_WS('/', @@hostname, @@port, @@server_id, @@version), 256), ':', @@GLOBAL.log_bin_trust_function_creators + 0); SHOW GRANTS;" 2>/dev/null)" || {
+        echo "ERROR: Database admin client cannot connect/query. Check V2BOARD_DB_ADMIN_CMD and its protected credentials file." >&2
+        return 1
+    }
+    # The client must return raw rows (mysql --batch --skip-column-names).
+    # Do not print SHOW GRANTS: MariaDB may include password hashes in it.
+    while IFS= read -r line; do
+        line="${line%$'\r'}"
+        case "$line" in
+            "v2board-db:$expected:"[01]) identity="$line" ;;
+        esac
+        if [[ "$line" =~ $grant_pattern ]] && [[ "${BASH_REMATCH[1]}" =~ $privilege_pattern ]]; then
+            grants=1
+        fi
+    done <<< "$output"
+    if [ -z "${identity:-}" ]; then
+        echo "ERROR: Admin client must connect to the SAME MySQL server as the application and return raw rows." >&2
+        echo "Include --batch --skip-column-names in V2BOARD_DB_ADMIN_CMD; check its host, port and socket." >&2
+        return 1
+    fi
+    if [ "$grants" != 1 ]; then
+        echo "ERROR: Admin client needs a direct global SUPER or SYSTEM_VARIABLES_ADMIN grant to change log_bin_trust_function_creators." >&2
+        return 1
+    fi
+    DB_TRIGGER_ADMIN_TRUST="${identity##*:}"
+}
+
+# Run a deliberately supplied database-admin client without putting a password
+# in update.sh or in the process arguments.  V2BOARD_DB_ADMIN_CMD should use a
+# protected defaults file, socket credentials, sudo, or an equivalent secret
+# mechanism.  SQL is sent through stdin and is limited to fixed statements in
+# the functions below.
+deploy_db_admin_sql() {
+    local sql="$1" command="${V2BOARD_DB_ADMIN_CMD:-}"
+
+    if [ -z "$command" ]; then
+        echo "ERROR: V2BOARD_DB_ADMIN_CMD is required for this database operation." >&2
+        return 1
+    fi
+    printf '%s\n' "$sql" | bash -c "$command"
+}
+
+deploy_db_trigger_prepare() {
+    local status
+
+    DB_TRIGGER_TRUST_CHANGED="${DB_TRIGGER_TRUST_CHANGED:-0}"
+    status="$(deploy_db_trigger_status)" || return 1
+    if [ "$status" = ready ]; then
+        return 0
+    fi
+
+    if [ -z "${V2BOARD_DB_ADMIN_CMD:-}" ]; then
+        echo "ERROR: cannot create audit triggers while MySQL binary logging is enabled." >&2
+        echo "Set V2BOARD_DB_ADMIN_CMD to a database-admin client and rerun the deployment." >&2
+        return 1
+    fi
+
+    deploy_db_admin_check "${status#*|}" || return 1
+    # Recheck just before changing it; never restore a setting already enabled
+    # by an operator. Do not run deployments sharing a database in parallel.
+    [ "$DB_TRIGGER_ADMIN_TRUST" = 0 ] || return 0
+    echo "Temporarily enabling log_bin_trust_function_creators for schema migration..."
+    # Record restoration before the write: a lost connection may hide a
+    # successful SET. EXIT must still try to put the original value back.
+    DB_TRIGGER_TRUST_CHANGED=1
+    deploy_db_admin_sql 'SET GLOBAL log_bin_trust_function_creators = 1;' >/dev/null || {
+        echo "ERROR: database-admin command could not enable log_bin_trust_function_creators." >&2
+        return 1
+    }
+    status="$(deploy_db_trigger_status)" || return 1
+    if [ "$status" != ready ]; then
+        echo "ERROR: log_bin_trust_function_creators did not become enabled." >&2
+        return 1
+    fi
+}
+
+deploy_db_trigger_restore() {
+    local restored
+    [ "${DB_TRIGGER_TRUST_CHANGED:-0}" = "1" ] || return 0
+
+    echo "Restoring log_bin_trust_function_creators=OFF..."
+    if ! restored="$(deploy_db_admin_sql 'SET GLOBAL log_bin_trust_function_creators = 0; SELECT @@GLOBAL.log_bin_trust_function_creators;')" || [ "${restored//$'\r'/}" != 0 ]; then
+        echo "ERROR: failed to restore log_bin_trust_function_creators=OFF." >&2
+        echo "A database administrator must restore it manually after checking the migration." >&2
+        return 1
+    fi
+    DB_TRIGGER_TRUST_CHANGED=0
+    return 0
+}
+
+deploy_schema_update() {
+    local migration_status=0 restore_status=0
+
+    if ! deploy_db_trigger_prepare; then
+        deploy_db_trigger_restore || true
+        return 1
+    fi
+    if deploy_php artisan v2board:update; then
+        migration_status=0
+    else
+        migration_status=$?
+    fi
+
+    if deploy_db_trigger_restore; then
+        restore_status=0
+    else
+        restore_status=$?
+    fi
+    if [ "$migration_status" -ne 0 ]; then
+        return "$migration_status"
+    fi
+    return "$restore_status"
+}
+
 deploy_function_is_enabled() {
     deploy_php -r "exit(function_exists('$1') ? 0 : 1);"
 }
