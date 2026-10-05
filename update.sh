@@ -6,7 +6,9 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/deploy-common.sh"
 
-WEBMAN_STOPPED="${WEBMAN_STOPPED:-0}"
+# Older update.sh versions only exported this marker after stopping Webman and
+# resetting Git. Recover their state too, not just state exported by new scripts.
+WEBMAN_STOPPED="${WEBMAN_STOPPED:-${V2BOARD_UPDATE_REEXECUTED:-0}}"
 WEBMAN_RESTARTED=0
 DB_TRIGGER_TRUST_CHANGED=0
 # 只在从没走到启动那一步时才兜底重启，否则一次失败的启动会被 trap 再跑一遍，
@@ -53,7 +55,7 @@ trap 'exit 129' HUP
 # 不会递归刷屏。**刻意不写 `set +e`** —— trap 里的 set 是会留下来的，那会让
 # `set -e` 在后面全程失效：失败一次之后脚本继续往下跑，最后还以退出码 0 结束，
 # 比现在这种静默掐断更糟（这个坑也是实测出来的）。
-DEPLOY_MUTATED="${DEPLOY_MUTATED:-0}"
+DEPLOY_MUTATED="${DEPLOY_MUTATED:-${V2BOARD_UPDATE_REEXECUTED:-0}}"
 DEPLOY_CURRENT_STEP="（还没进入部署主体，在前置检查阶段）"
 # 包一层只为把步骤名记牢并打出来。参数原样透传，退出码原样返回。
 deploy_step() {
@@ -88,6 +90,10 @@ deploy_report_failure() {
     } >&2
 }
 trap 'deploy_report_failure' ERR
+
+# A legacy re-exec may have lost the Supervisor details as well as the stopped
+# flag. Resolve the manager before any preflight can fail and invoke EXIT.
+deploy_recover_update_manager
 
 [ -d .git ] || {
     echo "ERROR: Please deploy using Git." >&2

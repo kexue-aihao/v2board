@@ -241,13 +241,16 @@ deploy_check_db_trigger_capability() {
 }
 
 deploy_db_admin_check() {
-    local expected="$1" output identity line grants=0
+    local expected="$1" output identity line grants=0 client_status
     local grant_pattern='^GRANT (.*) ON \*\.\* TO '
     local privilege_pattern='(^|, *)(SUPER|SYSTEM_VARIABLES_ADMIN|ALL PRIVILEGES)(,|$)'
-    output="$(deploy_db_admin_sql "SELECT CONCAT('v2board-db:', SHA2(CONCAT_WS('/', @@hostname, @@port, @@server_id, @@version), 256), ':', @@GLOBAL.log_bin_trust_function_creators + 0); SHOW GRANTS;" 2>/dev/null)" || {
-        echo "ERROR: Database admin client cannot connect/query. Check V2BOARD_DB_ADMIN_CMD and its protected credentials file." >&2
+    if output="$(deploy_db_admin_sql "SELECT CONCAT('v2board-db:', SHA2(CONCAT_WS('/', @@hostname, @@port, @@server_id, @@version), 256), ':', @@GLOBAL.log_bin_trust_function_creators + 0); SHOW GRANTS;" 2>&1)"; then
+        :
+    else
+        client_status=$?
+        deploy_db_admin_failure "$client_status" "$output"
         return 1
-    }
+    fi
     # The client must return raw rows (mysql --batch --skip-column-names).
     # Do not print SHOW GRANTS: MariaDB may include password hashes in it.
     while IFS= read -r line; do
@@ -269,6 +272,33 @@ deploy_db_admin_check() {
         return 1
     fi
     DB_TRIGGER_ADMIN_TRUST="${identity##*:}"
+}
+
+deploy_db_admin_failure() {
+    local client_status="$1" output="$2"
+    # Do not replay raw output: shell errors can contain command-line secrets,
+    # and SHOW GRANTS can contain MariaDB password hashes. Classify known errors.
+    if [ "$client_status" = 126 ] || [ "$client_status" = 127 ]; then
+        echo "ERROR: Database admin client was not found or is not executable." >&2
+        echo "Run: command -v mysql mariadb; use the installed client's full path in V2BOARD_DB_ADMIN_CMD." >&2
+    else
+        case "$output" in
+            *'required defaults file'*|*'defaults file handling'*|*'unknown variable'*|*'unknown option'*)
+                echo "ERROR: Database admin defaults file is missing, unreadable, or contains invalid client options." >&2
+                echo "Exporting V2BOARD_DB_ADMIN_CMD does not create the --defaults-extra-file file." >&2
+                echo "Create/configure that file outside the project with mode 600; see docs/deployment-db-triggers.md." >&2 ;;
+            *'ERROR 1045'*|*'ERROR 1698'*|*'Access denied'*)
+                echo "ERROR: Database admin authentication failed. Check the database user/password and permitted host in the defaults file." >&2
+                echo "The Linux root account is not the MySQL root account." >&2 ;;
+            *'ERROR 2002'*|*'ERROR 2003'*|*'ERROR 2005'*)
+                echo "ERROR: Database admin connection failed. Check host, port, socket and whether MySQL is running." >&2 ;;
+            *'ERROR 2026'*)
+                echo "ERROR: Database admin TLS connection failed. Check the client's CA/certificate and server TLS configuration." >&2 ;;
+            *)
+                echo "ERROR: Database admin query failed (client exit $client_status)." >&2 ;;
+        esac
+    fi
+    echo "Check the client directly with the same connection options and -e 'SELECT 1;' before retrying." >&2
 }
 
 # Run a deliberately supplied database-admin client without putting a password
@@ -318,6 +348,26 @@ deploy_db_trigger_prepare() {
         echo "ERROR: log_bin_trust_function_creators did not become enabled." >&2
         return 1
     fi
+}
+
+# An old update.sh stopped Webman before fetching the new update.sh, but did not
+# export the Supervisor manager state across exec. Recover it from Supervisor's
+# live/configured view before a new preflight can fail and run EXIT cleanup.
+deploy_recover_update_manager() {
+    [ "${WEBMAN_STOPPED:-0}" = 1 ] || return 0
+    [ -z "${WEBMAN_MANAGER:-}" ] || return 0
+
+    local sc program
+    if sc="$(deploy_supervisorctl_bin 2>/dev/null)" \
+       && program="$(deploy_supervisor_program 2>/dev/null)" \
+       && deploy_supervisor_knows_program "$sc" "$(deploy_supervisor_target "$program")"; then
+        SUPERVISORCTL_BIN="$sc"
+        SUPERVISOR_PROGRAM="$program"
+        SUPERVISOR_TARGET="$(deploy_supervisor_target "$program")"
+        WEBMAN_MANAGER=supervisor
+        echo "Recovered Supervisor Webman state across update.sh restart: $SUPERVISOR_TARGET"
+    fi
+    return 0
 }
 
 deploy_db_trigger_restore() {
@@ -864,7 +914,9 @@ deploy_supervisor_target() {
 # supervisorctl status 对 FATAL / STOPPED 的程序返回非 0 退出码，用退出码判断会把
 # 「程序存在但没在跑」误判成「没有这个程序」，于是掉回手工分支去和 supervisord 抢端口。
 deploy_supervisor_knows_program() {
-    "$1" status "$2" 2>/dev/null | grep -qE 'RUNNING|STOPPED|STARTING|BACKOFF|FATAL|EXITED|STOPPING|UNKNOWN'
+    local output
+    output="$("$1" status "$2" 2>/dev/null || true)"
+    grep -qE 'RUNNING|STOPPED|STARTING|BACKOFF|FATAL|EXITED|STOPPING|UNKNOWN' <<< "$output"
 }
 
 deploy_supervisor_running() {

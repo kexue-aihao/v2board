@@ -15,7 +15,8 @@ trust，迁移成功、失败或收到 INT/TERM/HUP 后都尝试恢复原值。�
 先在项目目录之外创建仅部署用户可读的文件；以 root 部署时：
 
 ```bash
-install -m 600 /dev/null /root/v2board-db-admin.cnf
+(umask 077; touch /root/v2board-db-admin.cnf)
+chmod 600 /root/v2board-db-admin.cnf
 vi /root/v2board-db-admin.cnf
 ```
 
@@ -36,6 +37,7 @@ password="填写数据库管理员密码"
 
 ```bash
 export V2BOARD_DB_ADMIN_CMD='mysql --defaults-extra-file=/root/v2board-db-admin.cnf --batch --skip-column-names'
+mysql --defaults-extra-file=/root/v2board-db-admin.cnf --batch --skip-column-names -e 'SELECT 1;'
 DEPLOY_CHECK_ONLY=1 bash ./update.sh
 bash ./update.sh
 ```
@@ -48,6 +50,31 @@ bash ./update.sh
 
 两个触发器创建完成后，后续部署会识别它们，可直接使用 `bash ./update.sh`。
 脚本按当前检出的代码做前置检查；首次取得这个修复时需先拉取并检出更新后的文件。
+
+## 管理员连接失败排查
+
+`export V2BOARD_DB_ADMIN_CMD=...` 只指定命令，不会创建配置文件或填入数据库密码。
+先执行上面的 `SELECT 1`，成功返回 `1` 后再部署。脚本会区分以下常见原因：
+
+- 客户端不存在或不可执行：运行 `command -v mysql mariadb`，使用实际客户端路径。
+- defaults 文件缺失、不可读或选项错误：按上面的步骤创建并填写文件，检查 `[client]`。
+- `1045/1698`：数据库认证失败，检查数据库管理员密码和允许连接的 host。
+- `2002/2003/2005`：检查数据库地址、端口、socket 和服务状态。
+- `2026`：检查客户端 TLS 设置、CA 及证书。
+
+脚本不会把原始客户端输出或 `SHOW GRANTS` 写入部署日志，避免泄露命令里的密码或
+MariaDB 的认证哈希。直接执行 `SELECT 1` 能看到客户端的具体错误，不要分享密码文件内容。
+
+若从旧版脚本升级时已经出现 `webman: stopped`，而退出前没有重新启动服务，先执行：
+
+```bash
+supervisorctl start 'webman:*'
+supervisorctl status 'webman:*'
+```
+
+这对应本文事故中的 Supervisor 组名，其他部署使用自己的组名。新版已兼容旧脚本
+只传递重执行标记的路径：前置检查失败也会尝试恢复已停止的服务，并报告部署已部分执行。
+先修好管理员连接，再重新部署；恢复 Webman 不代表数据库迁移已经完成。
 
 ## 无管理员连接时
 
