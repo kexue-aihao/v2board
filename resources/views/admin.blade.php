@@ -52,7 +52,19 @@
 </head>
 
 <body>
-<div id="root"></div>
+<div id="admin-startup" class="admin-startup" role="status" aria-live="polite" aria-atomic="true">
+    <div class="admin-startup__content">
+        <div class="admin-startup__indicator" aria-hidden="true">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" focusable="false">
+                <path d="M12 3 4.5 6v5.5c0 4.2 2.8 7.3 7.5 9.5 4.7-2.2 7.5-5.3 7.5-9.5V6L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                <path d="m8.5 11.8 2.3 2.3 4.7-4.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </div>
+        <p id="admin-startup-title" class="admin-startup__title">正在加载权限</p>
+        <p id="admin-startup-message" class="admin-startup__message">正在为您准备管理后台，请稍候</p>
+    </div>
+</div>
+<div id="root" aria-busy="true"></div>
 {{-- 覆盖翻译层必须是 body 内第一个脚本：fetch/XHR 的 Content-Language 补丁
      要抢在应用（含 2FA 覆盖层的裸 fetch）发出首个请求之前装好。 --}}
 <script src="/assets/admin/i18n.js?v={{$adminAssetVersion}}"></script>

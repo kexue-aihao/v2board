@@ -19,7 +19,8 @@ const labels = {
     '/reward': '签到与娱乐', '/risk/trace': '订阅溯源', '/risk/gateway': '订阅清洗网关', '/risk/shared-ip': '多账号同 IP',
     '/queue': '队列监控', '/security/account': '账号安全', '/security/audit': '安全审计',
 };
-const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/admin/umi.css"><link rel="stylesheet" href="/assets/admin/components.chunk.css"></head><body><div id="root"></div><script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};</script><script src="/assets/admin/security-loader.js"></script></body></html>';
+const startupMarkup = fs.readFileSync(path.join(root, 'resources/views/admin.blade.php'), 'utf8').match(/<div id="admin-startup"[\s\S]*?<div id="root"[^>]*><\/div>/)[0];
+const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/admin/umi.css"><link rel="stylesheet" href="/assets/admin/components.chunk.css"><link rel="stylesheet" href="/assets/admin/custom.css"></head><body>' + startupMarkup + '<script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};</script><script src="/assets/admin/security-loader.js"></script></body></html>';
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/test') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.end(html); }
@@ -31,25 +32,38 @@ const server = http.createServer((req, res) => {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const browser = await chromium.launch({headless: true});
     try {
-        for (const role of (process.env.ADMIN_TEST_ROLE ? [process.env.ADMIN_TEST_ROLE] : ['guest', ...Object.keys(roles)])) {
-            const context = await browser.newContext({viewport: {width: role === 'support' ? 390 : 1440, height: 1000}});
+        for (const role of (process.env.ADMIN_TEST_ROLE ? [process.env.ADMIN_TEST_ROLE] : ['guest', 'guest2fa', ...Object.keys(roles)])) {
+            const isGuest = role === 'guest' || role === 'guest2fa';
+            const context = await browser.newContext({viewport: {width: role === 'support' ? 390 : 1440, height: 1000}, reducedMotion: role === 'support' ? 'reduce' : 'no-preference'});
             const page = await context.newPage(), errors = [], calls = [];
+            let releaseBootstrap, releaseAsset, notifyBootstrap, notifyAsset;
+            const bootstrapGate = new Promise(resolve => { releaseBootstrap = resolve; });
+            const assetGate = new Promise(resolve => { releaseAsset = resolve; });
+            const bootstrapRequested = new Promise(resolve => { notifyBootstrap = resolve; });
+            const assetRequested = new Promise(resolve => { notifyAsset = resolve; });
             const edits = [], userDefaults = {transfer_enable: 107374182400, u: 0, d: 0, total_used: 0, balance: 0, commission_balance: 0, device_limit: 6, expired_at: null, plan_id: null, banned: 0, commission_type: 0, commission_rate: null, discount: null, speed_limit: null, is_staff: 0, admin_version: 1, created_at: 1700000000, updated_at: 1700000000, alive_ip: 0, subscribe_url: 'https://example.test/subscribe', remarks: ''};
             const users = [Object.assign({}, userDefaults, {id: 6, email: 'member@example.test', is_admin: 0, admin_role: null}), Object.assign({}, userDefaults, {id: 1, email: 'founder@example.test', is_admin: 1, admin_role: null})];
             const order = {id: 10, trade_no: 'TEST-ORDER-123', user_id: 6, invite_user_id: 8, plan_id: 1, plan_name: '测试套餐', period: 'month_price', type: 1, status: 3, total_amount: 1000, balance_amount: 0, discount_amount: 0, refund_amount: 0, surplus_amount: 0, commission_balance: 100, commission_status: 0, created_at: 1700000000, updated_at: 1700000000, commission_log: [], user: {id: 6, email: 'buyer@example.test'}, invite_user: {id: 8, email: 'inviter@example.test'}};
             page.on('pageerror', error => { errors.push(error.message); console.error(role, error.message); });
             if (process.env.ADMIN_BROWSER_DEBUG) page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
-            if (role !== 'guest') await page.addInitScript(() => localStorage.setItem('authorization', 'fixture'));
+            if (!isGuest) await page.addInitScript(() => localStorage.setItem('authorization', 'fixture'));
             await page.route('**/api/v1/test/**', async route => {
                 const url = new URL(route.request().url()), endpoint = url.pathname.replace('/api/v1/test', ''); calls.push(endpoint);
                 if (process.env.ADMIN_BROWSER_DEBUG) console.log(role, route.request().method(), url.pathname + url.search);
-                const currentRole = role === 'guest' ? 'operations' : role;
+                const currentRole = isGuest ? 'operations' : role;
                 let body = {data: [], total: 0};
-                if (endpoint === '/security/bootstrap') body.data = {role: currentRole, version: 1, role_label: currentRole, menus: roles[currentRole][1].map(href => ({href, title: labels[href] || href, type: 'item'})), landing: roles[currentRole][0], debug_exempt: true};
-                else if (endpoint === '/security/asset') return route.fulfill({contentType: 'application/javascript', body: fs.readFileSync(path.join(root, 'resources/admin/build', currentRole + '.js'), 'utf8')});
+                if (endpoint === '/security/bootstrap') {
+                    notifyBootstrap(); await bootstrapGate;
+                    body.data = {role: currentRole, version: 1, role_label: currentRole, menus: roles[currentRole][1].map(href => ({href, title: labels[href] || href, type: 'item'})), landing: roles[currentRole][0], debug_exempt: true};
+                }
+                else if (endpoint === '/security/asset') {
+                    notifyAsset(); await assetGate;
+                    return route.fulfill({contentType: 'application/javascript', body: fs.readFileSync(path.join(root, 'resources/admin/build', currentRole + '.js'), 'utf8')});
+                }
                 else if (endpoint === '/user/info') body.data = {email: 'admin@example.test'};
                 else if (endpoint === '/user/checkLogin') body.data = {is_login: true, is_admin: true};
-                else if (endpoint === '/passport/auth/login') body.data = {auth_data: 'logged-in', is_admin: true};
+                else if (endpoint === '/passport/auth/login') body.data = role === 'guest2fa' ? {two_factor_required: true, challenge: 'fixture-challenge'} : {auth_data: 'logged-in', is_admin: true};
+                else if (endpoint === '/passport/auth/verify2fa') body.data = {auth_data: 'logged-in', is_admin: true};
                 else if (endpoint === '/security/audit') body = {data: [{id: 1, actor_id: 1, role: 'super', role_label: '超级管理员', event: 'request.finish', description: '修改用户资料（ID 6）', result: 'success', result_label: '成功', created_at: 1700000000, payload: JSON.stringify({description: '修改用户资料（ID 6）'})}], total: 1};
                 else if (endpoint === '/user/fetch') body = {data: users, total: users.length};
                 else if (endpoint === '/user/getUserInfoById') body.data = users.find(user => Number(user.id) === Number(url.searchParams.get('id')));
@@ -73,14 +87,36 @@ const server = http.createServer((req, res) => {
                 else if (endpoint === '/ticket/fetch') body = url.searchParams.has('id') ? {data: {id: 2, subject: '工单测试', message: [{id: 1, message: '需要帮助', created_at: 1, is_me: false}]}} : {data: [{id: 2, subject: '工单测试', status: 0}], total: 1};
                 await route.fulfill({contentType: 'application/json', body: JSON.stringify(body)});
             });
-            await page.goto('http://127.0.0.1:' + server.address().port + '/test#' + (role === 'guest' ? '/login' : roles[role][0]));
-            if (role === 'guest') {
+            await page.goto('http://127.0.0.1:' + server.address().port + '/test#' + (isGuest ? '/login' : roles[role][0]));
+            if (isGuest) {
                 await page.locator('input[type=password]').waitFor();
+                await page.locator('#admin-startup').waitFor({state: 'detached'});
                 await page.locator('input[type=text]').fill('admin@example.test'); await page.locator('input[type=password]').fill('testpassword');
                 await page.getByRole('button', {name: '登入'}).click();
-                await page.locator('#sidebar').waitFor();
-            } else {
-                await page.locator('#sidebar').waitFor();
+                if (role === 'guest2fa') {
+                    await page.getByPlaceholder('000000 或 XXXX-XXXX-XXXX', {exact: true}).fill('123456');
+                    await page.getByRole('button', {name: '验证并继续', exact: true}).click();
+                }
+            }
+            await bootstrapRequested;
+            const startup = page.locator('#admin-startup');
+            await startup.waitFor();
+            assert.equal(await page.locator('#admin-startup-title').textContent(), '正在加载权限');
+            assert.equal(await page.locator('#root').getAttribute('aria-busy'), 'true');
+            assert.equal(await page.locator('.admin-startup__indicator').evaluate(el => getComputedStyle(el, '::before').animationName), role === 'support' ? 'none' : 'admin-startup-spin');
+            if (process.env.ADMIN_SCREENSHOT_DIR && ['super', 'support'].includes(role)) {
+                fs.mkdirSync(process.env.ADMIN_SCREENSHOT_DIR, {recursive: true});
+                await page.screenshot({path: path.join(process.env.ADMIN_SCREENSHOT_DIR, role === 'super' ? 'startup-permissions.png' : 'startup-permissions-mobile.png')});
+            }
+            releaseBootstrap();
+            await assetRequested;
+            assert.equal(await page.locator('#admin-startup-title').textContent(), '正在进入管理后台');
+            assert.ok(await startup.isVisible(), 'loading remains visible while role script is pending');
+            releaseAsset();
+            await page.locator('#sidebar').waitFor();
+            await startup.waitFor({state: 'detached'});
+            assert.equal(await page.locator('#root').getAttribute('aria-busy'), null);
+            if (!isGuest) {
                 const links = await page.locator('#sidebar .nav-main-link-name').allTextContents();
                 assert.deepEqual(links, roles[role][1].map(href => labels[href] || href), role + ' menus');
                 await page.evaluate(() => document.fonts.ready);
@@ -196,6 +232,34 @@ const server = http.createServer((req, res) => {
             }
             assert.deepEqual(errors, [], role + ' browser errors');
             console.log(role + ': browser passed (' + calls.length + ' requests)');
+            await context.close();
+        }
+        if (!process.env.ADMIN_TEST_ROLE) for (const scenario of ['bootstrap-failure', 'asset-failure', 'expired-session']) {
+            const context = await browser.newContext(), page = await context.newPage(), calls = [], errors = [];
+            await page.addInitScript(() => localStorage.setItem('authorization', 'fixture'));
+            page.on('pageerror', error => errors.push(error.message));
+            await page.route('**/api/v1/test/**', async route => {
+                const endpoint = new URL(route.request().url()).pathname.replace('/api/v1/test', ''); calls.push(endpoint);
+                if ((scenario === 'bootstrap-failure' && endpoint === '/security/bootstrap') || (scenario === 'asset-failure' && endpoint === '/security/asset')) {
+                    return route.fulfill({status: 503, contentType: 'application/json', body: JSON.stringify({message: '后台加载失败，请刷新重试'})});
+                }
+                if (scenario === 'expired-session') return route.fulfill({status: 403, contentType: 'application/json', body: JSON.stringify({message: '登录已过期'})});
+                return route.fulfill({contentType: 'application/json', body: JSON.stringify({data: {role: 'operations', version: 1, debug_exempt: true, landing: roles.operations[0], menus: roles.operations[1].map(href => ({href, title: labels[href], type: 'item'}))}})});
+            });
+            await page.goto('http://127.0.0.1:' + server.address().port + '/test#/server/manage');
+            if (scenario === 'expired-session') {
+                await page.locator('input[type=password]').waitFor();
+                assert.equal(await page.evaluate(() => localStorage.getItem('authorization')), null);
+                assert.ok(!calls.includes('/security/asset'), 'expired session does not load role resources');
+            } else {
+                await page.getByRole('alert').waitFor();
+                assert.equal(await page.getByRole('alert').textContent(), '后台加载失败，请刷新重试');
+                if (scenario === 'bootstrap-failure') assert.ok(!calls.includes('/security/asset'));
+            }
+            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.locator('#root').getAttribute('aria-busy'), null);
+            assert.deepEqual(errors, [], scenario + ' browser errors');
+            console.log(scenario + ': browser passed');
             await context.close();
         }
     } finally { await browser.close(); server.close(); }

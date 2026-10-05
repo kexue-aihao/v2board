@@ -43,6 +43,71 @@
   --v2-motion: 160ms ease;
 }
 
+/* 登录刷新后的角色资源加载期间保留可见内容，React 页面就绪后淡出。 */
+.admin-startup {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f0f3f8;
+  color: #334155;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  text-align: center;
+  opacity: 1;
+  transition: opacity 160ms ease;
+}
+
+.admin-startup.is-finished {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.admin-startup__indicator {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 24px;
+  color: #0665d0;
+}
+
+.admin-startup__indicator::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 3px solid #dbe6f3;
+  border-top-color: #0665d0;
+  border-radius: 50%;
+  animation: admin-startup-spin 900ms linear infinite;
+}
+
+.admin-startup__title {
+  margin: 0 0 8px;
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.admin-startup__message {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+@keyframes admin-startup-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-startup { transition: none; }
+  .admin-startup__indicator::before { animation: none; }
+}
+
 /* Embedded ticket workspace（功能布局，保留）。
    工单页的「列表 + 会话」双栏工作台是 umi.js 补丁渲染的自有 DOM（v2-ticket-* 类只在
    本文件有样式），删掉这段整页布局即散架。原金色点缀已随视觉体系一并中性化：改动只有
