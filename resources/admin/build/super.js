@@ -21707,7 +21707,51 @@
             constructor(e) {
                 super(e),
                 this.state = {
-                    nav: window.adminSecurity.menus
+                    nav: (function(){var icons={"/dashboard":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-speedometer"
+                        }),"/config/system":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-equalizer"
+                        }),"/config/payment":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-credit-card"
+                        }),"/config/theme":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-magic-wand"
+                        }),"/server/manage":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-layers"
+                        }),"/server/group":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-wrench"
+                        }),"/server/route":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-shuffle"
+                        }),"/plan":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-bag"
+                        }),"/order":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-list"
+                        }),"/coupon":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-present"
+                        }),"/giftcard":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-star"
+                        }),"/user":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-users"
+                        }),"/notice":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-speech"
+                        }),"/ticket":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-support"
+                        }),"/knowledge":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-bulb"
+                        }),"/reseller":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-layers"
+                        }),"/external":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-link"
+                        }),"/reward":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-game-controller"
+                        }),"/risk/trace":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-magnifier"
+                        }),"/risk/gateway":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-shield"
+                        }),"/risk/shared-ip":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-share-alt"
+                        }),"/queue":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-bar-chart"
+                        }),"/security/administrators":o.a.createElement("i",{className:"nav-main-link-icon si si-users"}),"/security/audit":o.a.createElement("i",{className:"nav-main-link-icon si si-notebook"}),"/security/account":o.a.createElement("i",{className:"nav-main-link-icon si si-lock"})};return window.adminSecurity.menus.map(function(menu){return Object.assign({},menu,{icon:icons[menu.href]});});})()
                 }
             }
             componentDidMount() {}

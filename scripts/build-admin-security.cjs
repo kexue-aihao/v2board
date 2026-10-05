@@ -106,9 +106,39 @@ function compile(role) {
             if (!models.includes(namespace)) replace(node, 'void 0');
         },
     }));
-    modules.Bl7J = edit(modules.Bl7J, (ast, replace) => walk.simple(ast, {
-        Property(node) { if (propertyName(node) === 'nav' && node.value.type === 'ArrayExpression') replace(node.value, 'window.adminSecurity.menus'); },
+    let menuEdits = 0;
+    modules.Bl7J = edit(modules.Bl7J, (ast, replace, wrapped) => walk.simple(ast, {
+        Property(node) {
+            if (propertyName(node) !== 'nav' || node.value.type !== 'ArrayExpression') return;
+            // Bootstrap selects the visible entries. Restore their original React
+            // icons locally, and keep other roles' menu metadata out of the bundle.
+            const icons = [];
+            let createElement;
+            for (const item of node.value.elements) {
+                const href = item.properties.find(p => propertyName(p) === 'href');
+                if (!href) continue;
+                const icon = item.properties.find(p => propertyName(p) === 'icon');
+                if (!icon || icon.value.type !== 'CallExpression' || icon.value.callee.type !== 'MemberExpression'
+                    || (icon.value.callee.property.name ?? icon.value.callee.property.value) !== 'createElement') {
+                    throw new Error('Unexpected menu icon for ' + href.value.value);
+                }
+                createElement = wrapped.slice(icon.value.callee.start, icon.value.callee.end);
+                if ((pageRoles[href.value.value] || []).includes(role)) {
+                    icons.push(JSON.stringify(href.value.value) + ':' + wrapped.slice(icon.value.start, icon.value.end));
+                }
+            }
+            if (!createElement) throw new Error('Menu icon extraction failed');
+            const securityIcons = role === 'super'
+                ? {'/security/administrators': 'si-users', '/security/audit': 'si-notebook', '/security/account': 'si-lock'}
+                : role === 'guest' ? {} : {'/security/account': 'si-lock'};
+            for (const [href, icon] of Object.entries(securityIcons)) {
+                icons.push(JSON.stringify(href) + ':' + createElement + '("i",{className:"nav-main-link-icon si ' + icon + '"})');
+            }
+            replace(node.value, '(function(){var icons={' + icons.join(',') + '};return window.adminSecurity.menus.map(function(menu){return Object.assign({},menu,{icon:icons[menu.href]});});})()');
+            menuEdits++;
+        },
     }));
+    if (menuEdits !== 1) throw new Error('Expected one administrator menu');
     if (role !== 'super') modules.hlQx = selfModel();
     if (role === 'finance') modules.GmDa = modelEffects(modules.GmDa, ['fetch'], {'/plan/fetch': '/security/options/plans'});
     if (role === 'finance') modules.pi3A = edit(modules.pi3A, (ast, replace, wrapped) => walk.simple(ast, {

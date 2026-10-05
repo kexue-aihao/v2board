@@ -5580,7 +5580,9 @@
             constructor(e) {
                 super(e),
                 this.state = {
-                    nav: window.adminSecurity.menus
+                    nav: (function(){var icons={"/ticket":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-support"
+                        }),"/security/account":o.a.createElement("i",{className:"nav-main-link-icon si si-lock"})};return window.adminSecurity.menus.map(function(menu){return Object.assign({},menu,{icon:icons[menu.href]});});})()
                 }
             }
             componentDidMount() {}

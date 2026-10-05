@@ -12084,7 +12084,15 @@
             constructor(e) {
                 super(e),
                 this.state = {
-                    nav: window.adminSecurity.menus
+                    nav: (function(){var icons={"/plan":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-bag"
+                        }),"/coupon":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-present"
+                        }),"/giftcard":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-star"
+                        }),"/reward":o.a.createElement("i", {
+                            className: "nav-main-link-icon si si-game-controller"
+                        }),"/security/account":o.a.createElement("i",{className:"nav-main-link-icon si si-lock"})};return window.adminSecurity.menus.map(function(menu){return Object.assign({},menu,{icon:icons[menu.href]});});})()
                 }
             }
             componentDidMount() {}

@@ -6,12 +6,19 @@ const http = require('node:http');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '../..');
 const roles = {
-    super: ['/security/administrators', ['/security/administrators', '/security/audit', '/security/account']],
+    super: ['/security/administrators', ['/dashboard', '/config/system', '/config/payment', '/config/theme', '/server/manage', '/server/group', '/server/route', '/plan', '/order', '/coupon', '/giftcard', '/user', '/notice', '/ticket', '/knowledge', '/reseller', '/external', '/reward', '/risk/trace', '/risk/gateway', '/risk/shared-ip', '/queue', '/security/administrators', '/security/audit', '/security/account']],
     operations: ['/server/manage', ['/config/system', '/config/payment', '/config/theme', '/server/manage', '/server/group', '/server/route', '/risk/trace', '/risk/gateway', '/risk/shared-ip', '/security/account']],
     finance: ['/order', ['/order', '/security/account']], support: ['/ticket', ['/ticket', '/security/account']],
     marketing: ['/plan', ['/plan', '/coupon', '/giftcard', '/reward', '/security/account']],
 };
-const labels = {'/server/manage': '节点管理', '/order': '订单管理', '/plan': '订阅管理', '/ticket': '工单管理', '/security/account': '账号安全', '/security/administrators': '管理员权限', '/security/audit': '安全审计'};
+const labels = {
+    '/dashboard': '仪表盘', '/config/system': '系统配置', '/config/payment': '支付配置', '/config/theme': '主题配置',
+    '/server/manage': '节点管理', '/server/group': '权限组管理', '/server/route': '路由管理', '/order': '订单管理',
+    '/plan': '订阅管理', '/coupon': '优惠券管理', '/giftcard': '礼品卡管理', '/user': '用户管理', '/notice': '公告管理',
+    '/ticket': '工单管理', '/knowledge': '知识库管理', '/reseller': '倒卖商管理', '/external': '外部订阅源',
+    '/reward': '签到与娱乐', '/risk/trace': '订阅溯源', '/risk/gateway': '订阅清洗网关', '/risk/shared-ip': '多账号同 IP',
+    '/queue': '队列监控', '/security/account': '账号安全', '/security/administrators': '管理员权限', '/security/audit': '安全审计',
+};
 const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/admin/umi.css"><link rel="stylesheet" href="/assets/admin/components.chunk.css"></head><body><div id="root"></div><script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};</script><script src="/assets/admin/security-loader.js"></script></body></html>';
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -62,6 +69,20 @@ const server = http.createServer((req, res) => {
                 await page.locator('#sidebar').waitFor();
                 const links = await page.locator('#sidebar .nav-main-link-name').allTextContents();
                 assert.deepEqual(links, roles[role][1].map(href => labels[href] || href), role + ' menus');
+                await page.evaluate(() => document.fonts.ready);
+                const icons = await page.locator('#sidebar .nav-main-link').evaluateAll(links => links.map(link => {
+                    const icons = link.querySelectorAll('.nav-main-link-icon'), icon = icons[0];
+                    return {title: link.textContent, count: icons.length, tag: icon && icon.tagName,
+                        font: icon && getComputedStyle(icon, '::before').fontFamily,
+                        content: icon && getComputedStyle(icon, '::before').content};
+                }));
+                for (const icon of icons) {
+                    assert.equal(icon.count, 1, role + ' ' + icon.title + ' has one menu icon');
+                    assert.equal(icon.tag, 'I');
+                    assert.match(icon.font, /simple-line-icons/i);
+                    assert.ok(icon.content && !['none', 'normal', '""'].includes(icon.content), icon.title + ' has an icon glyph');
+                }
+                assert.equal(await page.locator('#sidebar .nav-main-link.active .nav-main-link-name').textContent(), labels[roles[role][0]], role + ' active menu');
                 if (role === 'support') {
                     await page.getByRole('link', {name: '阅读与回复'}).click(); await page.locator('#support-reply').fill('已收到，我们会处理。');
                     await Promise.all([page.waitForResponse(r => r.url().endsWith('/ticket/reply')), page.getByRole('button', {name: '回复工单', exact: true}).click()]);
@@ -91,6 +112,7 @@ const server = http.createServer((req, res) => {
                 }
                 await page.evaluate(() => { location.hash = '/security/account'; });
                 await page.getByRole('heading', {name: '修改密码'}).waitFor();
+                assert.equal(await page.locator('#sidebar .nav-main-link.active .nav-main-link-name').textContent(), '账号安全', role + ' active menu after navigation');
                 if (role !== 'super') {
                     await page.evaluate(() => { location.hash = '/user'; });
                     await page.waitForFunction(expected => location.hash === '#' + expected, roles[role][0]);

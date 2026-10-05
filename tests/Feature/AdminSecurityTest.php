@@ -61,6 +61,9 @@ class AdminSecurityTest extends TestCase
             $headers = $this->headers($id);
             $bootstrap = $this->getJson($this->base . '/security/bootstrap', $headers)->assertOk()->assertJsonPath('data.role', $role)->assertJsonPath('data.landing', $landing);
             $menus = array_column($bootstrap->json('data.menus'), 'href');
+            if ($role === 'super') {
+                $this->assertSame(['type' => 'item', 'title' => '仪表盘', 'href' => '/dashboard'], $bootstrap->json('data.menus')[0]);
+            }
             if ($role !== 'super') {
                 $this->assertNotContains('/security/audit', $menus);
                 $this->assertNotContains('/user', $menus);

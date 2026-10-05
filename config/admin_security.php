@@ -14,7 +14,8 @@ return [
         'marketing' => '运营管理员',
     ],
     'pages' => [
-        ['仪表盘', '/dashboard', '总览', ['super']],
+        // The dashboard is the first standalone entry in the original sidebar.
+        ['仪表盘', '/dashboard', null, ['super']],
         ['系统配置', '/config/system', '设置', ['super', 'operations']],
         ['支付配置', '/config/payment', '设置', ['super', 'operations']],
         ['主题配置', '/config/theme', '设置', ['super', 'operations']],
