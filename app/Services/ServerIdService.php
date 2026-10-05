@@ -96,21 +96,23 @@ class ServerIdService
 
         (new RatePolicyService())->mutate(function () use ($table, $type, $statTypes, $oldId, $newId) {
             DB::transaction(function () use ($table, $type, $statTypes, $oldId, $newId) {
-                DB::table($table)->where('id', $oldId)->update(['id' => $newId]);
-                DB::table($table)->where('parent_id', $oldId)->update(['parent_id' => $newId]);
-                DB::table('v2_stat_server')
+                SecurityAuditMutation::update(DB::table($table)->where('id', $oldId), ['id' => $newId]);
+                SecurityAuditMutation::update(DB::table($table)->where('parent_id', $oldId), ['parent_id' => $newId]);
+                $affectedStats = DB::table('v2_stat_server')
                     ->where('server_id', $oldId)
                     ->whereIn('server_type', $statTypes)
                     ->update(['server_id' => $newId]);
+                SecurityAuditService::effect('迁移节点流量统计关联', ['节点协议' => $type, '旧节点编号' => $oldId, '新节点编号' => $newId, '数量' => $affectedStats]);
                 if ((new RatePolicyService())->ready()) {
-                    DB::table('v2_rate_node_policy')->where('node_type', $type)->where('node_id', $newId)->delete();
-                    DB::table('v2_rate_node_policy')->where('node_type', $type)->where('node_id', $oldId)->update(['node_id' => $newId]);
-                    DB::table(DynamicRateService::TABLE_RULE)->where('scope', 'node')->where('node_type', $type)->where('node_id', $oldId)->update(['node_id' => $newId]);
+                    SecurityAuditMutation::delete(DB::table('v2_rate_node_policy')->where('node_type', $type)->where('node_id', $newId), 'node_id');
+                    SecurityAuditMutation::update(DB::table('v2_rate_node_policy')->where('node_type', $type)->where('node_id', $oldId), ['node_id' => $newId], 'node_id');
+                    SecurityAuditMutation::update(DB::table(DynamicRateService::TABLE_RULE)->where('scope', 'node')->where('node_type', $type)->where('node_id', $oldId), ['node_id' => $newId]);
                 }
             });
         });
 
         self::migrateCacheKeys($type, $oldId, $newId);
+        SecurityAuditService::effect('迁移节点运行缓存', ['节点协议' => $type, '旧节点编号' => $oldId, '新节点编号' => $newId], 'success', true);
 
         $keyName = $server->getKeyName();
         $server->setAttribute($keyName, $newId);

@@ -106,7 +106,7 @@ class OrderService
         DB::beginTransaction();
         if ($order->surplus_order_ids) {
             try {
-                Order::whereIn('id', $order->surplus_order_ids)->update([
+                SecurityAuditMutation::update(Order::whereIn('id', $order->surplus_order_ids), [
                     'status' => 4
                 ]);
             } catch (\Exception $e) {
@@ -428,9 +428,8 @@ class OrderService
                 // —— 这与四个调用方控制器里既有的 `status !== 0` 前置检查一致，此处在行锁内强制执行。
                 if ((int)$order->status !== 0) return false;
                 // 原子状态跃迁：并发下只有一个请求能命中 status=0 并把它改成 2，其余影响行数为 0。
-                $affected = Order::where('id', $order->id)
-                    ->where('status', 0)
-                    ->update(['status' => 2]);
+                $affected = SecurityAuditMutation::update(Order::where('id', $order->id)
+                    ->where('status', 0), ['status' => 2]);
                 if ($affected !== 1) return false;
                 $order->status = 2;
                 $this->order = $order;

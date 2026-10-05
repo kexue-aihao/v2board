@@ -49,6 +49,7 @@ class RewardController extends Controller
             }
         }
         $config = config('v2board');
+        $previousConfig = $config;
         foreach ($data as $key => $value) {
             $config[$key] = str_ends_with($key, '_payout_multiplier') || str_ends_with($key, '_win_probability')
                 ? number_format((float)$value, 2, '.', '')
@@ -58,6 +59,7 @@ class RewardController extends Controller
             abort(500, '保存奖励配置失败，请检查 config 目录写入权限');
         }
         $cacheError = null;
+        \App\Services\SecurityAuditService::fileChanged('settings', '签到与娱乐', $previousConfig, $config);
         try {
             if (Artisan::call('config:cache') !== 0) {
                 $cacheError = 'config:cache returned a non-zero exit code';

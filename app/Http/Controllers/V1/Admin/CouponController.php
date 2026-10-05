@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\V1\Admin;
 
+use App\Services\SecurityAuditMutation;
+
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\CouponGenerate;
 use App\Http\Requests\Admin\CouponSave;
@@ -87,7 +89,7 @@ class CouponController extends Controller
             array_push($coupons, $coupon);
         }
         DB::beginTransaction();
-        if (!Coupon::insert(array_map(function ($item) use ($coupon) {
+        if (!SecurityAuditMutation::insert(Coupon::query(), array_map(function ($item) use ($coupon) {
             // format data
             if (isset($item['limit_plan_ids']) && is_array($item['limit_plan_ids'])) {
                 $item['limit_plan_ids'] = json_encode($coupon['limit_plan_ids']);

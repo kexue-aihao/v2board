@@ -29,6 +29,13 @@ class SendEmailJob implements ShouldQueue
         $this->params = $params;
     }
 
+    public function auditMetadata(): array
+    {
+        return ['email' => $this->params['email'] ?? null, 'subject' => \App\Services\SecurityAuditBusiness::text($this->params['subject'] ?? ''),
+            'template_name' => $this->params['template_name'] ?? null,
+            'body_length' => mb_strlen((string)($this->params['template_value']['content'] ?? ''))];
+    }
+
     /**
      * Execute the job.
      *
@@ -60,7 +67,10 @@ class SendEmailJob implements ShouldQueue
             );
         } catch (\Exception $e) {
             $error = $e->getMessage();
+            \App\Services\SecurityAuditService::result(['state' => 'failure', 'reason' => '邮件发送服务未接受发送，请按异常类型排查', 'exception_type' => get_class($e)]);
         }
+
+        \App\Services\SecurityAuditService::effect(isset($error) ? '邮件发送失败' : '邮件发送服务已接受', $this->auditMetadata(), isset($error) ? 'failure' : 'success', true);
 
         $log = [
             'email' => $params['email'],

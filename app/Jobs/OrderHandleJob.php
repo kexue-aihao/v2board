@@ -79,4 +79,9 @@ class OrderHandleJob implements ShouldQueue
             'error' => $e->getMessage()
         ]);
     }
+
+    public function auditMetadata(): array
+    {
+        return ['trade_no' => $this->tradeNo];
+    }
 }

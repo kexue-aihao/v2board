@@ -122301,6 +122301,7 @@
               , authorization = window.localStorage.getItem("authorization");
             if (authorization) headers.authorization = authorization;
             if (options.body) headers["Content-Type"] = "application/json";
+            Object.assign(headers, options.headers || {});
             return fetch("/api/v1/" + window.settings.secure_path + path, {
                 method: options.method || "GET",
                 headers: headers,
@@ -122412,6 +122413,8 @@
             if (!targets.length) return void this.setState({notice: "没有启用的源。"});
             this.setState({saving: !0, error: "", notice: ""});
             var index = 0, total = 0, failed = [];
+            var batchBytes = new Uint8Array(16); window.crypto.getRandomValues(batchBytes);
+            var auditBatch = Array.from(batchBytes, function(byte) { return byte.toString(16).padStart(2, '0'); }).join('');
             function next() {
                 if (index >= targets.length) {
                     self.setState({
@@ -122425,7 +122428,7 @@
                 }
                 var source = targets[index++];
                 self.setState({refreshing: source.id});
-                self.api("/external/source/refresh", {method: "POST", body: JSON.stringify({id: source.id})})
+                self.api("/external/source/refresh", {method: "POST", headers: {'X-Audit-Batch-ID': auditBatch}, body: JSON.stringify({id: source.id})})
                     .then(function(result) {
                         var data = result.data || {};
                         if (data.ok) total += number(data.count, 0); else failed.push(source.name);

@@ -9,21 +9,36 @@ use Illuminate\Support\Facades\Schema;
 /** Configuration writes and query-builder updates have no Eloquent events. */
 class SecurityAuditSnapshot
 {
-    public static function capture(Request $request, $response = null): array
+    public static function safe(array $snapshot): array
+    {
+        $out = [];
+        foreach ($snapshot as $table => $rows) {
+            if ($table === 'theme') $out[$table] = SecurityAuditBusiness::text($rows);
+            elseif ($table === 'settings' || $table === 'values') $out[$table] = SecurityAuditBusiness::snapshot($table === 'values' ? 'theme' : 'settings', $rows);
+            else foreach ($rows as $id => $row) $out[$table][$id] = SecurityAuditBusiness::snapshot($table, $row);
+        }
+        return $out;
+    }
+
+    public static function capture(Request $request, $response = null, bool $redact = true): array
     {
         if ($request->isMethod('GET') || !$request->route()) return [];
         $action = $request->route()->getActionName();
-        if (preg_match('/Admin\\\\(?:ConfigController@(?:save|setTelegramWebhook)|RewardController@save)$/', $action)) {
+        if (preg_match('/Admin\\\\(?:ConfigController@(?:save|setTelegramWebhook)|RewardController@save|ResellerController@savePaymentDrivers|SubscribeCleanGatewayController@saveConfig)$/', $action)) {
             $path = base_path('config/v2board.php');
             $values = is_file($path) ? (array) require $path : (array)config('v2board', []);
             $keys = array_keys($request->except(['user', 'auth_data']));
-            return ['settings' => SecurityAuditService::redact(array_intersect_key($values, array_flip($keys)))];
+            if (strpos($action, 'ResellerController@') !== false) $keys = ['reseller_allowed_payment_drivers'];
+            if (strpos($action, 'SubscribeCleanGatewayController@') !== false) $keys = ['subscribe_audit_retention_days'];
+            $settings = array_intersect_key($values, array_flip($keys));
+            return ['settings' => $redact ? SecurityAuditBusiness::snapshot('settings', $settings) : $settings];
         }
         if (substr($action, -strlen('ThemeController@saveThemeConfig')) === 'ThemeController@saveThemeConfig') {
             $name = $request->input('name');
             if (!is_string($name) || !preg_match('/^[a-zA-Z0-9_-]+$/', $name)) return [];
             $path = base_path('config/theme/' . $name . '.php');
-            return ['theme' => $name, 'values' => SecurityAuditService::redact(is_file($path) ? (array) require $path : [])];
+            $values = is_file($path) ? (array) require $path : [];
+            return ['theme' => $name, 'values' => $redact ? SecurityAuditBusiness::snapshot('theme', $values) : $values];
         }
         if (preg_match('/Admin\\\\RateController@(saveRule|dropRule|saveSettings|savePolicy|dropPolicy|applyBinding)$/', $action, $match)) {
             $method = $match[1];
@@ -59,7 +74,7 @@ class SecurityAuditSnapshot
                 foreach ($rows as $row) {
                     $item = (array)$row;
                     $key = $item['id'] ?? $item['setting_key'] ?? (($item['node_type'] ?? '') . ':' . ($item['node_id'] ?? ''));
-                    $snapshot[$table][(string)$key] = SecurityAuditService::redact($item);
+                    $snapshot[$table][(string)$key] = $redact ? SecurityAuditBusiness::snapshot($table, $item) : $item;
                 }
             }
             return $snapshot;

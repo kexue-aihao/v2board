@@ -198,10 +198,9 @@ class SubscriptionService
 
             // Do not clear the selected row: if its model already holds true,
             // Eloquent will not write that unchanged attribute back on save().
-            Subscription::where('user_id', $lockedUser->id)
+            SecurityAuditMutation::update(Subscription::where('user_id', $lockedUser->id)
                 ->where('id', '!=', $lockedSubscription->id)
-                ->where('is_primary', true)
-                ->update(['is_primary' => false]);
+                ->where('is_primary', true), ['is_primary' => false]);
             $lockedSubscription->is_primary = true;
             $lockedSubscription->save();
             $this->syncUser($lockedUser, $lockedSubscription);

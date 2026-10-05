@@ -90,10 +90,10 @@ class RatePolicyService
                 if (!$old) abort(404, '倍率策略不存在');
                 if ((int) $old->revision !== (int) ($values['revision'] ?? 0)) abort(409, '策略已被修改，请刷新后重试');
                 $attributes['revision'] = (int) $old->revision + 1;
-                DB::table('v2_rate_policy')->where('id', $old->id)->update($attributes);
+                SecurityAuditMutation::update(DB::table('v2_rate_policy')->where('id', $old->id), $attributes);
                 $id = (int) $old->id;
             } else {
-                $id = DB::table('v2_rate_policy')->insertGetId($attributes + ['revision' => 1, 'created_at' => time()]);
+                $id = SecurityAuditMutation::insertGetId(DB::table('v2_rate_policy'), $attributes + ['revision' => 1, 'created_at' => time()]);
             }
             return ['id' => $id];
         });
@@ -107,8 +107,9 @@ class RatePolicyService
             if (!$policy) abort(404, '倍率策略不存在');
             if ((int) $policy->revision !== $revision) abort(409, '策略已被修改，请刷新后重试');
             if (DB::table('v2_rate_node_policy')->where('policy_id', $id)->exists()) abort(409, '请先解除节点绑定，再删除策略');
-            DB::table('v2_rate_policy_state')->where('policy_id', $id)->delete();
-            return DB::table('v2_rate_policy')->where('id', $id)->delete() > 0;
+            $count = DB::table('v2_rate_policy_state')->where('policy_id', $id)->delete();
+            SecurityAuditService::effect('清理倍率策略运行状态', ['策略编号' => $id, '删除数量' => $count]);
+            return SecurityAuditMutation::delete(DB::table('v2_rate_policy')->where('id', $id)) > 0;
         });
     }
 
@@ -132,6 +133,7 @@ class RatePolicyService
         if (!Redis::set(self::CONFIG, json_encode($config, JSON_UNESCAPED_UNICODE))) {
             throw new \RuntimeException('倍率配置发布失败，请重试');
         }
+        SecurityAuditService::effect('倍率配置已发布到运行缓存', ['配置版本' => $config['revision'] ?? null], 'success', true);
     }
 
     /** No process-local cache: successful edits reach the next traffic report. */
@@ -189,7 +191,7 @@ class RatePolicyService
         // binding to a deleted or reused ID. The next tick republishes on recovery.
         DB::transaction(function () use ($type, $id) {
             $this->mutate(function () use ($type, $id) {
-                DB::table('v2_rate_node_policy')->where('node_type', $type)->where('node_id', $id)->delete();
+                SecurityAuditMutation::delete(DB::table('v2_rate_node_policy')->where('node_type', $type)->where('node_id', $id), 'node_id');
             });
         });
     }
@@ -217,8 +219,8 @@ class RatePolicyService
                     'old_name' => $old['mode'] === 'off' ? '不参与带宽动态加倍' : ($config['policies'][$old['policy_id']]['name'] ?? '策略已删除'),
                     'new_name' => $label, 'changed' => $changed];
                 if ($expectedRevision !== null && $changed) {
-                    if ($mode === 'global') DB::table('v2_rate_node_policy')->where('node_type', $item['type'])->where('node_id', $item['id'])->delete();
-                    else DB::table('v2_rate_node_policy')->updateOrInsert(['node_type' => $item['type'], 'node_id' => $item['id']],
+                    if ($mode === 'global') SecurityAuditMutation::delete(DB::table('v2_rate_node_policy')->where('node_type', $item['type'])->where('node_id', $item['id']), 'node_id');
+                    else SecurityAuditMutation::upsertOne(DB::table('v2_rate_node_policy'), ['node_type' => $item['type'], 'node_id' => $item['id']],
                         ['mode' => $mode, 'policy_id' => $mode === 'policy' ? $policyId : null]);
                 }
             }

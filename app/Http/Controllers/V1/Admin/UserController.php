@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers\V1\Admin;
 
+use App\Services\SecurityAuditMutation;
+use App\Services\SecurityAuditService;
+
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\UserFetch;
 use App\Http\Requests\Admin\UserGenerate;
@@ -515,6 +518,7 @@ class UserController extends Controller
         $userModel = User::orderBy('id', 'asc');
         $this->filter($request, $userModel);
         $res = $userModel->get();
+        SecurityAuditService::result(['exported_count' => $res->count()]);
         $plan = Plan::get();
         for ($i = 0; $i < count($res); $i++) {
             for ($k = 0; $k < count($plan); $k++) {
@@ -612,7 +616,7 @@ class UserController extends Controller
             array_push($users, $user);
         }
         DB::beginTransaction();
-        if (!User::insert($users)) {
+        if (!SecurityAuditMutation::insert(User::query(), $users)) {
             DB::rollBack();
             abort(500, __('生成失败'));
         }
@@ -645,6 +649,7 @@ class UserController extends Controller
         $sort = $request->input('sort') ? $request->input('sort') : 'created_at';
         $builder = User::orderBy($sort, $sortType);
         $this->filter($request, $builder);
+        $submitted = 0;
         foreach ($builder->cursor() as $user) {
             SendEmailJob::dispatch([
                 'email' => $user->email,
@@ -656,7 +661,9 @@ class UserController extends Controller
                     'content' => $request->input('content')
                 ]
             ], 'send_email_mass');
+            $submitted++;
         }
+        SecurityAuditService::result(['submitted_count' => $submitted]);
 
         return response([
             'data' => true
@@ -670,14 +677,12 @@ class UserController extends Controller
         $builder = User::where('id', '<>', 1)->orderBy($sort, $sortType);
         $this->filter($request, $builder);
         try {
-            $builder->each(function ($user){
+            $selected = (clone $builder)->lockForUpdate()->get();
+            foreach ($selected as $user) {
                 $authService = new AuthService($user);
                 $authService->removeAllSession();
-                $changed = clone $user;
-                $changed->banned = 1;
-                \App\Services\SecurityAuditService::modelChange('updated', $changed);
-            });
-            $builder->update([
+            }
+            SecurityAuditMutation::update(User::whereIn('id', $selected->pluck('id')->all()), [
                 'banned' => 1
             ]);
         } catch (\Exception $e) {
@@ -698,16 +703,17 @@ class UserController extends Controller
 
         DB::beginTransaction();
         try {
-            $builder->each(function ($user){
+            $selected = (clone $builder)->lockForUpdate()->get();
+            foreach ($selected as $user) {
                 $authService = new AuthService($user);
                 $authService->removeAllSession();
-                Order::where('user_id', $user->id)->delete();
-                InviteCode::where('user_id', $user->id)->delete();
+                SecurityAuditMutation::delete(Order::where('user_id', $user->id));
+                SecurityAuditMutation::delete(InviteCode::where('user_id', $user->id));
                 $tickets = Ticket::where('user_id', $user->id)->get();
                 foreach($tickets as $ticket) {
-                    TicketMessage::where('ticket_id', $ticket->id)->delete();
+                    SecurityAuditMutation::delete(TicketMessage::where('ticket_id', $ticket->id));
                 }
-                Ticket::where('user_id', $user->id)->delete();
+                SecurityAuditMutation::delete(Ticket::where('user_id', $user->id));
                 // 走同一个服务，「该用户的审计数据」只有一处定义，与清空按钮不会漂移。
                 // 原来这里漏了 v2_node_connection_log，已注销账号的真实 IP 会残留。
                 (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
@@ -715,12 +721,11 @@ class UserController extends Controller
                 // 的用途是重置误判的风险判定），但账号注销后 user_id 已无法解析，必须清。
                 (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
                 if (Schema::hasTable('v2_subscription')) {
-                    Subscription::where('user_id', $user->id)->delete();
+                    SecurityAuditMutation::delete(Subscription::where('user_id', $user->id));
                 }
-                User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
-                \App\Services\SecurityAuditService::modelChange('deleted', $user);
-            });
-            $builder->delete();
+                SecurityAuditMutation::update(User::where('invite_user_id', $user->id), ['invite_user_id' => null]);
+            }
+            SecurityAuditMutation::delete(User::whereIn('id', $selected->pluck('id')->all()));
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
@@ -742,20 +747,20 @@ class UserController extends Controller
         try {
             $authService = new AuthService($user);
             $authService->removeAllSession();
-            Order::where('user_id', $request->input('id'))->delete();
-            User::where('invite_user_id', $request->input('id'))->update(['invite_user_id' => null]);
-            InviteCode::where('user_id', $request->input('id'))->delete();
+            SecurityAuditMutation::delete(Order::where('user_id', $request->input('id')));
+            SecurityAuditMutation::update(User::where('invite_user_id', $request->input('id')), ['invite_user_id' => null]);
+            SecurityAuditMutation::delete(InviteCode::where('user_id', $request->input('id')));
             
             $tickets = Ticket::where('user_id', $request->input('id'))->get();
             foreach($tickets as $ticket) {
-                TicketMessage::where('ticket_id', $ticket->id)->delete();
+                SecurityAuditMutation::delete(TicketMessage::where('ticket_id', $ticket->id));
             }
-            Ticket::where('user_id', $request->input('id'))->delete();
+            SecurityAuditMutation::delete(Ticket::where('user_id', $request->input('id')));
             (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
             // 同 allDel：token 历史不跟随「清空审计记录」按钮，但账号注销时必须清。
             (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
             if (Schema::hasTable('v2_subscription')) {
-                Subscription::where('user_id', $user->id)->delete();
+                SecurityAuditMutation::delete(Subscription::where('user_id', $user->id));
             }
 
             $user->delete();
@@ -795,6 +800,8 @@ class UserController extends Controller
                     return (int)$id;
                 })->all();
             $scanToken = bin2hex(random_bytes(16));
+            SecurityAuditService::result(['matched_count' => count($ids)]);
+            foreach ($ids as $id) SecurityAuditService::batchDecision(\App\Services\SecurityAuditBusiness::object('v2_user', $id), 'preview', '扫描时无有效订阅，删除前将重新核实');
             // 保留本次检测的具体账号，避免确认时把后来才变为无效的账号一起删除。
             Cache::put('ADMIN_SUBSCRIPTION_CLEANUP_' . $scanToken, [
                 'ids' => $ids,
@@ -848,30 +855,36 @@ class UserController extends Controller
                 $removed = DB::transaction(function () use ($id, $cleanupQuery, $hasSubscriptions, $snapshot) {
                     // 与充值、开通订阅保持相同锁顺序：先用户，再订阅。
                     $user = User::whereKey($id)->lockForUpdate()->first();
-                    if (!$user) return null;
+                    if (!$user) {
+                        SecurityAuditService::batchDecision(\App\Services\SecurityAuditBusiness::object('v2_user', $id), 'skipped', '账号已不存在');
+                        return null;
+                    }
                     if ($hasSubscriptions) {
                         Subscription::where('user_id', $id)->lockForUpdate()->get(['id']);
                     }
                     $eligible = (clone $cleanupQuery)
                         ->whereKey($id)->lockForUpdate()->first();
-                    if (!$eligible) return null;
+                    if (!$eligible) {
+                        SecurityAuditService::batchDecision(\App\Services\SecurityAuditBusiness::object('v2_user', $id, $user->getAttributes()), 'skipped', '账号已不符合清理条件');
+                        return null;
+                    }
                     $userData = $this->subscriptionCleanupUserData($eligible, $snapshot['checked_at']);
 
                     $authService = new AuthService($user);
                     $authService->removeAllSession();
-                    Order::where('user_id', $user->id)->delete();
-                    User::where('invite_user_id', $user->id)->update(['invite_user_id' => null]);
-                    InviteCode::where('user_id', $user->id)->delete();
+                    SecurityAuditMutation::delete(Order::where('user_id', $user->id));
+                    SecurityAuditMutation::update(User::where('invite_user_id', $user->id), ['invite_user_id' => null]);
+                    SecurityAuditMutation::delete(InviteCode::where('user_id', $user->id));
 
                     $tickets = Ticket::where('user_id', $user->id)->get();
                     foreach ($tickets as $ticket) {
-                        TicketMessage::where('ticket_id', $ticket->id)->delete();
+                        SecurityAuditMutation::delete(TicketMessage::where('ticket_id', $ticket->id));
                     }
-                    Ticket::where('user_id', $user->id)->delete();
+                    SecurityAuditMutation::delete(Ticket::where('user_id', $user->id));
                     (new SubscribeAuditRetentionService())->purgeUser((int)$user->id);
                     (new SubscriptionTokenHistoryService())->purgeUser((int)$user->id);
                     if ($hasSubscriptions) {
-                        Subscription::where('user_id', $user->id)->delete();
+                        SecurityAuditMutation::delete(Subscription::where('user_id', $user->id));
                     }
                     return $user->delete() ? $userData : null;
                 });
@@ -889,6 +902,7 @@ class UserController extends Controller
             throw $exception;
         }
         Cache::forget($cacheKey);
+        SecurityAuditService::result(['matched_count' => count($ids), 'deleted_count' => $deleted, 'skipped_count' => $processed - $deleted]);
 
         info('ADMIN SUBSCRIPTION CLEANUP deleted=' . $deleted
             . ' by=' . (is_array($request->user) ? ($request->user['email'] ?? '-') : '-'));

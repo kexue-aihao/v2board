@@ -86,7 +86,8 @@ class ThemeController extends Controller
         }
 
         if ($request->attributes->get('security_audit_context')) SecurityAuditService::append('theme.change', 'pending', [
-            'theme' => $payload['name'], 'before' => $previousConfig, 'after' => $config,
+            'theme' => $payload['name'], 'before' => \App\Services\SecurityAuditBusiness::snapshot('theme', $previousConfig),
+            'after' => \App\Services\SecurityAuditBusiness::snapshot('theme', $config),
         ]);
 
         File::ensureDirectoryExists(base_path() . '/config/theme/');
@@ -96,6 +97,7 @@ class ThemeController extends Controller
             abort(500, __('修改失败'));
         }
 
+        SecurityAuditService::fileChanged('theme', $payload['name'], $previousConfig, $config);
         try {
             Artisan::call('config:cache');
 //            sleep(2);

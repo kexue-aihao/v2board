@@ -34,5 +34,11 @@ class SendTelegramAdminOperationJob implements ShouldQueue
     public function handle(TelegramService $telegram)
     {
         $telegram->sendMessage($this->chatId, $this->text, $this->parseMode, null, $this->messageThreadId);
+        \App\Services\SecurityAuditService::effect('管理员 Telegram 操作通知发送完成', $this->auditMetadata(), 'success', true);
+    }
+
+    public function auditMetadata(): array
+    {
+        return ['telegram_id' => $this->chatId, 'topic_id' => $this->messageThreadId, 'body_length' => mb_strlen($this->text)];
     }
 }

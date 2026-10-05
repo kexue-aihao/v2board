@@ -71,22 +71,22 @@ class ExternalSubscriptionService
     {
         $attributes = $this->normalizeSource($data) + ['updated_at' => time()];
         if ($id !== null) {
-            DB::table(self::TABLE_SOURCE)->where('id', $id)->update($attributes);
+            SecurityAuditMutation::update(DB::table(self::TABLE_SOURCE)->where('id', $id), $attributes);
 
             return $id;
         }
 
         $attributes['created_at'] = time();
 
-        return (int) DB::table(self::TABLE_SOURCE)->insertGetId($attributes);
+        return SecurityAuditMutation::insertGetId(DB::table(self::TABLE_SOURCE), $attributes);
     }
 
     public function deleteSource(int $id): bool
     {
         return DB::transaction(function () use ($id) {
-            DB::table(self::TABLE_NODE)->where('source_id', $id)->delete();
+            SecurityAuditMutation::delete(DB::table(self::TABLE_NODE)->where('source_id', $id));
 
-            return DB::table(self::TABLE_SOURCE)->where('id', $id)->delete() > 0;
+            return SecurityAuditMutation::delete(DB::table(self::TABLE_SOURCE)->where('id', $id)) > 0;
         });
     }
 
@@ -122,6 +122,7 @@ class ExternalSubscriptionService
     {
         $source = DB::table(self::TABLE_SOURCE)->where('id', $sourceId)->first();
         if (!$source) {
+            SecurityAuditService::result(['reason' => '订阅源不存在']);
             return ['source_id' => $sourceId, 'ok' => false, 'error' => '源不存在'];
         }
 
@@ -153,7 +154,7 @@ class ExternalSubscriptionService
 
             $now = time();
             DB::transaction(function () use ($sourceId, $parsed, $now) {
-                DB::table(self::TABLE_NODE)->where('source_id', $sourceId)->delete();
+                SecurityAuditMutation::delete(DB::table(self::TABLE_NODE)->where('source_id', $sourceId));
                 $rows = [];
                 foreach ($parsed['nodes'] as $index => $node) {
                     $rows[] = [
@@ -169,11 +170,11 @@ class ExternalSubscriptionService
                     ];
                 }
                 foreach (array_chunk($rows, 200) as $chunk) {
-                    DB::table(self::TABLE_NODE)->insert($chunk);
+                    SecurityAuditMutation::insert(DB::table(self::TABLE_NODE), $chunk);
                 }
             });
 
-            DB::table(self::TABLE_SOURCE)->where('id', $sourceId)->update([
+            SecurityAuditMutation::update(DB::table(self::TABLE_SOURCE)->where('id', $sourceId), [
                 'last_fetch_at' => $now,
                 'last_status' => 'ok',
                 'last_error' => null,
@@ -190,10 +191,11 @@ class ExternalSubscriptionService
                 'base64' => $parsed['base64']
             ];
         } catch (\Throwable $e) {
+            SecurityAuditService::result(['reason' => SecurityAuditService::failureReason($e), 'exception_type' => get_class($e)]);
             $message = $this->text($e->getMessage(), 500);
             if (!$dryRun) {
                 // 只记错误，不动已经导入的节点：源抽风不该把用户的备用线路清空。
-                DB::table(self::TABLE_SOURCE)->where('id', $sourceId)->update([
+                SecurityAuditMutation::update(DB::table(self::TABLE_SOURCE)->where('id', $sourceId), [
                     'last_fetch_at' => time(),
                     'last_status' => 'error',
                     'last_error' => $message,

@@ -168,6 +168,8 @@ class ServerBatchOperationService
             foreach ($entries as $index => $entry) {
                 $node = $plan[$index];
                 if (!$node['changed']) {
+                    SecurityAuditService::batchDecision(SecurityAuditBusiness::object($entry['server']->getTable(), $entry['server']->id, $entry['server']->getAttributes()),
+                        $node['applicable'] ? 'unchanged' : 'skipped', $node['skip_reason'] ?? '');
                     continue;
                 }
                 $server = $entry['server'];
@@ -913,6 +915,7 @@ class ServerBatchOperationService
                 abort(422, __('选中的节点已不存在：:type #:id', ['type' => $item['type'], 'id' => $item['id']]));
             }
             $entries[] = ['type' => $item['type'], 'server' => $server];
+            SecurityAuditService::select($server->getTable(), $server->id, $server->getAttributes());
         }
 
         return $entries;

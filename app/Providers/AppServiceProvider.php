@@ -34,6 +34,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot()
     {
+        \App\Services\SecurityAuditService::registerTransactions();
         \App\Services\SecurityAuditQueue::register();
         foreach (['created', 'updated', 'deleted'] as $event) {
             \Illuminate\Support\Facades\Event::listen('eloquent.' . $event . ': *', function ($name, $payload) use ($event) {

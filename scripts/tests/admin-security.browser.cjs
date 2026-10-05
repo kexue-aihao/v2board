@@ -43,6 +43,13 @@ const server = http.createServer((req, res) => {
             const assetRequested = new Promise(resolve => { notifyAsset = resolve; });
             const edits = [], userDefaults = {transfer_enable: 107374182400, u: 0, d: 0, total_used: 0, balance: 0, commission_balance: 0, device_limit: 6, expired_at: null, plan_id: null, banned: 0, commission_type: 0, commission_rate: null, discount: null, speed_limit: null, is_staff: 0, admin_version: 1, created_at: 1700000000, updated_at: 1700000000, alive_ip: 0, subscribe_url: 'https://example.test/subscribe', remarks: ''};
             const users = [Object.assign({}, userDefaults, {id: 6, email: 'member@example.test', is_admin: 0, admin_role: null}), Object.assign({}, userDefaults, {id: 1, email: 'founder@example.test', is_admin: 1, admin_role: null})];
+            const auditBusiness = {version: 1, module: 'users', module_label: '用户管理', action_label: '修改用户资料', stage: 'finish', state: 'success', channel: '后台', actor: {id: 1, email: 'founder@example.test'}, batch_id: 'b'.repeat(32), criteria: [{label: '用户编号', value: 6}]};
+            const auditRow = {id: 3, actor_id: 1, request_id: 'a'.repeat(32), role: 'super', role_label: '超级管理员', event: 'request.finish', description: '修改用户资料（ID 6）', result: 'success', result_label: '成功', created_at: 1700000000, business: auditBusiness, payload: JSON.stringify({details: {business: auditBusiness}})};
+            function auditRecord(id, business) { var failed = business.result && business.result.state === 'failure'; return Object.assign({}, auditRow, {id, business, result: failed ? 'failure' : 'success', result_label: failed ? '失败' : '成功', payload: JSON.stringify({details: {business}})}); }
+            const detailRecords = [auditRecord(1, Object.assign({}, auditBusiness, {stage: 'changes', items: [{operation_label: '修改', object: {label: '用户 member@example.test（6）'}, fields: [
+                {label: '总流量', before_label: '100 GB', after_label: '200 GB'}, {label: '密码', before_label: '已设置', after_label: '已修改'},
+                {label: '备注', before_label: '未设置', after_label: '<img src=x onerror="window.auditXss=true">'}]}]})),
+                auditRecord(2, Object.assign({}, auditBusiness, {stage: 'finish', result: {state: 'failure', reason: '邮件发送服务未接受发送'}, job: {name: 'SendEmailJob', ref: 'audit-job-123', attempt: 2, metadata: {email: 'recipient@example.test', subject: '通知'}}}))];
             const order = {id: 10, trade_no: 'TEST-ORDER-123', user_id: 6, invite_user_id: 8, plan_id: 1, plan_name: '测试套餐', period: 'month_price', type: 1, status: 3, total_amount: 1000, balance_amount: 0, discount_amount: 0, refund_amount: 0, surplus_amount: 0, commission_balance: 100, commission_status: 0, created_at: 1700000000, updated_at: 1700000000, commission_log: [], user: {id: 6, email: 'buyer@example.test'}, invite_user: {id: 8, email: 'inviter@example.test'}};
             page.on('pageerror', error => { errors.push(error.message); console.error(role, error.message); });
             if (process.env.ADMIN_BROWSER_DEBUG) page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
@@ -64,7 +71,11 @@ const server = http.createServer((req, res) => {
                 else if (endpoint === '/user/checkLogin') body.data = {is_login: true, is_admin: true};
                 else if (endpoint === '/passport/auth/login') body.data = role === 'guest2fa' ? {two_factor_required: true, challenge: 'fixture-challenge'} : {auth_data: 'logged-in', is_admin: true};
                 else if (endpoint === '/passport/auth/verify2fa') body.data = {auth_data: 'logged-in', is_admin: true};
-                else if (endpoint === '/security/audit') body = {data: [{id: 1, actor_id: 1, role: 'super', role_label: '超级管理员', event: 'request.finish', description: '修改用户资料（ID 6）', result: 'success', result_label: '成功', created_at: 1700000000, payload: JSON.stringify({description: '修改用户资料（ID 6）'})}], total: 1};
+                else if (endpoint === '/security/audit') body = {data: [auditRow], total: 1};
+                else if (endpoint === '/security/audit/detail') {
+                    if (url.searchParams.get('scope') === 'batch') body = {data: detailRecords.concat([auditRecord(4, Object.assign({}, auditBusiness, {stage: 'batch', items: [{operation_label: '跳过', object: {label: '用户（7）'}, reason: '账号已不符合清理条件', fields: []}]}))]), next_after: 4, has_more: false};
+                    else body = Number(url.searchParams.get('after')) ? {data: detailRecords.slice(1), next_after: 2, has_more: false} : {data: detailRecords.slice(0, 1), next_after: 1, has_more: true};
+                }
                 else if (endpoint === '/user/fetch') body = {data: users, total: users.length};
                 else if (endpoint === '/user/getUserInfoById') body.data = users.find(user => Number(user.id) === Number(url.searchParams.get('id')));
                 else if (endpoint === '/user/update') {
@@ -136,8 +147,22 @@ const server = http.createServer((req, res) => {
                 if (role === 'super') {
                     await page.getByRole('cell', {name: '修改用户资料（ID 6）', exact: true}).waitFor();
                     assert.equal(await page.getByRole('cell', {name: '成功', exact: true}).count(), 1);
-                    await page.getByLabel('操作内容', {exact: true}).fill('修改用户资料');
+                    await page.getByLabel('中文操作内容', {exact: true}).fill('修改用户资料');
                     await Promise.all([page.waitForResponse(response => new URL(response.url()).searchParams.get('keyword') === '修改用户资料'), page.getByRole('button', {name: '查询', exact: true}).click()]);
+                    await page.getByRole('button', {name: '查看', exact: true}).click();
+                    const auditDetail = page.getByRole('region', {name: '操作详情'});
+                    await auditDetail.getByRole('cell', {name: '200 GB', exact: true}).waitFor();
+                    assert.equal(await auditDetail.getByRole('cell', {name: '已修改', exact: true}).count(), 1);
+                    assert.equal(await auditDetail.locator('img').count(), 0, 'free text is never rendered as HTML');
+                    assert.equal(await page.evaluate(() => window.auditXss), undefined);
+                    await auditDetail.getByRole('button', {name: '加载更多关联明细'}).click();
+                    await auditDetail.getByRole('cell', {name: 'audit-job-123', exact: true}).waitFor();
+                    await auditDetail.getByRole('cell', {name: '邮件发送服务未接受发送', exact: true}).waitFor();
+                    await auditDetail.getByRole('button', {name: '查看同批次操作'}).click();
+                    await auditDetail.getByText('跳过 · 用户（7） · 账号已不符合清理条件', {exact: true}).waitFor();
+                    await auditDetail.getByText('查看原始审计证据', {exact: true}).first().click();
+                    assert.match(await auditDetail.locator('pre:visible').first().textContent(), /before_label/);
+                    await auditDetail.getByText('查看原始审计证据', {exact: true}).first().click();
                     if (process.env.ADMIN_SCREENSHOT_DIR) {
                         fs.mkdirSync(process.env.ADMIN_SCREENSHOT_DIR, {recursive: true});
                         await page.screenshot({path: path.join(process.env.ADMIN_SCREENSHOT_DIR, 'audit-chinese.png'), fullPage: true});

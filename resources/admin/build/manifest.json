@@ -1,14 +1,14 @@
 {
   "version": 1,
   "sources": {
-    "resources/admin/legacy/umi.js": "524d72bae1b8819bf4722ef3b63696ff2a3e9be390dd7acf15ece4715cfc3bb9",
+    "resources/admin/legacy/umi.js": "581f3b8b39f2a4edcfc2b7c61b76db8563ed0a688ffc33d8e5175227bfc8f7ad",
     "resources/admin/legacy/vendors.async.js": "bca4127faf6c5243bd85bfb8c5f86b1c90883c5c165a77d1de42a2b2e33fdc47",
     "resources/admin/legacy/components.async.js": "b814b94620870164b47cd4477e62bab2a4da826cba68f09986e24136b31e3eca",
     "scripts/build-admin-security.cjs": "7b5f685303107ad3ca6be7f0f1e39b69fc09a888c967a517a80a630f9cc0d2c6",
     "scripts/admin-security/support.js": "825ba4924809ac2a887d58e75bafe662d92b923c1755411a521bc5c8d2bdb377",
     "scripts/admin-security/account.js": "4be24ff9ed0c934c5c47b810e866960d3bcb413e9ccc029846a08839dd4d90d3",
     "scripts/admin-security/role-field.js": "ee2a5932fb223342ad20416ef2c15b7548337dd6e92b21867d3a8f2dfae74b98",
-    "scripts/admin-security/audit.js": "0538a8b6bb4d597215d7274e6a9eea5314014ead17eaf745b9ff16093fcfc28f"
+    "scripts/admin-security/audit.js": "2aee1efd4b624566f988fb1055c3df91a4f5d8a574439ace50b7339004083961"
   },
   "roles": {
     "guest": {
@@ -458,7 +458,7 @@
       ]
     },
     "super": {
-      "sha256": "efdce8ce5d5582d1b56e030660e20c25ff305f56255edf8d0e933951ded9d14d",
+      "sha256": "6f71aad088d114e8536c2b240f23b90279938f799b3f5bf588d215eb5a924ffb",
       "modules": [
         "++nV",
         "+0iv",

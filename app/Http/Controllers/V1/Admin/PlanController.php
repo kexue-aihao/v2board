@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\V1\Admin;
 
+use App\Services\SecurityAuditMutation;
+
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\PlanSave;
 use App\Http\Requests\Admin\PlanSort;
@@ -47,7 +49,7 @@ class PlanController extends Controller
             // update user group id and transfer
             try {
                 if ($request->input('force_update')) {
-                    User::where('plan_id', $plan->id)->update([
+                    SecurityAuditMutation::update(User::where('plan_id', $plan->id), [
                         'group_id' => $params['group_id'],
                         'transfer_enable' => $params['transfer_enable'] * 1073741824,
                         'device_limit' => $params['device_limit'],

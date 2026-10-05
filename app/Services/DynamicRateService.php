@@ -63,7 +63,7 @@ class DynamicRateService
             $params = (new RatePeakStateMachine())->normalizeParams($values);
             $now = time();
             foreach ($params as $key => $value) {
-                DB::table(self::TABLE_SETTING)->updateOrInsert(
+                SecurityAuditMutation::upsertOne(DB::table(self::TABLE_SETTING),
                     ['setting_key' => $key],
                     ['setting_value' => $this->scalarToString($value), 'updated_at' => $now]
                 );
@@ -103,21 +103,21 @@ class DynamicRateService
             $attributes = $this->normalizeRule($data) + ['updated_at' => time()];
             if ($id !== null) {
                 $attributes['updated_at'] = time();
-                DB::table(self::TABLE_RULE)->where('id', $id)->update($attributes);
+                SecurityAuditMutation::update(DB::table(self::TABLE_RULE)->where('id', $id), $attributes);
 
                 return $id;
             }
 
             $attributes['created_at'] = time();
 
-            return (int) DB::table(self::TABLE_RULE)->insertGetId($attributes);
+            return SecurityAuditMutation::insertGetId(DB::table(self::TABLE_RULE), $attributes);
         });
     }
 
     public function deleteRule(int $id): bool
     {
         return (new RatePolicyService())->mutate(function () use ($id) {
-            return DB::table(self::TABLE_RULE)->where('id', $id)->delete() > 0;
+            return SecurityAuditMutation::delete(DB::table(self::TABLE_RULE)->where('id', $id)) > 0;
         });
     }
 

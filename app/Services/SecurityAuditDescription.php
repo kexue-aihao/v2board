@@ -50,7 +50,9 @@ class SecurityAuditDescription
         'V1\\Admin\\UserController@clearSubscribeAudit' => '清理用户订阅请求记录',
         'V1\\Admin\\UserController@dumpCSV' => '导出用户列表',
         'V1\\Admin\\UserController@sendMail' => '向用户发送邮件',
-        'V1\\Admin\\UserController@ban' => '批量停用或启用用户',
+        'V1\\Admin\\UserController@ban' => '批量停用用户',
+        'V1\\Admin\\OrderController@update' => '修改订单佣金状态',
+        'V1\\Admin\\PlanController@update' => '修改套餐显示与续费状态',
         'V1\\Admin\\UserController@allDel' => '批量删除用户',
         'V1\\Admin\\UserController@delUser' => '删除用户',
         'V1\\Admin\\UserController@subscriptionCleanup' => '扫描或删除无有效订阅的用户',
@@ -112,6 +114,7 @@ class SecurityAuditDescription
         'V1\\Admin\\SecurityController@administrators' => '查看管理员账号',
         'V1\\Admin\\SecurityController@assignRole' => '修改管理员身份',
         'V1\\Admin\\SecurityController@audit' => '查询安全审计记录',
+        'V1\\Admin\\SecurityController@auditDetail' => '查看安全审计操作详情',
         'V1\\Admin\\SecurityController@verifyAudit' => '校验安全审计完整性',
         'V1\\Admin\\SecurityController@exportAudit' => '导出安全审计记录',
         'V1\\Admin\\SecurityController@planOptions' => '查看订单套餐选项',
@@ -154,11 +157,17 @@ class SecurityAuditDescription
         [$controller, $method] = array_pad(explode('@', $action, 2), 2, '');
         $subject = self::RESOURCES[$controller] ?? '后台操作';
         if (preg_match('/^V1\\\\Admin\\\\Server\\\\(Trojan|Vmess|Vless|Shadowsocks|Hysteria|Tuic|AnyTLS|V2node)Controller$/', $controller, $match)) $subject = $match[1] . ' 节点';
+        if (isset($match[1]) && $method === 'update') return '修改' . $subject . '显示状态';
         return (self::VERBS[$method] ?? '执行') . $subject;
     }
 
     public static function describe(string $event, array $details = [], string $action = ''): string
     {
+        if (!empty($details['business'])) {
+            $description = SecurityAuditBusiness::describe($details['business']);
+            if (strpos($event, 'job.') === 0) $description = (self::EVENTS[$event] ?? '后台任务') . '：' . $description;
+            return $description;
+        }
         $action = $details['action'] ?? $action;
         $description = self::EVENTS[$event] ?? '记录后台事件';
         if (in_array($event, ['request.begin', 'request.finish', 'authorization.denied', 'business.changes'], true) && $action) {
@@ -185,6 +194,10 @@ class SecurityAuditDescription
         $data['description'] = $payload['description'] ?? self::describe($data['event'], $payload['details'] ?? []);
         $data['role_label'] = config('admin_security.roles.' . ($data['role'] ?? ''), '未认证 / 系统');
         $data['result_label'] = ['success' => '成功', 'failure' => '失败', 'denied' => '拒绝', 'pending' => '执行意图'][$data['result']] ?? '未知';
+        $business = $payload['details']['business'] ?? null;
+        $data['business'] = $business;
+        $data['detail_version'] = $business['version'] ?? 0;
+        if ($business) $data['result_label'] = ['success' => '成功', 'failure' => '失败', 'denied' => '拒绝', 'pending' => '结果待确认', 'partial' => '部分完成', 'no_change' => '无变化', 'queued' => '任务已提交'][$business['state'] ?? ''] ?? $data['result_label'];
         return $data;
     }
 

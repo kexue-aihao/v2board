@@ -16,6 +16,7 @@ class AdminRoute
             $router->get('/security/administrators', 'V1\\Admin\\SecurityController@administrators');
             $router->post('/security/administrators/role', 'V1\\Admin\\SecurityController@assignRole');
             $router->get('/security/audit', 'V1\\Admin\\SecurityController@audit');
+            $router->get('/security/audit/detail', 'V1\\Admin\\SecurityController@auditDetail');
             $router->post('/security/audit/verify', 'V1\\Admin\\SecurityController@verifyAudit');
             $router->post('/security/audit/export', 'V1\\Admin\\SecurityController@exportAudit');
             $router->get('/security/options/plans', 'V1\\Admin\\SecurityController@planOptions');

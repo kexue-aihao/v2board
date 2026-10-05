@@ -91,6 +91,8 @@ php artisan security:audit-archive --after=10000 --limit=10000
 
 ## 验证与已知限制
 
+详细业务审计的实现、全部入口清单及数据库验收见 [详细审计交付与覆盖清单](admin-audit-detail-coverage.md)。新记录包含中文对象、字段前后值、真实业务结果、批量逐项明细和任务关联；原始历史链保持不变。升级需清除旧配置缓存并重启常驻进程，使新增的 `config/admin_audit.php` 生效。
+
 ```sh
 php vendor/bin/phpunit tests/Feature/AdminSecurityTest.php
 node --test scripts/tests/admin-security.test.cjs
@@ -100,7 +102,7 @@ node scripts/tests/admin-security.browser.cjs
 
 测试覆盖五角色菜单和资源、用户编辑中的身份选择、直接 API 越权、旧 staff 入口、唯一超级管理员、角色撤销生效、审计防改删、中文操作记录与历史查询、事务回滚、队列上下文、登录失败、自身安全操作、导出归档、主题注入保护和财务最小用户信息。浏览器测试使用模拟 API，真实权限由 PHP 接口测试验证。
 
-当前本地数据库验证使用 SQLite，MySQL/MariaDB 触发器与独立存储的对象锁尚需在部署环境验收。此处“4A”描述本项目集成能力，不代表取得任何认证或已连接外部堡垒机。
+本地已验证 SQLite 和隔离 MariaDB 11.4.5 的详细审计路径；数据库测试范围和结果见上述交付清单。独立存储的对象锁仍需在部署环境验收。此处“4A”描述本项目集成能力，不代表取得任何认证或已连接外部堡垒机。
 
 全量 PHP 回归还包含改动前已存在的失败：AdminTelegramUnbind 的语言预期、ExternalNodeRender 的原生 header 与响应序列化断言、ExternalSubscription 的 HTTP 错误文本预期，以及 PlanContentSanitizer 的非特性 JSON 转义。已在升级前的 `9a7b4b01` 独立检出中复现，不应将全量回归宣称为全部通过。
 

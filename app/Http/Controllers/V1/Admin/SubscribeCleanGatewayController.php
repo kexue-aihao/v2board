@@ -149,6 +149,7 @@ class SubscribeCleanGatewayController extends Controller
             echo $lines;
         });
 
+        \App\Services\SecurityAuditService::result(['exported_count' => $result['rows'], 'truncated' => $result['truncated']]);
         if ($result['truncated']) {
             echo $service->csvField(sprintf(
                 '# 已达导出上限 %d 行，导出被截断，请收窄筛选条件后重试',
@@ -543,6 +544,7 @@ class SubscribeCleanGatewayController extends Controller
         }
 
         $config = config('v2board');
+        $previousConfig = $config;
         $config['subscribe_audit_retention_days'] = $days;
         $path = base_path() . '/config/v2board.php';
         $tempPath = $path . '.tmp.' . bin2hex(random_bytes(8));
@@ -558,6 +560,7 @@ class SubscribeCleanGatewayController extends Controller
             @opcache_invalidate($path, true);
         }
 
+        \App\Services\SecurityAuditService::fileChanged('settings', '订阅记录保留设置', $previousConfig, $config);
         Artisan::call('config:cache');
 
         $this->audit($request, 'CLEAN GATEWAY RETENTION days=' . $days);

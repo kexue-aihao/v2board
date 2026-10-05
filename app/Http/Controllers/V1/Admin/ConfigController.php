@@ -85,6 +85,7 @@ class ConfigController extends Controller
         $telegramService = new TelegramService($token);
         $telegramService->getMe();
         $telegramService->setWebhook($hookUrl, ['secret_token' => $secretToken]);
+        \App\Services\SecurityAuditService::effect('Telegram 回调地址已设置', ['回调域名' => parse_url($hookUrl, PHP_URL_HOST)], 'success', true);
         $config = config('v2board');
         // 必须把「这次真正用来注册 webhook 的 token」一并落盘：config('v2board') 是磁盘上
         // 已经生效的那份配置，而管理员完全可能是在表单里改完 token、还没点保存就直接点
@@ -108,6 +109,9 @@ class ConfigController extends Controller
         if (function_exists('opcache_invalidate')) {
             @opcache_invalidate($path, true);
         }
+        \App\Services\SecurityAuditService::fileChanged('settings', 'Telegram 回调密钥',
+            ['telegram_bot_token' => config('v2board.telegram_bot_token'), 'telegram_webhook_secret' => config('v2board.telegram_webhook_secret')],
+            ['telegram_bot_token' => $token, 'telegram_webhook_secret' => $secretToken]);
         Artisan::call('config:cache');
 
         // 下面这段不能省，删了就是线上事故：webman 是常驻进程，config() 取的是启动快照。
@@ -428,6 +432,7 @@ class ConfigController extends Controller
                 $telegramBindingEnabled === 0 ? 'binding_feature_disabled' : 'binding_group_changed'
             );
         }
+        \App\Services\SecurityAuditService::fileChanged('settings', '系统配置', $previousConfig, $config);
         if (function_exists('opcache_reset')) {
             if (opcache_reset() === false) {
                 abort(500, __('缓存清除失败，请卸载或检查opcache配置状态'));

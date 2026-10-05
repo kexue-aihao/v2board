@@ -471,7 +471,9 @@ class SubscriptionTokenHistoryService
             return 0;
         }
         try {
-            return (int)SubscriptionTokenHistory::where('user_id', $userId)->delete();
+            $count = (int)SubscriptionTokenHistory::where('user_id', $userId)->delete();
+            SecurityAuditService::effect('清理用户订阅令牌历史', ['用户编号' => $userId, '删除数量' => $count]);
+            return $count;
         } catch (\Throwable $e) {
             Log::error('清理用户 Token 历史失败', ['user_id' => $userId, 'error' => $e->getMessage()]);
             return 0;

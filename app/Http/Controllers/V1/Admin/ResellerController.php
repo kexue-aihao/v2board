@@ -295,10 +295,12 @@ class ResellerController extends Controller
         $installed = ResellerPaymentService::drivers();
         $allowed = array_values(array_unique(array_intersect($installed, (array)($data['allowed'] ?? []))));
         $config = config('v2board');
+        $previousConfig = $config;
         $config['reseller_allowed_payment_drivers'] = $allowed;
         if (!File::put(base_path('config/v2board.php'), "<?php\n return " . var_export($config, true) . " ;")) {
             abort(500, 'Failed to save reseller payment drivers');
         }
+        \App\Services\SecurityAuditService::fileChanged('settings', '倒卖商支付驱动', $previousConfig, $config);
         Artisan::call('config:cache');
         if (Cache::has('WEBMANPID')) {
             $pid = Cache::get('WEBMANPID');

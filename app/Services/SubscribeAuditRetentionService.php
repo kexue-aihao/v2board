@@ -105,6 +105,7 @@ class SubscribeAuditRetentionService
         // 分析里。
         $counts['ip_account_link'] = $this->purgeUserTable('v2_ip_account_link', $userId, $chunk);
 
+        \App\Services\SecurityAuditService::effect('清理用户订阅与节点访问记录', ['用户编号' => $userId, '删除数量' => $counts]);
         return $counts;
     }
 

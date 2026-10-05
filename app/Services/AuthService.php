@@ -115,8 +115,11 @@ class AuthService
     {
         $cacheKey = CacheKey::get("USER_SESSIONS", $this->user->id);
         $sessions = (array)Cache::get($cacheKey, []);
+        $removed = isset($sessions[$sessionId]);
         unset($sessions[$sessionId]);
-        return self::putSessions($this->user->id, $sessions);
+        $result = self::putSessions($this->user->id, $sessions);
+        SecurityAuditService::effect('撤销指定登录会话', ['用户编号' => $this->user->id, '撤销数量' => $removed ? 1 : 0], $result ? 'success' : 'failure', true);
+        return $result;
     }
 
     public function removeAllSession()
@@ -128,7 +131,9 @@ class AuthService
                 Cache::forget($meta['auth_data']);
             }
         }
-        return Cache::forget($cacheKey);
+        $result = Cache::forget($cacheKey);
+        SecurityAuditService::effect('撤销账号全部登录会话', ['用户编号' => $this->user->id, '撤销数量' => count($sessions)], $result || !$sessions ? 'success' : 'failure', true);
+        return $result;
     }
 
     private static function putSessions($userId, array $sessions): bool

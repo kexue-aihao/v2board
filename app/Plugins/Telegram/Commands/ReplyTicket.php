@@ -29,7 +29,8 @@ class ReplyTicket extends Telegram {
         \App\Services\SecurityAuditService::run(request(), \App\Services\AdminAccessService::actor($user), function () use ($ticketService, $ticketId, $msg, $user) {
             $ticketService->replyByAdmin($ticketId, $msg->text, $user->id);
             return response(['data' => true]);
-        });
+        }, ['action' => 'App\\Http\\Controllers\\V1\\Admin\\TicketController@reply', 'channel' => 'Telegram',
+            'targets' => [\App\Services\SecurityAuditBusiness::object('v2_ticket', $ticketId)]]);
         $telegramService = $this->telegramService;
         $telegramService->sendMessage($msg->chat_id, "#`{$ticketId}` 的工单已回复成功", 'markdown');
         $telegramService->sendMessageWithAdmin("#`{$ticketId}` 的工单已由 {$user->email} 进行回复", true);

@@ -152,12 +152,12 @@ class SubscribeAccountRiskService
 
         $now = time();
 
-        return (bool)DB::table(self::TABLE)->where('user_id', $userId)->update([
+        return (bool)SecurityAuditMutation::update(DB::table(self::TABLE)->where('user_id', $userId), [
             'handled_at' => $now,
             'handled_by' => $actorId > 0 ? $actorId : null,
             'handled_note' => trim($note) === '' ? null : trim($note),
             'updated_at' => $now
-        ]);
+        ], 'user_id');
     }
 
     /**

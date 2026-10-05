@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\V1\Admin;
 
+use App\Services\SecurityAuditMutation;
+
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\GiftcardGenerate;
 use App\Models\Giftcard;
@@ -75,7 +77,7 @@ class GiftcardController extends Controller
         }
         DB::beginTransaction();
         try {
-            if (!Giftcard::insert($giftcards)) {
+            if (!SecurityAuditMutation::insert(Giftcard::query(), $giftcards)) {
                 throw new \Exception('礼品卡批量生成失败');
             }
             DB::commit();

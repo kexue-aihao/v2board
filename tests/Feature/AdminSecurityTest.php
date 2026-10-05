@@ -249,13 +249,14 @@ class AdminSecurityTest extends TestCase
             Queue::connection('sync')->push(new AuditedTestJob(false, true));
             $this->fail('Expected job failure');
         } catch (\RuntimeException $error) {
-            $this->assertSame($original, $request->attributes->get('security_audit_context'));
+            $this->assertSame($original + ['business_result' => ['queued_count' => 1]], $request->attributes->get('security_audit_context'));
         }
         $this->assertDatabaseHas('v2_admin_audit', ['event' => 'job.finish', 'result' => 'failure', 'actor_id' => 1]);
         $queued = DB::table('v2_admin_audit')->where('event', 'job.queued')->first();
         $finished = DB::table('v2_admin_audit')->where('event', 'job.finish')->first();
         $this->assertSame('提交后台任务：向用户发送邮件', json_decode($queued->payload, true)['description']);
-        $this->assertSame('完成后台任务：向用户发送邮件', json_decode($finished->payload, true)['description']);
+        $this->assertStringContainsString('邮箱 ordinary@example.test → child@example.test', json_decode($finished->payload, true)['description']);
+        $this->assertSame('failure', json_decode($finished->payload, true)['details']['business']['state']);
         $this->assertStringNotContainsString('secret-job-failure', DB::table('v2_admin_audit')->pluck('payload')->implode(''));
         $this->assertNull($request->attributes->get('security_audit_queue_stack'));
     }
@@ -270,6 +271,8 @@ class AdminSecurityTest extends TestCase
         $job->shouldReceive('payload')->andReturn(['security_audit' => $origin]);
         $job->shouldReceive('resolveName')->andReturn(AuditedTestJob::class);
         $job->shouldReceive('getJobId')->andReturn('revoked-job');
+        $job->shouldReceive('attempts')->andReturn(1);
+        $job->shouldReceive('maxTries')->andReturn(3);
         try {
             Event::dispatch(new JobProcessing('database', $job));
             $this->fail('Revoked actor must be rejected before execution');
@@ -443,7 +446,8 @@ class AdminSecurityTest extends TestCase
         $this->postJson($this->base . '/user/update', ['id' => 6, 'email' => 'edited@example.test', 'banned' => 0, 'admin_role' => 'support'], $super)->assertOk();
         $records = $this->getJson($this->base . '/security/audit?' . http_build_query(['keyword' => '修改用户资料', 'event' => 'request.finish']), $super)->assertOk()->json('data');
         $this->assertCount(1, $records);
-        $this->assertSame('修改用户资料（ID 6）', $records[0]['description']);
+        $this->assertStringContainsString('邮箱 ordinary@example.test → edited@example.test', $records[0]['description']);
+        $this->assertStringContainsString('管理员身份 普通用户 → 客服管理员', $records[0]['description']);
         $this->assertSame('超级管理员', $records[0]['role_label']);
         $this->assertSame('成功', $records[0]['result_label']);
         $this->assertSame($records[0]['description'], json_decode($records[0]['payload'], true)['description']);

@@ -39,5 +39,11 @@ class SendTelegramJob implements ShouldQueue
     {
         $telegramService = new TelegramService();
         $telegramService->sendMessage($this->telegramId, $this->text, 'markdown');
+        \App\Services\SecurityAuditService::effect('Telegram 通知发送完成', $this->auditMetadata(), 'success', true);
+    }
+
+    public function auditMetadata(): array
+    {
+        return ['telegram_id' => $this->telegramId, 'body_length' => mb_strlen($this->text)];
     }
 }
