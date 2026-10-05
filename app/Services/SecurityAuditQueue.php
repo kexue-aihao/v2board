@@ -19,7 +19,7 @@ class SecurityAuditQueue
             if (!app()->bound('request')) return [];
             $context = request()->attributes->get('security_audit_context');
             if (!$context || empty($context['actor'])) return [];
-            $origin = ['actor' => $context['actor'], 'request_id' => $context['request_id']];
+            $origin = ['actor' => $context['actor'], 'request_id' => $context['request_id'], 'action' => $context['action'] ?? ''];
             SecurityAuditService::append('job.queued', 'pending', ['job' => $payload['displayName'] ?? null, 'queue' => $queue,
                 'job_uuid' => $payload['uuid'] ?? null]);
             return ['security_audit' => $origin];

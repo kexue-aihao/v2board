@@ -21751,7 +21751,7 @@
                             className: "nav-main-link-icon si si-share-alt"
                         }),"/queue":o.a.createElement("i", {
                             className: "nav-main-link-icon si si-bar-chart"
-                        }),"/security/administrators":o.a.createElement("i",{className:"nav-main-link-icon si si-users"}),"/security/audit":o.a.createElement("i",{className:"nav-main-link-icon si si-notebook"}),"/security/account":o.a.createElement("i",{className:"nav-main-link-icon si si-lock"})};return window.adminSecurity.menus.map(function(menu){return Object.assign({},menu,{icon:icons[menu.href]});});})()
+                        }),"/security/audit":o.a.createElement("i",{className:"nav-main-link-icon si si-notebook"}),"/security/account":o.a.createElement("i",{className:"nav-main-link-icon si si-lock"})};return window.adminSecurity.menus.map(function(menu){return Object.assign({},menu,{icon:icons[menu.href]});});})()
                 }
             }
             componentDidMount() {}
@@ -22828,7 +22828,7 @@
         }
     },
 "CgOb":function(e, t, n) {
-        "use strict";
+        "use strict";var AdminRoleField=n("securityRoleField").default;
         n("bbsP");
         var r = n("/wGt")
           , i = (n("+L6B"),
@@ -22893,16 +22893,7 @@
                     }
                 })
             }
-            submit() {
-                var e = f()({}, this.props.user.user);
-                this.props.dispatch({
-                    type: "user/update",
-                    params: e,
-                    callback: ()=>{
-                        this.hide()
-                    }
-                })
-            }
+            submit(){var user=Object.assign({},this.props.user.user);delete user.is_admin;delete user.is_staff;delete user.admin_version;if(Number(user.id)===1)delete user.admin_role;this.props.dispatch({type:"user/update",params:user,callback:()=>this.hide()});}
             render() {
                 var e = this.props.user
                   , t = e.user
@@ -23093,7 +23084,7 @@
                     defaultValue: t.speed_limit,
                     placeholder: "\u7559\u7a7a\u5219\u4e0d\u9650\u5236",
                     onChange: e=>this.formChange("speed_limit", e.target.value)
-                })), null, null, p.a.createElement("div", {
+                })), p.a.createElement(AdminRoleField,{user:this.props.user.user,onChange:role=>this.formChange("admin_role",role)}), null, p.a.createElement("div", {
                     className: "form-group"
                 }, p.a.createElement("label", {
                     htmlFor: "example-text-input-alt"
@@ -84778,7 +84769,7 @@
             path: "/risk/shared-ip",
             exact: !0,
             component: n("risksharedippage").default
-        },{path:"/security/account",exact:true,component:n("securityAccount").default},{path:"/security/administrators",exact:true,component:n("securityAdministrators").default},{path:"/security/audit",exact:true,component:n("securityAudit").default},{path:"/",redirect:window.adminSecurity.landing}];
+        },{path:"/security/account",exact:true,component:n("securityAccount").default},{path:"/security/audit",exact:true,component:n("securityAudit").default},{path:"/",redirect:window.adminSecurity.landing}];
         window.g_routes = u;
         var h = n("PszG");
         h.applyForEach("patchRoutes", {
@@ -105169,58 +105160,13 @@
     }
     t.default = Account;
 },
-"securityAdministrators":function(e, t, n) {
-    n.r(t);
-    var React = n('q1tI'), h = React.createElement, Page = n('Bl7J').a;
-    class Administrators extends React.Component {
-        constructor(props) { super(props); this.state = {rows: [], total: 0, page: 1, roles: {}, userId: '', role: 'operations', email: '', error: '', busy: false}; }
-        componentDidMount() { this.load(); }
-        async load() {
-            this.setState({busy: true, error: ''});
-            try {
-                var response = await fetch('/api/v1/' + window.settings.secure_path + '/security/administrators?page=' + this.state.page + '&email=' + encodeURIComponent(this.state.email), {cache: 'no-store', headers: {authorization: localStorage.getItem('authorization')}});
-                var result = await response.json(); if (!response.ok) throw new Error(result.message || '加载失败');
-                this.setState({rows: result.data, total: result.total, roles: result.roles});
-            } catch (error) { this.setState({error: error.message}); } finally { this.setState({busy: false}); }
-        }
-        async save(event) {
-            event.preventDefault();
-            if (!confirm('确认调整用户 ID ' + this.state.userId + ' 的管理员权限？该账号的现有登录会话将失效。')) return;
-            this.setState({busy: true, error: ''});
-            try {
-                await window.adminRequest('/security/administrators/role', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({user_id: Number(this.state.userId), role: this.state.role || null})});
-                this.setState({userId: ''}); await this.load();
-            } catch (error) { this.setState({error: error.message}); } finally { this.setState({busy: false}); }
-        }
-        render() {
-            var s = this.state, self = this;
-            return h(Page, Object.assign({}, this.props, {title: '管理员权限'}), h('div', {className: 'block block-rounded'}, h('div', {className: 'block-content block-content-full'},
-                h('p', {className: 'text-muted'}, 'ID 1 是唯一超级管理员。请选择已有用户并分配一个角色；撤销权限后该账号仍可作为普通用户使用。'),
-                s.error && h('div', {role: 'alert', className: 'alert alert-danger'}, s.error),
-                h('form', {className: 'd-flex flex-wrap mb-4', onSubmit: function(event) { self.save(event); }},
-                    h('input', {className: 'form-control mr-2 mb-2', style: {maxWidth: 200}, type: 'number', min: 2, required: true, placeholder: '已有用户 ID', 'aria-label': '用户 ID', value: s.userId, onChange: function(e) { self.setState({userId: e.target.value}); }}),
-                    h('select', {className: 'form-control mr-2 mb-2', style: {maxWidth: 230}, 'aria-label': '管理员角色', value: s.role, onChange: function(e) { self.setState({role: e.target.value}); }},
-                        Object.keys(s.roles).map(function(key) { return h('option', {key: key, value: key}, s.roles[key]); }), h('option', {value: ''}, '撤销后台权限')),
-                    h('button', {className: 'btn btn-primary mb-2', disabled: s.busy}, '保存角色')),
-                h('form', {className: 'd-flex mb-3', onSubmit: function(event) { event.preventDefault(); self.setState({page: 1}, function() { self.load(); }); }},
-                    h('input', {className: 'form-control mr-2', style: {maxWidth: 320}, placeholder: '搜索管理员邮箱', 'aria-label': '搜索管理员邮箱', value: s.email, onChange: function(e) { self.setState({email: e.target.value}); }}), h('button', {className: 'btn btn-light', disabled: s.busy}, '搜索')),
-                h('div', {className: 'table-responsive'}, h('table', {className: 'table'}, h('thead', null, h('tr', null, ['ID', '邮箱', '角色', '状态', '操作'].map(function(label) { return h('th', {key: label}, label); }))),
-                    h('tbody', null, s.rows.map(function(row) { return h('tr', {key: row.id}, h('td', null, row.id), h('td', null, row.email), h('td', null, row.role === 'super' ? '超级管理员' : s.roles[row.role] || '待分配'), h('td', null, row.banned ? '已停用' : row.role ? '正常' : '后台访问已暂停'),
-                        h('td', null, row.protected ? '创始账号 · 受保护' : h('button', {className: 'btn btn-sm btn-light', onClick: function() { self.setState({userId: String(row.id), role: row.role || 'operations'}); }}, '调整角色'))); })))),
-                h('button', {className: 'btn btn-light', disabled: s.page <= 1 || s.busy, onClick: function() { self.setState({page: s.page - 1}, function() { self.load(); }); }}, '上一页'),
-                h('span', {className: 'mx-3'}, '第 ' + s.page + ' 页 / 共 ' + s.total + ' 条'),
-                h('button', {className: 'btn btn-light', disabled: s.page * 25 >= s.total || s.busy, onClick: function() { self.setState({page: s.page + 1}, function() { self.load(); }); }}, '下一页'))));
-        }
-    }
-    t.default = Administrators;
-},
 "securityAudit":function(e, t, n) {
     n.r(t);
     var React = n('q1tI'), h = React.createElement, Page = n('Bl7J').a;
     class Audit extends React.Component {
         constructor(props) { super(props); this.state = {rows: [], total: 0, page: 1, actor: '', event: '', result: '', requestId: '', detail: null, busy: false, error: '', notice: ''}; }
         componentDidMount() { this.load(); }
-        query() { var s = this.state; return new URLSearchParams(Object.fromEntries(Object.entries({actor_id: s.actor, event: s.event, result: s.result, request_id: s.requestId}).filter(function(pair) { return pair[1] !== ''; }))).toString(); }
+        query() { var s = this.state; return new URLSearchParams(Object.fromEntries(Object.entries({actor_id: s.actor, keyword: s.event, result: s.result, request_id: s.requestId}).filter(function(pair) { return pair[1] !== ''; }))).toString(); }
         async load() {
             this.setState({busy: true, error: ''});
             try {
@@ -105249,22 +105195,41 @@
                 h('p', {className: 'text-muted'}, '原始记录只追加，不提供修改和删除。查询、导出及校验操作同样留痕。'),
                 s.error && h('div', {role: 'alert', className: 'alert alert-danger'}, s.error), s.notice && h('div', {role: 'status', className: 'alert alert-info', style: {overflowWrap: 'anywhere'}}, s.notice),
                 h('form', {className: 'd-flex flex-wrap mb-3', onSubmit: function(event) { event.preventDefault(); self.setState({page: 1}, function() { self.load(); }); }},
-                    [['actor', '管理员 ID'], ['event', '事件名称'], ['requestId', '请求编号']].map(function(field) { return h('input', {key: field[0], className: 'form-control mr-2 mb-2', style: {maxWidth: 230}, placeholder: field[1], 'aria-label': field[1], value: s[field[0]], onChange: function(e) { self.setState({[field[0]]: e.target.value}); }}); }),
+                    [['actor', '管理员 ID'], ['event', '操作内容'], ['requestId', '请求编号']].map(function(field) { return h('input', {key: field[0], className: 'form-control mr-2 mb-2', style: {maxWidth: 230}, placeholder: field[1], 'aria-label': field[1], value: s[field[0]], onChange: function(e) { self.setState({[field[0]]: e.target.value}); }}); }),
                     h('select', {className: 'form-control mr-2 mb-2', style: {maxWidth: 130}, 'aria-label': '操作结果', value: s.result, onChange: function(e) { self.setState({result: e.target.value}); }},
                         [['', '全部结果'], ['success', '成功'], ['failure', '失败'], ['denied', '拒绝'], ['pending', '执行意图']].map(function(pair) { return h('option', {key: pair[0], value: pair[0]}, pair[1]); })),
                     h('button', {className: 'btn btn-primary mr-2 mb-2', disabled: s.busy}, '查询'),
                     h('button', {type: 'button', className: 'btn btn-light mr-2 mb-2', disabled: s.busy, onClick: function() { self.verify(); }}, '完整性校验'),
                     h('button', {type: 'button', className: 'btn btn-light mb-2', disabled: s.busy, onClick: function() { self.export(); }}, '导出')),
-                h('div', {className: 'table-responsive'}, h('table', {className: 'table'}, h('thead', null, h('tr', null, ['序号', '时间', '管理员 / 角色', '事件', '结果', '详情'].map(function(label) { return h('th', {key: label}, label); }))),
-                    h('tbody', null, s.rows.map(function(row) { return h('tr', {key: row.id}, h('td', null, row.id), h('td', null, new Date(row.created_at * 1000).toLocaleString()), h('td', null, (row.actor_id || '未认证 / 系统') + ' / ' + (row.role || '—')), h('td', null, row.event), h('td', null, row.result),
+                h('div', {className: 'table-responsive'}, h('table', {className: 'table'}, h('thead', null, h('tr', null, ['序号', '时间', '管理员 / 角色', '操作内容', '结果', '详情'].map(function(label) { return h('th', {key: label}, label); }))),
+                    h('tbody', null, s.rows.map(function(row) { return h('tr', {key: row.id}, h('td', null, row.id), h('td', null, new Date(row.created_at * 1000).toLocaleString()), h('td', null, (row.actor_id || '未认证 / 系统') + ' / ' + (row.role_label || '—')), h('td', null, row.description), h('td', null, row.result_label),
                         h('td', null, h('button', {className: 'btn btn-sm btn-light', onClick: function() { self.setState({detail: row}); }}, '查看'))); })))),
                 h('button', {className: 'btn btn-light', disabled: s.page <= 1 || s.busy, onClick: function() { self.setState({page: s.page - 1}, function() { self.load(); }); }}, '上一页'), h('span', {className: 'mx-3'}, '第 ' + s.page + ' 页 / 共 ' + s.total + ' 条'),
                 h('button', {className: 'btn btn-light', disabled: s.page * 25 >= s.total || s.busy, onClick: function() { self.setState({page: s.page + 1}, function() { self.load(); }); }}, '下一页'),
                 s.detail && h('section', {className: 'border rounded p-3 mt-3'}, h('button', {className: 'btn btn-light mb-2', onClick: function() { self.setState({detail: null}); }}, '收起详情'),
+                    h('h5', null, s.detail.description),
                     h('pre', {style: {whiteSpace: 'pre-wrap', overflowWrap: 'anywhere'}}, JSON.stringify(Object.assign({}, s.detail, {payload: JSON.parse(s.detail.payload)}), null, 2))))));
         }
     }
     t.default = Audit;
+},
+"securityRoleField":function(e, t, n) {
+    n.r(t);
+    var React = n('q1tI'), h = React.createElement, nextId = 0;
+    t.default = function RoleField(props) {
+        var user = props.user, protectedAccount = Number(user.id) === 1;
+        var fieldId = React.useState(function() { return 'user-admin-role-' + ++nextId; })[0];
+        var roles = protectedAccount ? [['super', '超级管理员']] : [
+            ['', '普通用户'], ['operations', '运维管理员'], ['finance', '财务管理员'],
+            ['support', '客服管理员'], ['marketing', '运营管理员'],
+        ];
+        return h('div', {className: 'form-group'},
+            h('label', {htmlFor: fieldId}, '管理员身份'),
+            h('select', {id: fieldId, className: 'form-control', 'aria-label': '管理员身份',
+                value: protectedAccount ? 'super' : user.admin_role || '', disabled: protectedAccount,
+                onChange: function(event) { props.onChange(event.target.value || null); }},
+                roles.map(function(role) { return h('option', {key: role[0], value: role[0]}, role[1]); })));
+    };
 },
 "shjB":function(e,t){var n=9007199254740991;function r(e){return"number"==typeof e&&e>-1&&e%1==0&&e<=n}e.exports=r},
 "showgiftcardpage":function(e, t, n) {

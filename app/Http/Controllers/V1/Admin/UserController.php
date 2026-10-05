@@ -18,6 +18,7 @@ use App\Models\Subscription;
 use App\Models\SubscribeRequestLog;
 use App\Models\NodeConnectionLog;
 use App\Services\AuthService;
+use App\Services\AdminAccessService;
 use App\Services\PasswordPolicyService;
 use App\Services\ServerService;
 use App\Services\SubscribeAuditRetentionService;
@@ -249,10 +250,23 @@ class UserController extends Controller
 
     public function update(UserUpdate $request)
     {
+        return DB::transaction(function () use ($request) { return $this->saveUserUpdate($request); });
+    }
+
+    private function saveUserUpdate(UserUpdate $request)
+    {
         $params = $request->validated();
-        $user = User::find($request->input('id'));
+        $roleSupplied = array_key_exists('admin_role', $params);
+        $role = $params['admin_role'] ?? null;
+        unset($params['admin_role']);
+        $user = User::where('id', $request->input('id'))->lockForUpdate()->first();
         if (!$user) {
             abort(500, __('用户不存在'));
+        }
+        if ($roleSupplied) {
+            abort_unless(($request->user['admin_role'] ?? null) === 'super', 403, '只有超级管理员可以修改管理员身份');
+            abort_if((int)$user->id === 1, 403, '不能修改唯一超级管理员的身份');
+            abort_if($role !== null && (int)$params['banned'] === 1, 422, '停用账号不能分配管理员身份');
         }
         if (User::where('email', $params['email'])->first() && $user->email !== $params['email']) {
             abort(500, __('邮箱已被使用'));
@@ -287,8 +301,7 @@ class UserController extends Controller
         }
 
         if (isset($params['banned']) && (int)$params['banned'] === 1) {
-            $authService = new AuthService($user);
-            $authService->removeAllSession();
+            DB::afterCommit(function () use ($user) { (new AuthService($user))->removeAllSession(); });
         }
 
         try {
@@ -308,6 +321,7 @@ class UserController extends Controller
         } catch (\Exception $e) {
             abort(500, __('保存失败'));
         }
+        if ($roleSupplied) AdminAccessService::changeRole($user, $role);
         return response([
             'data' => true
         ]);

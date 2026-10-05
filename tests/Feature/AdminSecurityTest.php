@@ -61,6 +61,7 @@ class AdminSecurityTest extends TestCase
             $headers = $this->headers($id);
             $bootstrap = $this->getJson($this->base . '/security/bootstrap', $headers)->assertOk()->assertJsonPath('data.role', $role)->assertJsonPath('data.landing', $landing);
             $menus = array_column($bootstrap->json('data.menus'), 'href');
+            $this->assertNotContains('/security/administrators', $menus);
             if ($role === 'super') {
                 $this->assertSame(['type' => 'item', 'title' => '仪表盘', 'href' => '/dashboard'], $bootstrap->json('data.menus')[0]);
             }
@@ -242,7 +243,7 @@ class AdminSecurityTest extends TestCase
         $request = Request::create('/audit-jobs', 'POST');
         $this->app->instance('request', $request);
         $actor = AdminAccessService::actor(User::find(1));
-        $original = ['actor' => $actor, 'request_id' => str_repeat('a', 32), 'changes' => [], 'statements' => []];
+        $original = ['actor' => $actor, 'request_id' => str_repeat('a', 32), 'action' => 'App\\Http\\Controllers\\V1\\Admin\\UserController@sendMail', 'changes' => [], 'statements' => []];
         $request->attributes->set('security_audit_context', $original);
         try {
             Queue::connection('sync')->push(new AuditedTestJob(false, true));
@@ -251,6 +252,10 @@ class AdminSecurityTest extends TestCase
             $this->assertSame($original, $request->attributes->get('security_audit_context'));
         }
         $this->assertDatabaseHas('v2_admin_audit', ['event' => 'job.finish', 'result' => 'failure', 'actor_id' => 1]);
+        $queued = DB::table('v2_admin_audit')->where('event', 'job.queued')->first();
+        $finished = DB::table('v2_admin_audit')->where('event', 'job.finish')->first();
+        $this->assertSame('提交后台任务：向用户发送邮件', json_decode($queued->payload, true)['description']);
+        $this->assertSame('完成后台任务：向用户发送邮件', json_decode($finished->payload, true)['description']);
         $this->assertStringNotContainsString('secret-job-failure', DB::table('v2_admin_audit')->pluck('payload')->implode(''));
         $this->assertNull($request->attributes->get('security_audit_queue_stack'));
     }
@@ -368,6 +373,123 @@ class AdminSecurityTest extends TestCase
         $this->postJson($this->base . '/user/update', ['id' => 6, 'email' => 'updated@example.test', 'banned' => 0, 'is_admin' => 0, 'is_staff' => 0], $super)->assertOk();
         $this->postJson($this->base . '/user/update', ['id' => 6, 'email' => 'updated-again@example.test', 'banned' => 0], $super)->assertOk();
         $this->assertDatabaseHas('v2_user', ['id' => 6, 'email' => 'updated-again@example.test', 'is_admin' => 0]);
+    }
+
+    private function prepareUserEdit(): void
+    {
+        Schema::table('v2_user', function (Blueprint $table) {
+            $table->integer('group_id')->nullable(); $table->integer('invite_user_id')->nullable();
+        });
+    }
+
+    public function testUserEditorAssignsAllRolesAndRevokesExistingSessions(): void
+    {
+        $this->prepareUserEdit();
+        $super = $this->headers(1);
+        foreach (array_merge(AdminAccessService::ASSIGNABLE, [null]) as $index => $role) {
+            $old = $this->headers(6);
+            $this->postJson($this->base . '/user/update', ['id' => 6, 'email' => 'edited@example.test', 'banned' => 0, 'admin_role' => $role], $super)->assertOk();
+            $this->assertDatabaseHas('v2_user', ['id' => 6, 'admin_role' => $role, 'is_admin' => $role ? 1 : 0, 'is_staff' => 0, 'admin_version' => $index + 1]);
+            $this->assertFalse(AuthService::decryptAuthData($old['Authorization']));
+        }
+        $record = DB::table('v2_admin_audit')->where('event', 'administrator.role')->orderByDesc('id')->first();
+        $payload = json_decode($record->payload, true);
+        $this->assertSame('修改管理员身份：运营管理员 → 普通用户（ID 6）', $payload['description']);
+        $this->assertTrue(SecurityAuditService::verify()['valid']);
+    }
+
+    public function testSavingAnUnchangedRoleKeepsItsVersionAndSession(): void
+    {
+        $this->prepareUserEdit();
+        $old = $this->headers(2);
+        $this->postJson($this->base . '/user/update', ['id' => 2, 'email' => 'edited@example.test', 'banned' => 0, 'admin_role' => 'operations'], $this->headers(1))->assertOk();
+        $this->assertDatabaseHas('v2_user', ['id' => 2, 'admin_role' => 'operations', 'admin_version' => 1]);
+        $this->getJson($this->base . '/security/bootstrap', $old)->assertOk();
+        $this->assertSame(0, DB::table('v2_admin_audit')->where('event', 'administrator.role')->count());
+    }
+
+    public function testUserEditorRejectsPrivilegeEscalationAndProtectsTheFounder(): void
+    {
+        $this->prepareUserEdit();
+        $super = $this->headers(1);
+        $params = ['id' => 6, 'email' => 'ordinary@example.test', 'banned' => 0, 'admin_role' => 'finance'];
+        foreach ([2, 3, 4, 5, 6] as $id) $this->postJson($this->base . '/user/update', $params, $this->headers($id))->assertForbidden();
+        $this->postJson($this->base . '/user/update', array_merge($params, ['admin_role' => 'super']), $super)->assertStatus(422);
+        $this->postJson($this->base . '/user/update', array_merge($params, ['banned' => 1]), $super)->assertStatus(422);
+        $this->postJson($this->base . '/user/update', array_merge($params, ['id' => 1, 'email' => 'founder@example.test']), $super)->assertForbidden();
+        $this->assertDatabaseHas('v2_user', ['id' => 6, 'is_admin' => 0, 'banned' => 0, 'admin_role' => null]);
+        $this->assertDatabaseHas('v2_user', ['id' => 1, 'is_admin' => 1, 'admin_role' => null]);
+    }
+
+    public function testFailedUserEditLeavesRoleAndSessionUntouched(): void
+    {
+        $this->prepareUserEdit();
+        $old = $this->headers(2);
+        $super = $this->headers(1);
+        $this->postJson($this->base . '/user/update', ['id' => 2, 'email' => 'invalid', 'banned' => 0, 'admin_role' => 'finance'], $super)->assertStatus(422);
+        Event::listen('eloquent.updated: ' . User::class, function ($user) {
+            if ((int)$user->id === 2 && $user->admin_role === 'finance') DB::table('v2_admin_audit_head')->delete();
+        });
+        $this->postJson($this->base . '/user/update', ['id' => 2, 'email' => 'edited@example.test', 'banned' => 0, 'admin_role' => 'finance'], $super)->assertStatus(500);
+        $this->assertDatabaseHas('v2_user', ['id' => 2, 'email' => 'operations@example.test', 'admin_role' => 'operations', 'admin_version' => 1]);
+        $this->getJson($this->base . '/security/bootstrap', $old)->assertOk();
+        $this->assertTrue(SecurityAuditService::verify()['valid']);
+    }
+
+    public function testChineseActionsAreStoredSignedAndSearchable(): void
+    {
+        $this->prepareUserEdit();
+        $super = $this->headers(1);
+        $this->postJson($this->base . '/user/update', ['id' => 6, 'email' => 'edited@example.test', 'banned' => 0, 'admin_role' => 'support'], $super)->assertOk();
+        $records = $this->getJson($this->base . '/security/audit?' . http_build_query(['keyword' => '修改用户资料', 'event' => 'request.finish']), $super)->assertOk()->json('data');
+        $this->assertCount(1, $records);
+        $this->assertSame('修改用户资料（ID 6）', $records[0]['description']);
+        $this->assertSame('超级管理员', $records[0]['role_label']);
+        $this->assertSame('成功', $records[0]['result_label']);
+        $this->assertSame($records[0]['description'], json_decode($records[0]['payload'], true)['description']);
+        $this->assertTrue(SecurityAuditService::verify()['valid']);
+    }
+
+    public function testBanningAndRevokingIdentityOnlyRemovesSessionsAfterSuccessfulSave(): void
+    {
+        $this->prepareUserEdit();
+        $old = $this->headers(2);
+        $super = $this->headers(1);
+        $fail = true;
+        Event::listen('eloquent.updated: ' . User::class, function ($user) use (&$fail) {
+            if ($fail && (int)$user->id === 2 && !$user->is_admin) DB::table('v2_admin_audit_head')->delete();
+        });
+        $params = ['id' => 2, 'email' => 'edited@example.test', 'banned' => 1, 'admin_role' => null];
+        $this->postJson($this->base . '/user/update', $params, $super)->assertStatus(500);
+        $this->assertDatabaseHas('v2_user', ['id' => 2, 'email' => 'operations@example.test', 'banned' => 0, 'admin_role' => 'operations']);
+        $this->getJson($this->base . '/security/bootstrap', $old)->assertOk();
+        $fail = false;
+        $this->postJson($this->base . '/user/update', $params, $super)->assertOk();
+        $this->assertDatabaseHas('v2_user', ['id' => 2, 'banned' => 1, 'admin_role' => null, 'is_admin' => 0]);
+        $this->assertFalse(AuthService::decryptAuthData($old['Authorization']));
+        $record = DB::table('v2_admin_audit')->where('event', 'administrator.role')->orderByDesc('id')->first();
+        $this->assertSame('修改管理员身份：运维管理员 → 普通用户（ID 2）', json_decode($record->payload, true)['description']);
+        $this->assertTrue(SecurityAuditService::verify()['valid']);
+    }
+
+    public function testLegacyAuditActionsDisplayInChineseWithoutRewritingTheChain(): void
+    {
+        $head = DB::table('v2_admin_audit_head')->where('id', 1)->first();
+        $sequence = $head->sequence + 1;
+        $payload = ['version' => 1, 'sequence' => $sequence, 'request_id' => str_repeat('a', 32), 'actor_id' => 1,
+            'role' => 'super', 'event' => 'request.finish', 'result' => 'success', 'time' => time(),
+            'details' => ['action' => 'App\\Http\\Controllers\\V1\\Admin\\UserController@update', 'input' => ['id' => 6]]];
+        $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $hash = hash_hmac('sha256', $head->hash . "\n" . $json, config('admin_security.audit_key'));
+        DB::table('v2_admin_audit')->insert(['id' => $sequence, 'request_id' => $payload['request_id'], 'actor_id' => 1,
+            'role' => 'super', 'event' => 'request.finish', 'result' => 'success', 'created_at' => $payload['time'],
+            'payload' => $json, 'previous_hash' => $head->hash, 'hash' => $hash]);
+        DB::table('v2_admin_audit_head')->where('id', 1)->update(['sequence' => $sequence, 'hash' => $hash]);
+        $records = $this->getJson($this->base . '/security/audit?' . http_build_query(['keyword' => '修改用户资料']), $this->headers(1))->assertOk()->json('data');
+        $this->assertCount(1, $records);
+        $this->assertSame('修改用户资料（ID 6）', $records[0]['description']);
+        $this->assertSame($json, DB::table('v2_admin_audit')->where('id', $sequence)->value('payload'));
+        $this->assertTrue(SecurityAuditService::verify()['valid']);
     }
 
     public function testOperationsCannotChangeRewardRulesThroughLegacyConfigEndpoint(): void

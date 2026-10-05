@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class AdminAccessService
 {
@@ -49,6 +50,28 @@ class AdminAccessService
             $menus[] = ['type' => 'item', 'title' => $page[0], 'href' => $page[1]];
         }
         return $menus;
+    }
+
+    public static function changeRole(User $user, ?string $role): bool
+    {
+        abort_if((int)$user->id === 1, 403, '不能修改唯一超级管理员的身份');
+        abort_if($role !== null && !in_array($role, self::ASSIGNABLE, true), 422, '管理员身份无效');
+        return DB::transaction(function () use ($user, $role) {
+            $user = User::where('id', $user->id)->lockForUpdate()->firstOrFail();
+            abort_if($role !== null && $user->banned, 422, '请先解除该账号的停用状态');
+            if ($user->admin_role === $role && (int)$user->is_admin === ($role ? 1 : 0) && !(int)$user->is_staff) return false;
+            $before = ['role' => $user->admin_role, 'version' => (int)$user->admin_version];
+            $user->admin_role = $role;
+            $user->admin_version = (int)$user->admin_version + 1;
+            $user->is_admin = $role ? 1 : 0;
+            $user->is_staff = 0;
+            if (!$user->save()) abort(500, '管理员身份保存失败');
+            SecurityAuditService::append('administrator.role', 'success', ['target_id' => $user->id,
+                'before' => $before, 'after' => ['role' => $role, 'version' => (int)$user->admin_version]]);
+            // Revoke Redis/cache sessions only once the entire user edit commits.
+            DB::afterCommit(function () use ($user) { (new AuthService($user))->removeAllSession(); });
+            return true;
+        });
     }
 
     public static function allows(string $role, string $action): bool
@@ -119,9 +142,13 @@ class AdminAccessService
         if (strpos($action, 'Admin\\UserController@') !== false && $request->isMethod('POST')) {
             foreach (['admin_role', 'admin_version', 'is_admin', 'is_staff'] as $field) {
                 if (!$request->exists($field)) continue;
+                if ($field === 'admin_role' && substr($action, -strlen('Admin\\UserController@update')) === 'Admin\\UserController@update') {
+                    abort_if((int)$request->input('id') === 1, 403, '不能修改唯一超级管理员的身份');
+                    continue;
+                }
                 $target = User::find($request->input('id'));
                 if (!$target || (string)$request->input($field) !== (string)$target->$field) {
-                    abort(422, '请通过「管理员权限」分配角色');
+                    abort(422, '请在用户编辑窗口选择管理员身份');
                 }
                 $request->request->remove($field);
             }

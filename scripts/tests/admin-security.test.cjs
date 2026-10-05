@@ -12,18 +12,22 @@ for (const role of ['guest', 'super', 'operations', 'finance', 'support', 'marke
         const result = compile(role);
         assert.equal(crypto.createHash('sha256').update(result.code).digest('hex'), manifest.roles[role].sha256);
         assert.deepEqual(result.modules, manifest.roles[role].modules);
+        assert.ok(!result.modules.includes('securityAdministrators'));
+        assert.ok(!result.code.includes('/security/administrators'));
         if (role !== 'super') {
-            assert.ok(!result.modules.includes('securityAdministrators'));
             assert.ok(!result.modules.includes('securityAudit'));
             assert.ok(!result.modules.includes('d1ca'));
             assert.ok(!result.code.includes('/user/update'));
         }
         if (role === 'super') {
+            assert.ok(result.modules.includes('securityRoleField'));
+            assert.ok(result.code.includes('formChange("admin_role"'));
             assert.ok(result.code.includes('/user/update'));
             assert.ok(result.code.includes('formChange("email"'));
             assert.ok(!result.code.includes('formChange("is_admin"'));
             assert.ok(!result.code.includes('formChange("is_staff"'));
         }
+        if (role !== 'super') assert.ok(!result.modules.includes('securityRoleField'));
         if (role === 'finance') {
             assert.ok(!result.code.includes('/user/getUserInfoById'));
             assert.ok(!result.code.includes('user/addFilter'));

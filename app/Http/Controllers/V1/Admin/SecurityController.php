@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\AdminAccessService;
 use App\Services\AuthService;
 use App\Services\SecurityAuditService;
+use App\Services\SecurityAuditDescription;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -49,17 +50,7 @@ class SecurityController extends Controller
         $data = $request->validate(['user_id' => 'required|integer|min:2', 'role' => 'nullable|in:operations,finance,support,marketing']);
         return DB::transaction(function () use ($data) {
             $user = User::where('id', $data['user_id'])->lockForUpdate()->firstOrFail();
-            abort_if($user->banned, 422, '请先解除该账号的停用状态');
-            $before = ['role' => AdminAccessService::role($user), 'version' => (int)$user->admin_version];
-            $role = $data['role'] ?? null;
-            $user->admin_role = $role;
-            $user->admin_version = (int)$user->admin_version + 1;
-            $user->is_admin = $role ? 1 : 0;
-            $user->is_staff = 0;
-            $user->save();
-            SecurityAuditService::append('administrator.role', 'success', ['target_id' => $user->id, 'before' => $before,
-                'after' => ['role' => $role, 'version' => $user->admin_version]]);
-            (new AuthService($user))->removeAllSession();
+            AdminAccessService::changeRole($user, $data['role'] ?? null);
             return response(['data' => true]);
         });
     }
@@ -90,9 +81,23 @@ class SecurityController extends Controller
             'actor_id' => 'nullable|integer|min:1', 'event' => 'nullable|string|max:100',
             'result' => 'nullable|in:success,failure,pending,denied', 'request_id' => 'nullable|regex:/^[a-f0-9]{32}$/',
             'from' => 'nullable|integer|min:0', 'to' => 'nullable|integer|min:0',
+            'keyword' => 'nullable|string|max:100',
         ]);
         $query = DB::table('v2_admin_audit');
         foreach (['actor_id', 'event', 'result', 'request_id'] as $key) if (isset($data[$key])) $query->where($key, $data[$key]);
+        if (!empty($data['keyword'])) {
+            $query->where(function ($query) use ($data) {
+                $sqlite = DB::connection()->getDriverName() === 'sqlite';
+                $description = "JSON_EXTRACT(payload, '$.description')";
+                $action = "JSON_EXTRACT(payload, '$.details.action')";
+                if (!$sqlite) { $description = 'JSON_UNQUOTE(' . $description . ')'; $action = 'JSON_UNQUOTE(' . $action . ')'; }
+                $query->whereRaw($description . " LIKE ? ESCAPE '!'", [SecurityAuditDescription::searchPattern($data['keyword'])]);
+                foreach (SecurityAuditDescription::legacySearchTerms($data['keyword']) as $term) {
+                    $query->orWhereRaw($action . " LIKE ? ESCAPE '!'", [SecurityAuditDescription::searchPattern($term)]);
+                    if (strpos($term, '\\') === false && strpos($term, '@') === false) $query->orWhere('event', $term);
+                }
+            });
+        }
         if (isset($data['from'])) $query->where('created_at', '>=', $data['from']);
         if (isset($data['to'])) $query->where('created_at', '<=', $data['to']);
         return $query;
@@ -101,7 +106,7 @@ class SecurityController extends Controller
     public function audit(Request $request)
     {
         $rows = $this->auditQuery($request)->orderByDesc('id')->paginate(min(100, max(1, (int)$request->input('page_size', 25))));
-        return response(['data' => $rows->items(), 'total' => $rows->total()])->header('Cache-Control', 'private, no-store');
+        return response(['data' => array_map([SecurityAuditDescription::class, 'row'], $rows->items()), 'total' => $rows->total()])->header('Cache-Control', 'private, no-store');
     }
 
     public function verifyAudit()

@@ -89,7 +89,6 @@ function compile(role) {
             }
             if (role !== 'guest') routes.push('{path:"/security/account",exact:true,component:n("securityAccount").default}');
             if (role === 'super') {
-                routes.push('{path:"/security/administrators",exact:true,component:n("securityAdministrators").default}');
                 routes.push('{path:"/security/audit",exact:true,component:n("securityAudit").default}');
             }
             routes.push('{path:"/",redirect:window.adminSecurity.landing}');
@@ -129,7 +128,7 @@ function compile(role) {
             }
             if (!createElement) throw new Error('Menu icon extraction failed');
             const securityIcons = role === 'super'
-                ? {'/security/administrators': 'si-users', '/security/audit': 'si-notebook', '/security/account': 'si-lock'}
+                ? {'/security/audit': 'si-notebook', '/security/account': 'si-lock'}
                 : role === 'guest' ? {} : {'/security/account': 'si-lock'};
             for (const [href, icon] of Object.entries(securityIcons)) {
                 icons.push(JSON.stringify(href) + ':' + createElement + '("i",{className:"nav-main-link-icon si ' + icon + '"})');
@@ -186,11 +185,23 @@ function compile(role) {
                 const row = ancestors.slice().reverse().find(a => a.type === 'CallExpression' && a.callee.type === 'MemberExpression' && a.callee.property.name === 'createElement'
                     && a.arguments[1] && a.arguments[1].type === 'ObjectExpression' && a.arguments[1].properties.some(p => ['label', 'title'].includes(propertyName(p)) || (propertyName(p) === 'className' && p.value.value === 'form-group')));
                 if (!row) throw new Error('Cannot remove legacy administrator toggle in ' + id);
-                replace(row, 'null');
+                if (role === 'super' && node.arguments[0].value === 'is_admin') {
+                    const factory = wrapped.slice(row.callee.start, row.callee.end);
+                    replace(row, factory + '(AdminRoleField,{user:this.props.user.user,onChange:role=>this.formChange("admin_role",role)})');
+                } else replace(row, 'null');
             },
         }));
     }
-    for (const [id, file] of Object.entries({securitySupport: 'support', securityAccount: 'account', securityAdministrators: 'administrators', securityAudit: 'audit'})) {
+    if (role === 'super') modules.CgOb = edit(modules.CgOb, (ast, replace) => walk.simple(ast, {
+        ExpressionStatement(node) {
+            if (node.directive === 'use strict') replace(node, '"use strict";var AdminRoleField=n("securityRoleField").default;');
+        },
+        MethodDefinition(node) {
+            if (propertyName(node) !== 'submit') return;
+            replace(node, `submit(){var user=Object.assign({},this.props.user.user);delete user.is_admin;delete user.is_staff;delete user.admin_version;if(Number(user.id)===1)delete user.admin_role;this.props.dispatch({type:"user/update",params:user,callback:()=>this.hide()});}`);
+        },
+    }));
+    for (const [id, file] of Object.entries({securitySupport: 'support', securityAccount: 'account', securityRoleField: 'role-field', securityAudit: 'audit'})) {
         modules[id] = read('scripts/admin-security/' + file + '.js').trim();
     }
     // Include only reachable modules. Literal references also cover webpack's
@@ -228,7 +239,7 @@ function build() {
     const out = path.join(root, 'resources/admin/build');
     fs.mkdirSync(out, {recursive: true});
     const sourceFiles = ['resources/admin/legacy/umi.js', 'resources/admin/legacy/vendors.async.js', 'resources/admin/legacy/components.async.js',
-        'scripts/build-admin-security.cjs', ...['support', 'account', 'administrators', 'audit'].map(name => 'scripts/admin-security/' + name + '.js')];
+        'scripts/build-admin-security.cjs', ...['support', 'account', 'role-field', 'audit'].map(name => 'scripts/admin-security/' + name + '.js')];
     const manifest = {version: 1, sources: Object.fromEntries(sourceFiles.map(file => [file, crypto.createHash('sha256').update(read(file).replace(/\r\n/g, '\n')).digest('hex')])), roles: {}};
     for (const role of Object.keys(roleModels)) {
         const result = compile(role);

@@ -6,7 +6,7 @@ const http = require('node:http');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '../..');
 const roles = {
-    super: ['/security/administrators', ['/dashboard', '/config/system', '/config/payment', '/config/theme', '/server/manage', '/server/group', '/server/route', '/plan', '/order', '/coupon', '/giftcard', '/user', '/notice', '/ticket', '/knowledge', '/reseller', '/external', '/reward', '/risk/trace', '/risk/gateway', '/risk/shared-ip', '/queue', '/security/administrators', '/security/audit', '/security/account']],
+    super: ['/security/audit', ['/dashboard', '/config/system', '/config/payment', '/config/theme', '/server/manage', '/server/group', '/server/route', '/plan', '/order', '/coupon', '/giftcard', '/user', '/notice', '/ticket', '/knowledge', '/reseller', '/external', '/reward', '/risk/trace', '/risk/gateway', '/risk/shared-ip', '/queue', '/security/audit', '/security/account']],
     operations: ['/server/manage', ['/config/system', '/config/payment', '/config/theme', '/server/manage', '/server/group', '/server/route', '/risk/trace', '/risk/gateway', '/risk/shared-ip', '/security/account']],
     finance: ['/order', ['/order', '/security/account']], support: ['/ticket', ['/ticket', '/security/account']],
     marketing: ['/plan', ['/plan', '/coupon', '/giftcard', '/reward', '/security/account']],
@@ -17,7 +17,7 @@ const labels = {
     '/plan': '订阅管理', '/coupon': '优惠券管理', '/giftcard': '礼品卡管理', '/user': '用户管理', '/notice': '公告管理',
     '/ticket': '工单管理', '/knowledge': '知识库管理', '/reseller': '倒卖商管理', '/external': '外部订阅源',
     '/reward': '签到与娱乐', '/risk/trace': '订阅溯源', '/risk/gateway': '订阅清洗网关', '/risk/shared-ip': '多账号同 IP',
-    '/queue': '队列监控', '/security/account': '账号安全', '/security/administrators': '管理员权限', '/security/audit': '安全审计',
+    '/queue': '队列监控', '/security/account': '账号安全', '/security/audit': '安全审计',
 };
 const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/admin/umi.css"><link rel="stylesheet" href="/assets/admin/components.chunk.css"></head><body><div id="root"></div><script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};</script><script src="/assets/admin/security-loader.js"></script></body></html>';
 const server = http.createServer((req, res) => {
@@ -34,11 +34,15 @@ const server = http.createServer((req, res) => {
         for (const role of (process.env.ADMIN_TEST_ROLE ? [process.env.ADMIN_TEST_ROLE] : ['guest', ...Object.keys(roles)])) {
             const context = await browser.newContext({viewport: {width: role === 'support' ? 390 : 1440, height: 1000}});
             const page = await context.newPage(), errors = [], calls = [];
+            const edits = [], userDefaults = {transfer_enable: 107374182400, u: 0, d: 0, total_used: 0, balance: 0, commission_balance: 0, device_limit: 6, expired_at: null, plan_id: null, banned: 0, commission_type: 0, commission_rate: null, discount: null, speed_limit: null, is_staff: 0, admin_version: 1, created_at: 1700000000, updated_at: 1700000000, alive_ip: 0, subscribe_url: 'https://example.test/subscribe', remarks: ''};
+            const users = [Object.assign({}, userDefaults, {id: 6, email: 'member@example.test', is_admin: 0, admin_role: null}), Object.assign({}, userDefaults, {id: 1, email: 'founder@example.test', is_admin: 1, admin_role: null})];
             const order = {id: 10, trade_no: 'TEST-ORDER-123', user_id: 6, invite_user_id: 8, plan_id: 1, plan_name: '测试套餐', period: 'month_price', type: 1, status: 3, total_amount: 1000, balance_amount: 0, discount_amount: 0, refund_amount: 0, surplus_amount: 0, commission_balance: 100, commission_status: 0, created_at: 1700000000, updated_at: 1700000000, commission_log: [], user: {id: 6, email: 'buyer@example.test'}, invite_user: {id: 8, email: 'inviter@example.test'}};
             page.on('pageerror', error => { errors.push(error.message); console.error(role, error.message); });
+            if (process.env.ADMIN_BROWSER_DEBUG) page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
             if (role !== 'guest') await page.addInitScript(() => localStorage.setItem('authorization', 'fixture'));
             await page.route('**/api/v1/test/**', async route => {
                 const url = new URL(route.request().url()), endpoint = url.pathname.replace('/api/v1/test', ''); calls.push(endpoint);
+                if (process.env.ADMIN_BROWSER_DEBUG) console.log(role, route.request().method(), url.pathname + url.search);
                 const currentRole = role === 'guest' ? 'operations' : role;
                 let body = {data: [], total: 0};
                 if (endpoint === '/security/bootstrap') body.data = {role: currentRole, version: 1, role_label: currentRole, menus: roles[currentRole][1].map(href => ({href, title: labels[href] || href, type: 'item'})), landing: roles[currentRole][0], debug_exempt: true};
@@ -46,7 +50,17 @@ const server = http.createServer((req, res) => {
                 else if (endpoint === '/user/info') body.data = {email: 'admin@example.test'};
                 else if (endpoint === '/user/checkLogin') body.data = {is_login: true, is_admin: true};
                 else if (endpoint === '/passport/auth/login') body.data = {auth_data: 'logged-in', is_admin: true};
-                else if (endpoint === '/security/administrators') body = {data: [{id: 1, email: 'founder@example.test', role: 'super', protected: true}], total: 1, roles: {operations: '运维管理员', finance: '财务管理员', support: '客服管理员', marketing: '运营管理员'}};
+                else if (endpoint === '/security/audit') body = {data: [{id: 1, actor_id: 1, role: 'super', role_label: '超级管理员', event: 'request.finish', description: '修改用户资料（ID 6）', result: 'success', result_label: '成功', created_at: 1700000000, payload: JSON.stringify({description: '修改用户资料（ID 6）'})}], total: 1};
+                else if (endpoint === '/user/fetch') body = {data: users, total: users.length};
+                else if (endpoint === '/user/getUserInfoById') body.data = users.find(user => Number(user.id) === Number(url.searchParams.get('id')));
+                else if (endpoint === '/user/update') {
+                    const data = route.request().postDataJSON(), user = users.find(user => Number(user.id) === Number(data.id));
+                    edits.push(data);
+                    // Form posts carry strings; the real model returns numbers
+                    // and nullable fields after Laravel validation and casting.
+                    for (const [key, value] of Object.entries(data)) user[key] = typeof user[key] === 'number' ? Number(value) : value === '' && user[key] === null ? null : value;
+                    body.data = true;
+                }
                 else if (endpoint === '/2fa/status') body.data = {enabled: false};
                 else if (endpoint === '/2fa/setup') body.data = {manual_key: 'TEST-SETUP-KEY'};
                 else if (endpoint === '/2fa/confirm') body.data = {recovery_codes: ['TEST-RECOVERY-ONE', 'TEST-RECOVERY-TWO']};
@@ -83,6 +97,55 @@ const server = http.createServer((req, res) => {
                     assert.ok(icon.content && !['none', 'normal', '""'].includes(icon.content), icon.title + ' has an icon glyph');
                 }
                 assert.equal(await page.locator('#sidebar .nav-main-link.active .nav-main-link-name').textContent(), labels[roles[role][0]], role + ' active menu');
+                if (role === 'super') {
+                    await page.getByRole('cell', {name: '修改用户资料（ID 6）', exact: true}).waitFor();
+                    assert.equal(await page.getByRole('cell', {name: '成功', exact: true}).count(), 1);
+                    await page.getByLabel('操作内容', {exact: true}).fill('修改用户资料');
+                    await Promise.all([page.waitForResponse(response => new URL(response.url()).searchParams.get('keyword') === '修改用户资料'), page.getByRole('button', {name: '查询', exact: true}).click()]);
+                    if (process.env.ADMIN_SCREENSHOT_DIR) {
+                        fs.mkdirSync(process.env.ADMIN_SCREENSHOT_DIR, {recursive: true});
+                        await page.screenshot({path: path.join(process.env.ADMIN_SCREENSHOT_DIR, 'audit-chinese.png'), fullPage: true});
+                    }
+                    await page.evaluate(() => { location.hash = '/user'; });
+                    async function editUser(email) {
+                        await page.getByText(email, {exact: true}).first().waitFor();
+                        // Ant Table renders the action column again in its fixed
+                        // right pane; the copy beside the email is hidden.
+                        await page.locator('tr a.ant-dropdown-trigger:visible').nth(users.findIndex(user => user.email === email)).click();
+                        await page.locator('.ant-dropdown:visible').getByText('编辑', {exact: true}).click();
+                        await page.locator('.ant-drawer-open select[aria-label="管理员身份"]').waitFor({timeout: 10000});
+                    }
+                    await editUser('member@example.test');
+                    const roleField = page.locator('.ant-drawer-open select[aria-label="管理员身份"]');
+                    assert.deepEqual(await roleField.locator('option').allTextContents(), ['普通用户', '运维管理员', '财务管理员', '客服管理员', '运营管理员']);
+                    assert.equal(await page.getByText('是否管理员', {exact: true}).count(), 0);
+                    assert.equal(await page.getByText('是否员工', {exact: true}).count(), 0);
+                    await roleField.selectOption('finance');
+                    if (process.env.ADMIN_SCREENSHOT_DIR) {
+                        await roleField.scrollIntoViewIfNeeded();
+                        await page.screenshot({path: path.join(process.env.ADMIN_SCREENSHOT_DIR, 'user-role-editor.png'), fullPage: true});
+                    }
+                    // Ant Design inserts a space between two Chinese characters.
+                    await Promise.all([page.waitForResponse(response => response.url().endsWith('/user/update')), page.locator('.ant-drawer-open').getByRole('button', {name: /^提\s*交$/}).click()]);
+                    assert.equal(edits[0].admin_role, 'finance');
+                    for (const field of ['is_admin', 'is_staff', 'admin_version']) assert.ok(!Object.hasOwn(edits[0], field), 'editor does not send ' + field);
+                    await roleField.waitFor({state: 'hidden'});
+                    await editUser('member@example.test');
+                    assert.equal(await roleField.inputValue(), 'finance', 'saved identity is restored when reopening');
+                    await page.setViewportSize({width: 390, height: 1000});
+                    await roleField.scrollIntoViewIfNeeded();
+                    if (process.env.ADMIN_SCREENSHOT_DIR) await page.screenshot({path: path.join(process.env.ADMIN_SCREENSHOT_DIR, 'user-role-editor-mobile.png'), fullPage: true});
+                    await page.locator('.ant-drawer-open').getByRole('button', {name: /^取\s*消$/}).click();
+                    await roleField.waitFor({state: 'hidden'});
+                    await page.setViewportSize({width: 1440, height: 1000});
+                    await editUser('founder@example.test');
+                    assert.equal(await roleField.isDisabled(), true);
+                    assert.equal(await roleField.inputValue(), 'super');
+                    assert.deepEqual(await roleField.locator('option').allTextContents(), ['超级管理员']);
+                    await Promise.all([page.waitForResponse(response => response.url().endsWith('/user/update')), page.locator('.ant-drawer-open').getByRole('button', {name: /^提\s*交$/}).click()]);
+                    assert.ok(!Object.hasOwn(edits[1], 'admin_role'), 'founder edits preserve the protected identity');
+                    await roleField.waitFor({state: 'hidden'});
+                }
                 if (role === 'support') {
                     await page.getByRole('link', {name: '阅读与回复'}).click(); await page.locator('#support-reply').fill('已收到，我们会处理。');
                     await Promise.all([page.waitForResponse(r => r.url().endsWith('/ticket/reply')), page.getByRole('button', {name: '回复工单', exact: true}).click()]);
@@ -129,7 +192,7 @@ const server = http.createServer((req, res) => {
                     assert.equal(await page.evaluate(() => window.adminSecurityRecoveryPending), true);
                     await page.getByRole('button', {name: '已保存，重新登录'}).waitFor();
                 }
-                assert.ok(!calls.includes('/user/fetch'), role + ' does not fetch user administration');
+                if (role !== 'super') assert.ok(!calls.includes('/user/fetch'), role + ' does not fetch user administration');
             }
             assert.deepEqual(errors, [], role + ' browser errors');
             console.log(role + ': browser passed (' + calls.length + ' requests)');

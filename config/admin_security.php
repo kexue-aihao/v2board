@@ -37,7 +37,6 @@ return [
         ['订阅清洗网关', '/risk/gateway', '风控', ['super', 'operations']],
         ['多账号同 IP', '/risk/shared-ip', '风控', ['super', 'operations']],
         ['队列监控', '/queue', '指标', ['super']],
-        ['管理员权限', '/security/administrators', '4A 安全审计', ['super']],
         ['安全审计', '/security/audit', '4A 安全审计', ['super']],
         ['账号安全', '/security/account', '账号', ['super', 'operations', 'finance', 'support', 'marketing']],
     ],

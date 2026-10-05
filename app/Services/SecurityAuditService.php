@@ -39,7 +39,9 @@ class SecurityAuditService
         $context = $request ? $request->attributes->get('security_audit_context', []) : [];
         $actor = $actor ?? ($context['actor'] ?? null);
         $requestId = $requestId ?? ($context['request_id'] ?? bin2hex(random_bytes(16)));
-        return DB::transaction(function () use ($event, $result, $details, $actor, $requestId, $request) {
+        $action = $context['action'] ?? ($request && $request->route() ? $request->route()->getActionName() : '');
+        $description = SecurityAuditDescription::describe($event, $details, $action);
+        return DB::transaction(function () use ($event, $result, $details, $actor, $requestId, $request, $description) {
             $head = DB::table('v2_admin_audit_head')->where('id', 1)->lockForUpdate()->first();
             if (!$head) throw new RuntimeException('安全审计尚未初始化，请先运行数据库升级');
             $sequence = (int)$head->sequence + 1;
@@ -47,6 +49,7 @@ class SecurityAuditService
                 'version' => 1, 'sequence' => $sequence, 'request_id' => $requestId,
                 'actor_id' => $actor['id'] ?? null, 'role' => $actor['admin_role'] ?? null,
                 'event' => $event, 'result' => $result, 'time' => time(),
+                'description' => $description,
                 'ip' => $request ? $request->ip() : null,
                 'user_agent' => $request ? substr((string)$request->userAgent(), 0, 512) : null,
                 'details' => self::redact($details),
@@ -98,9 +101,9 @@ class SecurityAuditService
     public static function run(Request $request, ?array $actor, callable $callback)
     {
         $previous = $request->attributes->get('security_audit_context');
-        $context = ['actor' => $actor, 'request_id' => bin2hex(random_bytes(16)), 'changes' => [], 'statements' => []];
-        $request->attributes->set('security_audit_context', $context);
         $action = $request->route() ? $request->route()->getActionName() : $request->path();
+        $context = ['actor' => $actor, 'request_id' => bin2hex(random_bytes(16)), 'action' => $action, 'changes' => [], 'statements' => []];
+        $request->attributes->set('security_audit_context', $context);
         try {
             $before = SecurityAuditSnapshot::capture($request);
             // This intent commits before any filesystem, Redis or remote side effect.
@@ -113,14 +116,14 @@ class SecurityAuditService
                 // Store every batch item across bounded records, without silently
                 // losing items to the general-purpose redaction size limit.
                 foreach (array_chunk($context['changes'] ?? [], 100) as $index => $changes) {
-                    self::append('business.changes', 'success', ['batch' => $index, 'changes' => $changes]);
+                    self::append('business.changes', $status < 400 ? 'success' : 'failure', ['batch' => $index, 'changes' => $changes]);
                 }
                 $batchResult = null;
                 if (strpos($action, 'Server\\ManageController@') !== false && !$request->isMethod('GET') && is_object($response) && method_exists($response, 'getContent')) {
                     $batchResult = json_decode($response->getContent(), true);
                 }
-                self::append('request.finish', $status < 400 ? 'success' : 'failure', [
-                    'action' => $action, 'status' => $status, 'change_count' => count($context['changes'] ?? []),
+                self::append('request.finish', $status < 400 ? 'success' : ($status === 403 ? 'denied' : 'failure'), [
+                    'action' => $action, 'target_id' => $request->input('id'), 'status' => $status, 'change_count' => count($context['changes'] ?? []),
                     'after' => $after !== $before ? $after : null, 'batch_result' => $batchResult,
                     'statements' => $context['statements'] ?? [],
                 ]);
@@ -132,6 +135,7 @@ class SecurityAuditService
             // Intent remains durable even when the business transaction rolls back.
             $status = method_exists($error, 'getStatusCode') ? $error->getStatusCode() : 500;
             self::append('request.finish', $status === 403 ? 'denied' : 'failure', ['action' => $action,
+                'target_id' => $request->input('id'),
                 'status' => $status,
                 'exception_type' => get_class($error)]);
             throw $error;
