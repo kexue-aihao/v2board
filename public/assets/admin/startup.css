@@ -1,0 +1,46 @@
+/* Inline first-frame layout. No business data or interactive controls. */
+.admin-startup {
+  position: fixed;
+  inset: 0;
+  z-index: 2100;
+  overflow: hidden;
+  background: #f0f3f8;
+  color: #495057;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.admin-startup *, .admin-startup *::before, .admin-startup *::after { box-sizing: border-box; }
+.admin-startup__workspace { display: none; min-height: 100%; }
+.admin-startup-authenticated .admin-startup__workspace { display: flex; }
+.admin-startup-authenticated .admin-startup__login { display: none; }
+.admin-startup__sidebar { flex: 0 0 250px; height: 100vh; overflow: hidden; background: #343a40; color: #e4e9f3; }
+.admin-startup__brand { height: 70px; display: flex; align-items: center; padding: 0 24px; font-size: 20px; font-weight: 600; }
+.admin-startup__menu { padding: 18px; }
+.admin-startup__nav-placeholder, .admin-startup__menu-item { display: flex; align-items: center; height: 42px; padding: 8px 16px; }
+.admin-startup__nav-placeholder::before { content: ""; width: 112px; height: 10px; border-radius: 3px; background: currentColor; opacity: .12; }
+.admin-startup__menu-item { font-size: 14px; }
+.admin-startup__menu-item::before { content: ""; flex: 0 0 12px; height: 12px; margin-right: 18px; border: 1px solid currentColor; border-radius: 3px; opacity: .5; }
+.admin-startup__body { flex: 1; min-width: 0; }
+.admin-startup__header { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 28px; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 4%); }
+.admin-startup__avatar { width: 28px; height: 28px; border-radius: 50%; background: currentColor; opacity: .12; }
+.admin-startup__main { padding: 28px; }
+.admin-startup__main h1 { margin: 0 0 24px; font-size: 20px; font-weight: 600; }
+.admin-startup__panel { background: #fff; border-radius: 4px; box-shadow: 0 1px 3px rgb(0 0 0 / 4%); }
+.admin-startup__toolbar { height: 65px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; }
+.admin-startup__toolbar span { width: 120px; height: 14px; border-radius: 3px; background: #e9edf2; }
+.admin-startup__toolbar span:last-child { width: 70px; height: 30px; }
+.admin-startup__row { height: 54px; margin: 0 20px; border-top: 1px solid #eef1f5; display: flex; align-items: center; }
+.admin-startup__row::before { content: ""; width: 60%; max-width: 420px; height: 10px; border-radius: 3px; background: #edf0f4; }
+.admin-startup__login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.admin-startup__login-panel { width: 420px; max-width: 100%; padding: 28px; border-radius: 4px; background: #fff; }
+.admin-startup__login-panel .admin-startup__brand { height: auto; padding: 0; margin-bottom: 8px; }
+.admin-startup__login-panel p { margin: 0 0 24px; color: #6c757d; }
+.admin-startup__input, .admin-startup__button { display: block; height: 42px; margin-top: 16px; border-radius: 4px; background: #f0f3f8; border: 1px solid #e4e7ed; }
+.admin-startup__button { background: #dce7f5; border: 0; }
+.admin-startup__status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.admin-startup-sidebar-light .admin-startup__sidebar { background: #fff; color: #495057; border-right: 1px solid #e4e7ed; }
+.admin-startup-header-dark .admin-startup__header { background: #0665d0; color: #c8d2e6; }
+@media (max-width: 991.98px) {
+  .admin-startup__sidebar { display: none; }
+  .admin-startup__header { padding: 0 16px; }
+  .admin-startup__main { padding: 20px 16px; }
+}

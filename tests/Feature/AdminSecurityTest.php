@@ -70,10 +70,18 @@ class AdminSecurityTest extends TestCase
                 $this->assertNotContains('/user', $menus);
             }
             $asset = $this->get($this->base . '/security/asset?role=super', $headers)->assertOk();
-            $this->assertStringContainsString('no-store', $asset->headers->get('Cache-Control'));
+            foreach (['private', 'no-cache', 'must-revalidate'] as $directive) {
+                $this->assertStringContainsString($directive, $asset->headers->get('Cache-Control'));
+            }
+            $this->assertSame('Authorization', $asset->headers->get('Vary'));
             $this->assertSame(file_get_contents(resource_path('admin/build/' . $role . '.js')), $asset->getContent());
+            $etag = $asset->headers->get('ETag');
+            $this->assertNotEmpty($etag);
+            $cached = $this->get($this->base . '/security/asset', array_merge($headers, ['If-None-Match' => $etag]))->assertStatus(304);
+            $this->assertSame('', $cached->getContent());
+            $this->get($this->base . '/security/asset', array_merge($headers, ['If-None-Match' => '"old-build"']))->assertOk()->assertHeader('ETag', $etag);
         }
-        $this->get($this->base . '/security/asset')->assertForbidden();
+        $this->get($this->base . '/security/asset', ['If-None-Match' => $etag])->assertForbidden();
     }
 
     public function testDirectInterfacesCannotBypassRolesOrLegacyStaffFlags(): void
@@ -98,10 +106,15 @@ class AdminSecurityTest extends TestCase
     public function testRoleAssignmentsAreSuperOnlyAndRevokeAlreadyIssuedSessions(): void
     {
         $old = $this->headers(2); $super = $this->headers(1);
+        $etag = $this->get($this->base . '/security/asset', $old)->assertOk()->headers->get('ETag');
         $this->postJson($this->base . '/security/administrators/role', ['user_id' => 2, 'role' => 'finance'], $this->headers(3))->assertForbidden();
         $this->postJson($this->base . '/security/administrators/role', ['user_id' => 2, 'role' => 'finance'], $super)->assertOk();
         $this->getJson($this->base . '/security/bootstrap', $old)->assertForbidden();
+        $this->get($this->base . '/security/asset', array_merge($old, ['If-None-Match' => $etag]))->assertForbidden();
         $this->getJson($this->base . '/security/bootstrap', $this->headers(2))->assertOk()->assertJsonPath('data.role', 'finance');
+        $changed = $this->get($this->base . '/security/asset', array_merge($this->headers(2), ['If-None-Match' => $etag]))->assertOk();
+        $this->assertNotSame($etag, $changed->headers->get('ETag'));
+        $this->assertSame(file_get_contents(resource_path('admin/build/finance.js')), $changed->getContent());
         $this->postJson($this->base . '/security/administrators/role', ['user_id' => 2, 'role' => null], $super)->assertOk();
         $this->getJson($this->base . '/security/bootstrap', $this->headers(2))->assertForbidden();
         $this->assertDatabaseHas('v2_admin_audit', ['event' => 'administrator.role', 'actor_id' => 1]);

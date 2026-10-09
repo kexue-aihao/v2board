@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
+const crypto = require('node:crypto');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '../..');
 const roles = {
@@ -19,12 +20,39 @@ const labels = {
     '/reward': '签到与娱乐', '/risk/trace': '订阅溯源', '/risk/gateway': '订阅清洗网关', '/risk/shared-ip': '多账号同 IP',
     '/queue': '队列监控', '/security/account': '账号安全', '/security/audit': '安全审计',
 };
-const startupMarkup = fs.readFileSync(path.join(root, 'resources/views/admin.blade.php'), 'utf8').match(/<div id="admin-startup"[\s\S]*?<div id="root"[^>]*><\/div>/)[0];
-const cacheScript = fs.readFileSync(path.join(root, 'resources/views/admin.blade.php'), 'utf8').match(/<script>\s*\/\/ Hide repeat startup animation[\s\S]*?<\/script>/)[0];
-const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/admin/umi.css"><link rel="stylesheet" href="/assets/admin/components.chunk.css"><link rel="stylesheet" href="/assets/admin/custom.css"><script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};</script>' + cacheScript + '</head><body>' + startupMarkup + '<script src="/assets/admin/security-loader.js"></script></body></html>';
+const view = fs.readFileSync(path.join(root, 'resources/views/admin.blade.php'), 'utf8');
+const startupMarkup = view.match(/<div id="admin-startup"[\s\S]*?<div id="root"[^>]*><\/div>/)[0].replace(/\{\{\$title\}\}/g, '4A Test');
+const layoutScript = view.match(/<script>\s*\/\/ Select a visible initial layout[\s\S]*?<\/script>/)[0];
+const styles = view.match(/<link data-admin-style[^>]+>/g).join('').replace(/\{\{\$adminAssetVersion\}\}/g, 'test');
+const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + fs.readFileSync(path.join(root, 'public/assets/admin/startup.css'), 'utf8') + '</style>' + styles + '<script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};</script>' + layoutScript + '</head><body>' + startupMarkup + '<script src="/assets/admin/security-loader.js"></script></body></html>';
+let cacheFixture = null;
+const cacheRequests = [];
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/test') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.end(html); }
+    // A real HTTP fixture is necessary: Playwright routing disables the cache.
+    if (cacheFixture && url.pathname.startsWith('/api/v1/test/')) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Content-Type', 'application/json');
+        const endpoint = url.pathname.replace('/api/v1/test', '');
+        if (!cacheFixture.authorized) { res.statusCode = 403; return res.end(JSON.stringify({message: '登录已过期'})); }
+        if (endpoint === '/security/bootstrap') {
+            const role = cacheFixture.role;
+            return res.end(JSON.stringify({data: {role, version: cacheFixture.version, debug_exempt: true, landing: roles[role][0], menus: roles[role][1].map(href => ({href, title: labels[href], type: 'item'}))}}));
+        }
+        if (endpoint === '/security/asset') {
+            const script = fs.readFileSync(path.join(root, 'resources/admin/build', cacheFixture.role + '.js'));
+            const etag = '"' + crypto.createHash('sha256').update(cacheFixture.role).update(script).digest('hex') + '"';
+            res.setHeader('Content-Type', 'application/javascript');
+            res.setHeader('Cache-Control', 'private, no-cache, max-age=0, must-revalidate');
+            res.setHeader('Vary', 'Authorization');
+            res.setHeader('ETag', etag);
+            res.statusCode = req.headers['if-none-match'] === etag ? 304 : 200;
+            cacheRequests.push({status: res.statusCode, etag, requestedEtag: req.headers['if-none-match']});
+            return res.end(res.statusCode === 304 ? undefined : script);
+        }
+        return res.end(JSON.stringify({data: endpoint === '/user/info' ? {email: 'cache@example.test'} : [], total: 0}));
+    }
     const target = path.resolve(root, 'public', '.' + url.pathname);
     if (!target.startsWith(path.join(root, 'public') + path.sep) || !fs.existsSync(target) || !fs.statSync(target).isFile()) { res.statusCode = 404; return res.end(); }
     res.setHeader('Content-Type', target.endsWith('.js') ? 'application/javascript' : target.endsWith('.css') ? 'text/css' : 'application/octet-stream'); res.end(fs.readFileSync(target));
@@ -117,16 +145,19 @@ const server = http.createServer((req, res) => {
             await bootstrapRequested;
             const startup = page.locator('#admin-startup');
             await startup.waitFor();
-            assert.equal(await page.locator('#admin-startup-title').textContent(), '正在加载权限');
+            assert.equal(await page.locator('#admin-startup-title').textContent(), '正在打开管理后台');
             assert.equal(await page.locator('#root').getAttribute('aria-busy'), 'true');
-            assert.equal(await page.locator('.admin-startup__indicator').evaluate(el => getComputedStyle(el, '::before').animationName), role === 'support' ? 'none' : 'admin-startup-spin');
+            assert.ok(await page.locator('.admin-startup__workspace').isVisible(), 'the initial workspace is visible during permission checks');
+            assert.equal(await startup.evaluate(el => getComputedStyle(el).animationName), 'none');
+            assert.equal(await page.locator('.admin-startup__indicator').count(), 0, 'no full-screen spinner');
+            assert.equal(await page.locator('#sidebar').count(), 0, 'protected application has not rendered before validation');
             if (process.env.ADMIN_SCREENSHOT_DIR && ['super', 'support'].includes(role)) {
                 fs.mkdirSync(process.env.ADMIN_SCREENSHOT_DIR, {recursive: true});
                 await page.screenshot({path: path.join(process.env.ADMIN_SCREENSHOT_DIR, role === 'super' ? 'startup-permissions.png' : 'startup-permissions-mobile.png')});
             }
             releaseBootstrap();
             await assetRequested;
-            assert.equal(await page.locator('#admin-startup-title').textContent(), '正在进入管理后台');
+            assert.equal(await page.locator('#admin-startup-title').textContent(), '正在打开管理后台');
             assert.ok(await startup.isVisible(), 'loading remains visible while role script is pending');
             releaseAsset();
             await page.locator('#sidebar').waitFor();
@@ -137,12 +168,15 @@ const server = http.createServer((req, res) => {
             resetGates();
             await page.reload();
             await bootstrapRequested;
-            assert.equal(await startup.evaluate(el => getComputedStyle(el).display), 'none', 'same-tab refresh hides the cover before permissions resolve');
+            assert.ok(await startup.isVisible(), 'same-tab refresh retains the workspace while permissions resolve');
+            assert.ok(await page.locator('.admin-startup__workspace').isVisible());
+            assert.deepEqual(await page.locator('.admin-startup__menu-item').allTextContents(), roles[isGuest ? 'operations' : role][1].map(href => labels[href]));
+            assert.equal(await startup.locator('a, button, input').count(), 0, 'cached menu labels cannot perform actions');
             assert.equal(await page.locator('#sidebar').count(), 0, 'cached role never bypasses server validation');
             assert.equal(calls.filter(endpoint => endpoint === '/security/asset').length, assetCount);
             releaseBootstrap();
             await assetRequested;
-            assert.equal(await startup.evaluate(el => getComputedStyle(el).display), 'none', 'refresh also hides the asset-loading animation');
+            assert.ok(await startup.isVisible(), 'workspace stays visible while the role script downloads');
             releaseAsset();
             await page.locator('#sidebar').waitFor();
             await startup.waitFor({state: 'detached'});
@@ -333,7 +367,7 @@ const server = http.createServer((req, res) => {
             });
             await page.goto('http://127.0.0.1:' + server.address().port + '/test#/user');
             await requested;
-            assert.equal(await page.locator('#admin-startup').evaluate(el => getComputedStyle(el).display === 'none'), scenario === 'cached-role-change');
+            assert.ok(await page.locator('#admin-startup').isVisible(), 'all cache states retain a visible initial workspace');
             assert.deepEqual(assetRoles, [], 'no role asset executes before validation');
             releaseBootstrap();
             await page.locator('#sidebar').waitFor();
@@ -344,6 +378,70 @@ const server = http.createServer((req, res) => {
             assert.deepEqual(errors, []);
             console.log(scenario + ': browser passed');
             await context.close();
+        }
+        if (!process.env.ADMIN_TEST_ROLE) {
+            const context = await browser.newContext(), page = await context.newPage(), errors = [];
+            await page.addInitScript(() => localStorage.setItem('authorization', 'fixture'));
+            page.on('pageerror', error => errors.push(error.message));
+            let releaseScript, releaseStyles;
+            const scriptGate = new Promise(resolve => { releaseScript = resolve; });
+            const styleGate = new Promise(resolve => { releaseStyles = resolve; });
+            await page.route('**/assets/admin/security-loader.js*', async route => { await scriptGate; return route.continue(); });
+            await page.route('**/assets/admin/*.css*', async route => { await styleGate; return route.continue(); });
+            await page.route('**/api/v1/test/**', async route => {
+                const endpoint = new URL(route.request().url()).pathname.replace('/api/v1/test', '');
+                if (endpoint === '/security/bootstrap') return route.fulfill({contentType: 'application/json', body: JSON.stringify({data: {role: 'support', version: 1, debug_exempt: true, landing: '/ticket', menus: roles.support[1].map(href => ({href, title: labels[href], type: 'item'}))}})});
+                if (endpoint === '/security/asset') return route.fulfill({contentType: 'application/javascript', body: fs.readFileSync(path.join(root, 'resources/admin/build/support.js'), 'utf8')});
+                return route.fulfill({contentType: 'application/json', body: JSON.stringify({data: [], total: 0})});
+            });
+            await page.goto('http://127.0.0.1:' + server.address().port + '/test#/ticket', {waitUntil: 'commit'});
+            const startup = page.locator('#admin-startup');
+            await startup.waitFor();
+            assert.ok(await page.locator('.admin-startup__workspace').isVisible(), 'HTML shows the workspace before the loader or application CSS arrive');
+            assert.equal((await page.locator('.admin-startup__header').boundingBox()).height, 52, 'critical layout styles are already available');
+            assert.equal(await page.locator('#sidebar').count(), 0);
+            releaseScript();
+            await page.locator('#sidebar').waitFor({state: 'attached'});
+            assert.ok(await startup.isVisible(), 'initial layout remains until full application styles finish');
+            assert.equal(await page.locator('#root').getAttribute('aria-busy'), 'true');
+            releaseStyles();
+            await startup.waitFor({state: 'detached'});
+            assert.equal(await page.locator('#root').getAttribute('aria-busy'), null);
+            assert.deepEqual(errors, []);
+            console.log('delayed-scripts-and-styles: browser passed');
+            await context.close();
+        }
+        if (!process.env.ADMIN_TEST_ROLE) {
+            cacheFixture = {authorized: true, role: 'support', version: 1};
+            const context = await browser.newContext(), page = await context.newPage(), errors = [];
+            await page.addInitScript(() => localStorage.setItem('authorization', 'cache-fixture'));
+            page.on('pageerror', error => errors.push(error.message));
+            await page.goto('http://127.0.0.1:' + server.address().port + '/test#/ticket');
+            await page.locator('#sidebar').waitFor();
+            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            await page.reload();
+            await page.locator('#sidebar').waitFor();
+            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.deepEqual(cacheRequests.map(request => request.status), [200, 304], 'refresh revalidates the cached script without downloading its body');
+            assert.equal(cacheRequests[1].requestedEtag, cacheRequests[0].etag);
+            cacheFixture.role = 'finance'; cacheFixture.version = 2;
+            await page.reload();
+            await page.locator('#sidebar').waitFor();
+            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.evaluate(() => window.adminSecurity.role), 'finance');
+            assert.equal(await page.evaluate(() => location.hash), '#/order');
+            assert.deepEqual(cacheRequests.map(request => request.status), [200, 304, 200]);
+            assert.notEqual(cacheRequests[2].etag, cacheRequests[0].etag, 'role changes fetch the current role bundle');
+            cacheFixture.authorized = false;
+            await page.reload();
+            await page.locator('input[type=password]').waitFor();
+            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.evaluate(() => localStorage.getItem('authorization')), null);
+            assert.equal(cacheRequests.length, 3, 'expired sessions do not execute cached role resources');
+            assert.deepEqual(errors, []);
+            console.log('private-http-cache-and-session-revocation: browser passed');
+            await context.close();
+            cacheFixture = null;
         }
     } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });

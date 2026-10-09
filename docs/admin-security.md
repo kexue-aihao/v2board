@@ -59,7 +59,9 @@ node --test scripts/tests/admin-security.test.cjs
 
 Web 服务器根目录必须为 `public/`。不要通过别名、静态资源规则、软链接或 CDN 暴露 `resources/`、`scripts/` 或项目根目录。删除旧公开资源 `assets/admin/umi.js`、`vendors.async.js`、`components.async.js` 及其旧副本、source map，并清理 CDN 缓存；构建校验会拒绝三个原文件重新出现在公开目录中。
 
-未登录只加载公开登录代码。登录后凭 Authorization 请求 `/security/asset`，服务端依据当前角色选择资源，忽略客户端提交的角色名称。响应禁用缓存，不允许 CDN 缓存受保护接口。浏览器端切换身份会重新加载页面。
+未登录只加载公开登录代码。登录后凭 Authorization 请求 `/security/asset`，服务端依据当前角色选择资源，忽略客户端提交的角色名称。脚本响应使用 `private, no-cache, must-revalidate`、`Vary: Authorization` 和内容 ETag：浏览器每次复用脚本前仍需服务端检查当前会话及角色，内容未变时返回 304，避免重复下载数 MB 的脚本。权限和业务接口继续使用 `no-store`；CDN 不得缓存受保护接口。浏览器端切换身份会重新加载页面。
+
+后台 HTML 自带静态侧栏、顶栏和内容占位，必要样式直接内联，完整样式表异步下载。权限确认和脚本加载期间保留这个框架，React 与样式都就绪后直接替换，不再隐藏加载内容留下空白，也不显示全屏转圈动画。缓存的菜单仅作为不可交互的文字占位，不包含业务数据，受保护代码仍在服务端验证当前权限后执行。
 
 浏览器由使用者控制，无法保证禁止 F12 或撤回此前已下载的代码。生产页面提供快捷键阻止，但安全边界始终是服务端拒绝越权接口、拒绝发送未授权业务模块。开发环境 `local/testing` 自动豁免快捷键阻止；部署配置 `ADMIN_DEBUG_EXEMPT=true` 可临时豁免，该配置**不会豁免权限或审计**。
 

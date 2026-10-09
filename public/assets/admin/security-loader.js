@@ -3,6 +3,7 @@
     var prefix = '/api/v1/' + window.settings.secure_path;
     var initialAuthorization = localStorage.getItem('authorization');
     var loading = false;
+    var failed = false;
     var root = document.getElementById('root');
     var startup = document.getElementById('admin-startup');
     var startupObserver;
@@ -17,7 +18,21 @@
             cachedSecurity = cached.security;
         }
     } catch (ignore) {}
-    if (!cachedSecurity) document.documentElement.classList.remove('admin-security-cached');
+    function showWorkspace(security) {
+        document.documentElement.classList.add('admin-startup-authenticated');
+        var menu = document.getElementById('admin-startup-menu');
+        if (!menu || !security) return;
+        menu.textContent = '';
+        var path = location.hash.replace(/^#/, '').split('?')[0];
+        security.menus.forEach(function (item) {
+            var label = document.createElement('span');
+            label.className = 'admin-startup__menu-item';
+            label.textContent = item.title;
+            menu.appendChild(label);
+            if (item.href === path) document.getElementById('admin-startup-page-title').textContent = item.title;
+        });
+    }
+    if (initialAuthorization) showWorkspace(cachedSecurity);
     function cacheSecurity(security) {
         try {
             sessionStorage.setItem(securityCacheKey, JSON.stringify({
@@ -33,13 +48,18 @@
         document.getElementById('admin-startup-message').textContent = message;
     }
     function ready() {
+        if (failed) return;
         if (!root.querySelector('#sidebar, .v2board-auth-box')) return;
+        var styles = document.querySelectorAll('link[data-admin-style]');
+        for (var i = 0; i < styles.length; i++) {
+            if (styles[i].dataset.failed === 'true') return fail(new Error('后台样式加载失败，请刷新重试'));
+            if (!styles[i].sheet || styles[i].media !== 'all') return;
+        }
         startupObserver.disconnect();
-        // Keep the cover until React's first frame has actually been painted.
+        // Swap the initial layout only after React and its styles can paint.
         requestAnimationFrame(function () { requestAnimationFrame(function () {
             root.removeAttribute('aria-busy');
-            startup.classList.add('is-finished');
-            setTimeout(function () { startup.remove(); }, 160);
+            startup.remove();
         }); });
     }
     if (startup) {
@@ -47,6 +67,8 @@
         startupObserver.observe(root, {childList: true, subtree: true});
     }
     function fail(error) {
+        if (failed) return;
+        failed = true;
         if (startupObserver) startupObserver.disconnect();
         if (startup) startup.remove();
         root.removeAttribute('aria-busy');
@@ -56,7 +78,9 @@
     }
     function request(path, options) {
         options = options || {};
-        options.cache = 'no-store';
+        // Code may reuse the private HTTP cache only after server revalidation.
+        // Business responses and permission checks always bypass the cache.
+        options.cache = options.script ? 'no-cache' : 'no-store';
         options.headers = Object.assign({Accept: 'application/json', authorization: localStorage.getItem('authorization') || ''}, options.headers);
         return fetch(prefix + path, options).then(function (response) {
             if (!response.ok) {
@@ -74,6 +98,7 @@
         });
     };
     function execute(script) {
+        if (failed) return;
         var node = document.createElement('script');
         node.textContent = script;
         document.body.appendChild(node);
@@ -93,7 +118,7 @@
     function guest() {
         progress('正在加载登录页面', '请稍候，即将进入登录界面');
         try { sessionStorage.removeItem(securityCacheKey); } catch (ignore) {}
-        document.documentElement.classList.remove('admin-security-cached');
+        document.documentElement.classList.remove('admin-startup-authenticated');
         localStorage.removeItem('authorization'); initialAuthorization = null;
         window.adminSecurity = {role: 'guest', menus: [], landing: '/login', version: 0};
         guard();
@@ -102,16 +127,16 @@
     }
     function start() {
         if (!initialAuthorization) return guest();
-        if (!cachedSecurity) progress('正在加载权限', '正在确认您的后台访问权限');
+        progress('正在打开管理后台', '页面即将就绪');
         return request('/security/bootstrap').then(function (security) {
             window.adminSecurity = security;
             cacheSecurity(security);
             guard();
+            showWorkspace(security);
             // This is a deterrent only. It never disables authorization or auditing.
             if (!security.debug_exempt) document.addEventListener('keydown', function (event) {
                 if (event.key === 'F12' || ((event.ctrlKey || event.metaKey) && event.shiftKey && /^(i|j|c)$/i.test(event.key))) event.preventDefault();
             }, true);
-            progress('正在进入管理后台', '正在为您准备工作台，请稍候');
             return request('/security/asset', {script: true}).then(execute);
         }).catch(function (error) {
             if (error.status === 401 || error.status === 403) return guest();
@@ -133,6 +158,11 @@
         });
     }
     window.addEventListener('focus', refreshRole);
+    document.querySelectorAll('link[data-admin-style]').forEach(function (link) {
+        if (link.dataset.failed === 'true') fail(new Error('后台样式加载失败，请刷新重试'));
+        link.addEventListener('load', ready);
+        link.addEventListener('error', function () { fail(new Error('后台样式加载失败，请刷新重试')); });
+    });
     setInterval(refreshRole, 30000);
     start().catch(fail);
 })();

@@ -29,8 +29,15 @@ class SecurityController extends Controller
         $role = $request->user['admin_role'];
         $path = resource_path('admin/build/' . $role . '.js');
         abort_unless(is_file($path), 503, '管理员资源尚未构建，请运行 node scripts/build-admin-security.cjs');
-        return response(file_get_contents($path), 200, ['Content-Type' => 'application/javascript; charset=utf-8',
-            'Cache-Control' => 'private, no-store, max-age=0', 'Vary' => 'Authorization', 'X-Content-Type-Options' => 'nosniff']);
+        // Admin middleware has already checked the current session and role.
+        // An unchanged bundle can reuse the browser's copy after that check;
+        // shared caches must never store it or serve it without validation.
+        $script = file_get_contents($path);
+        $response = response($script, 200, ['Content-Type' => 'application/javascript; charset=utf-8',
+            'Cache-Control' => 'private, no-cache, max-age=0, must-revalidate', 'Vary' => 'Authorization', 'X-Content-Type-Options' => 'nosniff']);
+        $response->setEtag(hash('sha256', $role . ':' . $script));
+        $response->isNotModified($request);
+        return $response;
     }
 
     public function administrators(Request $request)
