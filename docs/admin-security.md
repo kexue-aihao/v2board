@@ -55,13 +55,23 @@ php scripts/check-admin-security.php
 node --test scripts/tests/admin-security.test.cjs
 ```
 
-修改已有节点/倍率补丁后必须重新执行构建，并一同提交清单和生成资源。生产发布使用已构建产物，不要求服务器安装 Node。新增维护页面源码位于 `scripts/admin-security/`。
+修改已有节点/倍率补丁后必须重新执行构建，并一同提交清单和生成资源。构建使用 esbuild 压缩生成脚本，超级管理员资源由约 6.7 MB 降至 4.1 MB；仍按角色生成独立资源。生产发布使用已构建产物，不要求服务器安装 Node。新增维护页面源码位于 `scripts/admin-security/`。
 
 Web 服务器根目录必须为 `public/`。不要通过别名、静态资源规则、软链接或 CDN 暴露 `resources/`、`scripts/` 或项目根目录。删除旧公开资源 `assets/admin/umi.js`、`vendors.async.js`、`components.async.js` 及其旧副本、source map，并清理 CDN 缓存；构建校验会拒绝三个原文件重新出现在公开目录中。
 
-未登录只加载公开登录代码。登录后凭 Authorization 请求 `/security/asset`，服务端依据当前角色选择资源，忽略客户端提交的角色名称。脚本响应使用 `private, no-cache, must-revalidate`、`Vary: Authorization` 和内容 ETag：浏览器每次复用脚本前仍需服务端检查当前会话及角色，内容未变时返回 304，避免重复下载数 MB 的脚本。权限和业务接口继续使用 `no-store`；CDN 不得缓存受保护接口。浏览器端切换身份会重新加载页面。
+未登录只加载公开登录代码。管理员完成密码及所需二步验证后，后台响应设置 HttpOnly、SameSite Strict、HTTPS 下 Secure 的页面会话 Cookie。后台 HTML 用它验证 JWT、有效会话、当前角色及角色版本，直接提供本次页面所需的角色信息。页面脚本同时核对 localStorage 中的账号和会话，账号不一致时重新走 Authorization 验证。已有的 Authorization 会话会在首次 bootstrap 时补充 Cookie。
 
-后台 HTML 自带静态侧栏、顶栏和内容占位，必要样式直接内联，完整样式表异步下载。权限确认和脚本加载期间保留这个框架，React 与样式都就绪后直接替换，不再隐藏加载内容留下空白，也不显示全屏转圈动画。缓存的菜单仅作为不可交互的文字占位，不包含业务数据，受保护代码仍在服务端验证当前权限后执行。
+浏览器从 HTML head 发现实际角色脚本，与样式、翻译及访问控制脚本并行下载，正常进入无需先等待 bootstrap 再请求脚本。删除过渡动画、骨架页面及菜单占位缓存，直接渲染实际应用。支持 `blocking="render"` 的浏览器等待应用脚本执行后才绘制内容；已在 Chromium 验证首个内容画面包含实际后台。网络下载和执行仍需要时间，不支持该属性的浏览器仍可能在应用就绪前显示空白。
+
+仅 GET `/security/asset` 接受页面 Cookie；业务接口、bootstrap 和所有写操作仍要求 Authorization。服务端依据当前角色选择资源，忽略客户端提交的角色名称。脚本响应使用 `private, no-cache, must-revalidate`、`Vary: Authorization, Cookie` 和内容 ETag：每次复用前都检查当前会话及角色，内容未变返回 304。后台 HTML 和权限/业务接口使用 `no-store`；CDN 不得缓存受保护接口。退出登录清除 Cookie 并撤销会话，切换身份或角色失效时重新加载页面。
+
+## 升级后的 Telegram Webhook
+
+`update.sh` 优先保留 Telegram `getWebhookInfo` 返回的实际回调，未注册时使用后台保存的 `telegram_webhook_url`，两者都不存在才使用 `app_url`。前台域名与后台 API 域名不同时，升级不会再用前台域名覆盖正在使用的回调。回调必须是公开 HTTPS 的 `/api/v1/guest/telegram/webhook`，旧 URL 中的查询参数会被移除，认证改用 secret 头。
+
+升级保留已有 `telegram_webhook_secret`，缺失才生成；配置原子写入并重建缓存后再注册 Webhook，修正文件属主并启动 Webman，确保运行进程读取同一个 secret。不会清空 Telegram 待处理消息。机器人关闭时跳过注册和检查；开启但 token 缺失、Telegram 不可达或配置缓存失败都会中止升级。
+
+Webman 启动后，升级脚本向公开回调发送带 secret 头的空 JSON，验证 API 代理及运行进程的认证配置，要求 HTTP 200 且返回 `data: true`。此检查不发送机器人消息、不占用 update_id。失败会返回非零退出码并提示排查回调域名、TLS、代理和进程配置，不会显示 `Upgrade completed`。检查通过不代表所有 Telegram 业务命令都已验收；部署后仍应发送一条实际指令确认使用体验。
 
 浏览器由使用者控制，无法保证禁止 F12 或撤回此前已下载的代码。生产页面提供快捷键阻止，但安全边界始终是服务端拒绝越权接口、拒绝发送未授权业务模块。开发环境 `local/testing` 自动豁免快捷键阻止；部署配置 `ADMIN_DEBUG_EXEMPT=true` 可临时豁免，该配置**不会豁免权限或审计**。
 

@@ -124,6 +124,7 @@ class AdminConfigurationRuntimeTest extends TestCase
             $saved = require $testBase . '/config/v2board.php';
             $cached = require $this->app->getCachedConfigPath();
             $this->assertSame('new-token', $saved['telegram_bot_token']);
+            $this->assertSame('https://admin.example.test/api/v1/guest/telegram/webhook', $saved['telegram_webhook_url']);
             $this->assertSame($registeredSecret, $saved['telegram_webhook_secret']);
             $this->assertSame($saved, $cached['v2board']);
             $this->assertSame($registeredSecret, config('v2board.telegram_webhook_secret'));

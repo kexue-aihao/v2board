@@ -4,7 +4,9 @@
     "resources/admin/legacy/umi.js": "581f3b8b39f2a4edcfc2b7c61b76db8563ed0a688ffc33d8e5175227bfc8f7ad",
     "resources/admin/legacy/vendors.async.js": "bca4127faf6c5243bd85bfb8c5f86b1c90883c5c165a77d1de42a2b2e33fdc47",
     "resources/admin/legacy/components.async.js": "b814b94620870164b47cd4477e62bab2a4da826cba68f09986e24136b31e3eca",
-    "scripts/build-admin-security.cjs": "7b5f685303107ad3ca6be7f0f1e39b69fc09a888c967a517a80a630f9cc0d2c6",
+    "scripts/build-admin-security.cjs": "a73bab6e8d7fa6f3e866ab556ba05a32d1bbe073fd111e98e9bea69cbfb93ce3",
+    "scripts/package.json": "283ab049fd19c8a09d08f3121f2227e8b4bec6905e4bfa99a015a86076cbb409",
+    "scripts/package-lock.json": "6185a53f216ec545dd47605d2776a823f5676e386a358f9844c821e165cd82c2",
     "scripts/admin-security/support.js": "825ba4924809ac2a887d58e75bafe662d92b923c1755411a521bc5c8d2bdb377",
     "scripts/admin-security/account.js": "4be24ff9ed0c934c5c47b810e866960d3bcb413e9ccc029846a08839dd4d90d3",
     "scripts/admin-security/role-field.js": "ee2a5932fb223342ad20416ef2c15b7548337dd6e92b21867d3a8f2dfae74b98",
@@ -12,7 +14,7 @@
   },
   "roles": {
     "guest": {
-      "sha256": "9270ad3045e87a1f68cc4055696715e106087745302bf39021fdd16b3112b500",
+      "sha256": "94114bbf5f70c371f426afd50891717b3561b58ce966c97bde399bcf560935b8",
       "modules": [
         "+0iv",
         "+JPL",
@@ -458,7 +460,7 @@
       ]
     },
     "super": {
-      "sha256": "6f71aad088d114e8536c2b240f23b90279938f799b3f5bf588d215eb5a924ffb",
+      "sha256": "cf37db7290a6144ff33d758d9116338409e5651fe95d5a5c1ba5ebb9afea09d7",
       "modules": [
         "++nV",
         "+0iv",
@@ -1548,7 +1550,7 @@
       ]
     },
     "operations": {
-      "sha256": "631cd4f04345cea97bb95029267cd7c048f56ab0c1b55e1f179e62e4e98bbc65",
+      "sha256": "e9eabf971817a25ea5c2439475d0b8934d9a66ad0e4db413a830581b7bb2553a",
       "modules": [
         "++nV",
         "+0iv",
@@ -2312,7 +2314,7 @@
       ]
     },
     "finance": {
-      "sha256": "84fed6472fd5bca06140df80ed0544d4a9d0989ce17069b744dffc2e34d756be",
+      "sha256": "708e139eb263e4c8481fd17f68bb0b3cb9c750a29c449ac97541f79271c9bd9a",
       "modules": [
         "+0iv",
         "+6XX",
@@ -3049,7 +3051,7 @@
       ]
     },
     "support": {
-      "sha256": "efc8636d9549f594bb4e7f9f2fff0acd3ea88bf01e7cb7969c331ad74571e50b",
+      "sha256": "18064d04fe17e0ed3231dc3540ef32cf56564ab817087da6d9c502dafc2b4c97",
       "modules": [
         "+0iv",
         "+Gva",
@@ -3477,7 +3479,7 @@
       ]
     },
     "marketing": {
-      "sha256": "6df0e77dd01bb3cd433a334c64747573a0b2e30d9912952d0a4bbfb6e7373616",
+      "sha256": "cc99911bd9cf11ceac34444252a2572a9391f7c0b1eec55205aff82de7392eeb",
       "modules": [
         "++nV",
         "+0iv",

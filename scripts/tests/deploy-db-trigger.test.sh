@@ -55,6 +55,14 @@ deploy_php() {
                 *) return "$(cat "$db_test_dir/migration")" ;;
             esac
             ;;
+        'scripts/refresh-telegram-webhook.php')
+            echo refresh >> "$db_test_dir/webhook-calls"
+            [ ! -f "$db_test_dir/webhook-refresh-fail" ] || return 31
+            ;;
+        'scripts/check-telegram-webhook.php')
+            echo check >> "$db_test_dir/webhook-calls"
+            [ ! -f "$db_test_dir/webhook-check-fail" ] || return 32
+            ;;
         *) return 0 ;;
     esac
 }
@@ -64,6 +72,8 @@ source "$db_test_dir/php-stub.sh"
 reset_case() {
     rm -f "$db_test_dir/ready" "$db_test_dir/connection-fail" "$db_test_dir/enable-fail" "$db_test_dir/restore-fail"
     : > "$db_test_dir/calls"
+    : > "$db_test_dir/webhook-calls"
+    rm -f "$db_test_dir/webhook-refresh-fail" "$db_test_dir/webhook-check-fail"
     printf '%064d\n' 1 > "$db_test_dir/identity"
     echo 'GRANT ALL PRIVILEGES ON *.* TO test' > "$db_test_dir/grants"
     echo 0 > "$db_test_dir/trust"
@@ -179,6 +189,7 @@ deploy_start_webman() {
     fi
     WEBMAN_RESTARTED=1
     echo start >> "$db_test_dir/calls"
+    echo start >> "$db_test_dir/webhook-calls"
 }
 deploy_supervisorctl_bin() { echo fixture_supervisorctl; }
 deploy_webman_master_pid() { return 1; }
@@ -222,6 +233,24 @@ reset_case
 run_status bash "$fixture/update.sh"
 check 'update succeeds' 0 "$rc"
 check 'update restores before restart' $'query\nstop\nquery\nenable\nmigrate\nrestore\nstart' "$(cat "$db_test_dir/calls")"
+check 'webhook secret refreshed before workers and public check' $'refresh\nstart\ncheck' "$(cat "$db_test_dir/webhook-calls")"
+check_output 'healthy upgrade reports completion' 'Upgrade completed.'
+for failure in refresh check; do
+    reset_case
+    touch "$db_test_dir/webhook-${failure}-fail"
+    run_status bash "$fixture/update.sh"
+    case "$failure" in
+        refresh) expected=31; trace=$'refresh\nstart' ;;
+        check) expected=32; trace=$'refresh\nstart\ncheck' ;;
+    esac
+    check "webhook $failure failure aborts upgrade" "$expected" "$rc"
+    check "webhook $failure failure keeps worker recovery" "$trace" "$(cat "$db_test_dir/webhook-calls")"
+    if grep -Fq 'Upgrade completed.' "$db_test_dir/output"; then
+        check "webhook $failure failure cannot report success" absent present
+    else
+        check "webhook $failure failure cannot report success" absent absent
+    fi
+done
 for failure in 17 exit term; do
     reset_case
     echo "$failure" > "$db_test_dir/migration"

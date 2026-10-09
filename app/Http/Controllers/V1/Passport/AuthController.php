@@ -42,7 +42,7 @@ class AuthController extends Controller
 
     public function adminLogin(AuthLogin $request)
     {
-        return $this->performLogin($request, true);
+        return \App\Services\AdminEntryService::loginResponse($this->performLogin($request, true), $request);
     }
 
     private function performLogin(AuthLogin $request, $adminOnly = false)
@@ -103,7 +103,7 @@ class AuthController extends Controller
     public function adminVerify2fa(Request $request)
     {
         $this->assertAdminChallenge($request->input('challenge'), 'login');
-        return $this->verify2fa($request);
+        return \App\Services\AdminEntryService::loginResponse($this->verify2fa($request), $request);
     }
 
     public function adminSetup2fa(Request $request)
@@ -115,7 +115,7 @@ class AuthController extends Controller
     public function adminConfirmSetup2fa(Request $request)
     {
         $this->assertAdminChallenge($request->input('setup_token'), 'setup');
-        return $this->confirmSetup2fa($request);
+        return \App\Services\AdminEntryService::loginResponse($this->confirmSetup2fa($request), $request);
     }
 
     private function assertAdminChallenge($token, $type)

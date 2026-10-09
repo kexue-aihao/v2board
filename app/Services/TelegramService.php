@@ -91,6 +91,11 @@ class TelegramService {
         return $this->request('getMe');
     }
 
+    public function getWebhookInfo()
+    {
+        return $this->request('getWebhookInfo', [], 8);
+    }
+
     public function getChat($chatId)
     {
         return $this->request('getChat', ['chat_id' => $chatId], 8);

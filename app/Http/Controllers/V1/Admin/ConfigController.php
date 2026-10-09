@@ -79,6 +79,7 @@ class ConfigController extends Controller
         // 却是旧 token（甚至为空）—— 表现就是「刷新后 token 变空、机器人不生效」。
         $config['telegram_bot_token'] = $token;
         $config['telegram_webhook_secret'] = $secretToken;
+        $config['telegram_webhook_url'] = $hookUrl;
 
         // 写盘手法与 ConfigController::save / SubscribeCleanGatewayController::saveConfig 一致：
         // 临时文件 + 原子 rename。直接覆写有写到一半留下语法错误文件的风险，那会把整站打死。
@@ -100,7 +101,7 @@ class ConfigController extends Controller
             ['telegram_bot_token' => $token, 'telegram_webhook_secret' => $secretToken]);
         // Update this worker immediately; reload the other workers after sending
         // the response so they pick up the newly registered secret as well.
-        config(['v2board.telegram_bot_token' => $token, 'v2board.telegram_webhook_secret' => $secretToken]);
+        config(['v2board.telegram_bot_token' => $token, 'v2board.telegram_webhook_secret' => $secretToken, 'v2board.telegram_webhook_url' => $hookUrl]);
         $cacheWarning = null;
         try {
             if (Artisan::call('config:cache') !== 0) $cacheWarning = 'config:cache returned a non-zero exit code';

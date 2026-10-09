@@ -19,6 +19,12 @@ class Admin
     public function handle($request, Closure $next)
     {
         $authorization = $request->input('auth_data') ?? $request->header('authorization');
+        // Only the read-only script endpoint accepts the page cookie. Cookie
+        // authentication must not silently authorize any business API or write.
+        if (!$authorization && $request->isMethod('GET')
+            && $request->route()->getActionName() === 'App\\Http\\Controllers\\V1\\Admin\\SecurityController@asset') {
+            $authorization = \App\Services\AdminEntryService::token($request);
+        }
         $user = $authorization ? AuthService::decryptAuthData($authorization) : false;
         if (!$user || !AdminAccessService::role($user)) {
             try {

@@ -6,6 +6,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const acorn = require('acorn');
 const walk = require('acorn-walk');
+const {transformSync} = require('esbuild');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8').replace(/\r\n/g, '\n');
 const parse = code => acorn.parse(code, {ecmaVersion: 'latest', sourceType: 'script'});
@@ -231,7 +232,15 @@ function compile(role) {
     let suffix = source.slice(mainObject.end - 1);
     if (role !== 'guest') suffix = '});\n';
     else suffix = suffix.replace("window.location.hash = '/' + String(redirect || 'dashboard').replace(/^\\//, '');", 'window.location.reload();');
-    const code = prefix + [...reachable].sort().map(id => JSON.stringify(id) + ':' + modules[id]).join(',\n') + suffix;
+    const assembled = prefix + [...reachable].sort().map(id => JSON.stringify(id) + ':' + modules[id]).join(',\n') + suffix;
+    // Keep builds reproducible while reducing transfer and parse work. No source
+    // maps or original protected sources are published in the public directory.
+    const code = transformSync(assembled, {
+        minify: true, target: 'es2017', legalComments: 'none',
+        // Escape multiline string contents without leaving trailing whitespace
+        // in generated source or changing the strings themselves.
+        supported: {'template-literal': false},
+    }).code;
     parse(code);
     return {code, modules: [...reachable].sort(), routes: Object.keys(pageRoles).filter(route => pageRoles[route].includes(role))};
 }
@@ -239,7 +248,7 @@ function build() {
     const out = path.join(root, 'resources/admin/build');
     fs.mkdirSync(out, {recursive: true});
     const sourceFiles = ['resources/admin/legacy/umi.js', 'resources/admin/legacy/vendors.async.js', 'resources/admin/legacy/components.async.js',
-        'scripts/build-admin-security.cjs', ...['support', 'account', 'role-field', 'audit'].map(name => 'scripts/admin-security/' + name + '.js')];
+        'scripts/build-admin-security.cjs', 'scripts/package.json', 'scripts/package-lock.json', ...['support', 'account', 'role-field', 'audit'].map(name => 'scripts/admin-security/' + name + '.js')];
     const manifest = {version: 1, sources: Object.fromEntries(sourceFiles.map(file => [file, crypto.createHash('sha256').update(read(file).replace(/\r\n/g, '\n')).digest('hex')])), roles: {}};
     for (const role of Object.keys(roleModels)) {
         const result = compile(role);

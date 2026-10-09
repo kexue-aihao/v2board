@@ -60,8 +60,10 @@ Route::get('/', function (Request $request) {
 });
 
 //TODO:: 兼容
-Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))), function () {
-    return view('admin', [
+Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key')))), function (Request $request) {
+    $entry = \App\Services\AdminEntryService::page($request);
+    return response()->view('admin', [
+        'admin_entry' => $entry,
         'title' => config('v2board.app_name', 'V2Board'),
         'theme_sidebar' => config('v2board.frontend_theme_sidebar', 'light'),
         'theme_header' => config('v2board.frontend_theme_header', 'dark'),
@@ -70,7 +72,7 @@ Route::get('/' . config('v2board.secure_path', config('v2board.frontend_admin_pa
         'version' => config('app.version'),
         'logo' => config('v2board.logo'),
         'secure_path' => config('v2board.secure_path', config('v2board.frontend_admin_path', hash('crc32b', config('app.key'))))
-    ]);
+    ])->header('Cache-Control', 'private, no-store')->header('Vary', 'Cookie');
 });
 
 Route::get('/store/{slug}', function ($slug) {

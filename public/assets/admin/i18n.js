@@ -9,9 +9,9 @@
  * UI 语言出接口报错。bundle 一个字节不改，补丁锚点不受影响。
  *
  * 语言集与全站对齐（8 语，见 resources/lang/ 与 signature 主题），标签遵循
- * BCP 47。字典按语种拆文件 i18n.<code>.js：本引擎是 <body> 内第一个解析中
- * 脚本，document.write 注入的同源脚本同步阻塞加载，保证 vendors/umi 执行前
- * 字典就位（无闪中文）；write 被拦时回退异步注入，到货后全量补翻一遍。
+ * BCP 47。字典按语种拆文件 i18n.<code>.js：后台 entry 在 head 中发现字典，
+ * 与应用并行下载，defer 按引擎、字典、应用顺序执行（无闪中文）；其他入口
+ * 保留同步注入或异步兜底，到货后全量补翻一遍。
  *
  * 切换器：#page-header 右侧按钮组首位注入下拉（样式与暗色模式按钮同配方，
  * 跟随 header 明暗），登录页等无 header 场景回退右下角胶囊。React 更新右侧
@@ -379,6 +379,7 @@
 
     // —— 装载本语种字典：locale 已过注册表白名单，URL 不可注入 ——
     (function () {
+        if (document.getElementById('admin-entry-dictionary')) return;
         var v = '';
         try {
             var cs = document.currentScript;

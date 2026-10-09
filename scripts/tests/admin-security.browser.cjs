@@ -21,15 +21,23 @@ const labels = {
     '/queue': '队列监控', '/security/account': '账号安全', '/security/audit': '安全审计',
 };
 const view = fs.readFileSync(path.join(root, 'resources/views/admin.blade.php'), 'utf8');
-const startupMarkup = view.match(/<div id="admin-startup"[\s\S]*?<div id="root"[^>]*><\/div>/)[0].replace(/\{\{\$title\}\}/g, '4A Test');
-const layoutScript = view.match(/<script>\s*\/\/ Select a visible initial layout[\s\S]*?<\/script>/)[0];
 const styles = view.match(/<link data-admin-style[^>]+>/g).join('').replace(/\{\{\$adminAssetVersion\}\}/g, 'test');
-const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + fs.readFileSync(path.join(root, 'public/assets/admin/startup.css'), 'utf8') + '</style>' + styles + '<script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};</script>' + layoutScript + '</head><body>' + startupMarkup + '<script src="/assets/admin/security-loader.js"></script></body></html>';
+const entryCode = fs.readFileSync(path.join(root, 'public/assets/admin/entry.js'), 'utf8');
+function security(role, version = 1) {
+    return {role, version, user_id: 9, debug_exempt: true, landing: roles[role][0], menus: roles[role][1].map(href => ({href, title: labels[href], type: 'item'}))};
+}
+const entryToken = 'fixture.' + Buffer.from(JSON.stringify({id: 9, session: 'entry-fixture'})).toString('base64url') + '.fixture';
+function htmlForEntry(entry = null) {
+    return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        + '<script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};window.adminEntry=' + JSON.stringify(entry) + ';</script>'
+        + '<script defer src="/assets/admin/i18n.js?v=test"></script><script defer src="/assets/admin/security-loader.js"></script><script>' + entryCode + '</script>' + styles + '</head><body><div id="root" aria-busy="true"></div></body></html>';
+}
+const html = htmlForEntry();
 let cacheFixture = null;
 const cacheRequests = [];
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    if (url.pathname === '/test') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.end(html); }
+    if (url.pathname === '/test') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.setHeader('Cache-Control', 'private, no-store'); return res.end(cacheFixture && cacheFixture.authorized ? htmlForEntry({security: security(cacheFixture.role, cacheFixture.version), session: 'entry-fixture'}) : html); }
     // A real HTTP fixture is necessary: Playwright routing disables the cache.
     if (cacheFixture && url.pathname.startsWith('/api/v1/test/')) {
         res.setHeader('Cache-Control', 'no-store');
@@ -134,7 +142,7 @@ const server = http.createServer((req, res) => {
             await page.goto('http://127.0.0.1:' + server.address().port + '/test#' + (isGuest ? '/login' : roles[role][0]));
             if (isGuest) {
                 await page.locator('input[type=password]').waitFor();
-                await page.locator('#admin-startup').waitFor({state: 'detached'});
+                assert.equal(await page.locator('#admin-startup').count(), 0);
                 await page.locator('input[type=text]').fill('admin@example.test'); await page.locator('input[type=password]').fill('testpassword');
                 await page.getByRole('button', {name: '登入'}).click();
                 if (role === 'guest2fa') {
@@ -143,44 +151,32 @@ const server = http.createServer((req, res) => {
                 }
             }
             await bootstrapRequested;
-            const startup = page.locator('#admin-startup');
-            await startup.waitFor();
-            assert.equal(await page.locator('#admin-startup-title').textContent(), '正在打开管理后台');
+            assert.equal(await page.locator('#admin-startup').count(), 0, 'no transition or placeholder page');
             assert.equal(await page.locator('#root').getAttribute('aria-busy'), 'true');
-            assert.ok(await page.locator('.admin-startup__workspace').isVisible(), 'the initial workspace is visible during permission checks');
-            assert.equal(await startup.evaluate(el => getComputedStyle(el).animationName), 'none');
-            assert.equal(await page.locator('.admin-startup__indicator').count(), 0, 'no full-screen spinner');
-            assert.equal(await page.locator('#sidebar').count(), 0, 'protected application has not rendered before validation');
-            if (process.env.ADMIN_SCREENSHOT_DIR && ['super', 'support'].includes(role)) {
-                fs.mkdirSync(process.env.ADMIN_SCREENSHOT_DIR, {recursive: true});
-                await page.screenshot({path: path.join(process.env.ADMIN_SCREENSHOT_DIR, role === 'super' ? 'startup-permissions.png' : 'startup-permissions-mobile.png')});
-            }
+            assert.equal(await page.locator('#sidebar').count(), 0, 'legacy sessions still validate before role resources load');
             releaseBootstrap();
             await assetRequested;
-            assert.equal(await page.locator('#admin-startup-title').textContent(), '正在打开管理后台');
-            assert.ok(await startup.isVisible(), 'loading remains visible while role script is pending');
             releaseAsset();
             await page.locator('#sidebar').waitFor();
-            await startup.waitFor({state: 'detached'});
-            assert.equal(await page.locator('#root').getAttribute('aria-busy'), null);
+            await page.waitForFunction(() => !document.getElementById('root').hasAttribute('aria-busy'));
+            if (process.env.ADMIN_SCREENSHOT_DIR && ['super', 'support'].includes(role)) {
+                fs.mkdirSync(process.env.ADMIN_SCREENSHOT_DIR, {recursive: true});
+                await page.screenshot({path: path.join(process.env.ADMIN_SCREENSHOT_DIR, role + '-actual-page.png')});
+            }
             const bootstrapCount = calls.filter(endpoint => endpoint === '/security/bootstrap').length;
             const assetCount = calls.filter(endpoint => endpoint === '/security/asset').length;
             resetGates();
             await page.reload();
             await bootstrapRequested;
-            assert.ok(await startup.isVisible(), 'same-tab refresh retains the workspace while permissions resolve');
-            assert.ok(await page.locator('.admin-startup__workspace').isVisible());
-            assert.deepEqual(await page.locator('.admin-startup__menu-item').allTextContents(), roles[isGuest ? 'operations' : role][1].map(href => labels[href]));
-            assert.equal(await startup.locator('a, button, input').count(), 0, 'cached menu labels cannot perform actions');
-            assert.equal(await page.locator('#sidebar').count(), 0, 'cached role never bypasses server validation');
+            assert.equal(await page.locator('#admin-startup').count(), 0);
+            assert.equal(await page.locator('#sidebar').count(), 0);
             assert.equal(calls.filter(endpoint => endpoint === '/security/asset').length, assetCount);
             releaseBootstrap();
             await assetRequested;
-            assert.ok(await startup.isVisible(), 'workspace stays visible while the role script downloads');
             releaseAsset();
             await page.locator('#sidebar').waitFor();
-            await startup.waitFor({state: 'detached'});
-            assert.equal(calls.filter(endpoint => endpoint === '/security/bootstrap').length, bootstrapCount + 1, 'refresh checks the current server permissions');
+            await page.waitForFunction(() => !document.getElementById('root').hasAttribute('aria-busy'));
+            assert.equal(calls.filter(endpoint => endpoint === '/security/bootstrap').length, bootstrapCount + 1);
             if (!isGuest) {
                 const links = await page.locator('#sidebar .nav-main-link-name').allTextContents();
                 assert.deepEqual(links, roles[role][1].map(href => labels[href] || href), role + ' menus');
@@ -337,7 +333,7 @@ const server = http.createServer((req, res) => {
                 assert.equal(await page.getByRole('alert').textContent(), '后台加载失败，请刷新重试');
                 if (scenario === 'bootstrap-failure') assert.ok(!calls.includes('/security/asset'));
             }
-            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.locator('#admin-startup').count(), 0);
             assert.equal(await page.locator('#root').getAttribute('aria-busy'), null);
             assert.deepEqual(errors, [], scenario + ' browser errors');
             console.log(scenario + ': browser passed');
@@ -367,67 +363,85 @@ const server = http.createServer((req, res) => {
             });
             await page.goto('http://127.0.0.1:' + server.address().port + '/test#/user');
             await requested;
-            assert.ok(await page.locator('#admin-startup').isVisible(), 'all cache states retain a visible initial workspace');
+            assert.equal(await page.locator('#admin-startup').count(), 0);
             assert.deepEqual(assetRoles, [], 'no role asset executes before validation');
             releaseBootstrap();
             await page.locator('#sidebar').waitFor();
-            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.locator('#admin-startup').count(), 0);
             assert.equal(await page.evaluate(() => location.hash), '#' + roles.operations[0]);
             assert.deepEqual(assetRoles, ['operations'], 'the current server role replaces the cached role');
-            assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('v2board.admin.security:test')).security.version), 2);
+            assert.equal(await page.evaluate(() => sessionStorage.getItem('v2board.admin.security:test')), null, 'obsolete presentation cache is removed');
             assert.deepEqual(errors, []);
             console.log(scenario + ': browser passed');
             await context.close();
         }
         if (!process.env.ADMIN_TEST_ROLE) {
-            const context = await browser.newContext(), page = await context.newPage(), errors = [];
-            await page.addInitScript(() => localStorage.setItem('authorization', 'fixture'));
+          for (const locale of ['zh-CN', 'en-US']) {
+            const context = await browser.newContext(), page = await context.newPage(), errors = [], calls = [];
+            await page.addInitScript(({token, locale}) => {
+                localStorage.setItem('authorization', token);
+                localStorage.setItem('v2board_admin_locale', locale);
+                new MutationObserver(() => {
+                    if (document.getElementById('sidebar') && !window.adminRenderedAt) window.adminRenderedAt = performance.now();
+                    if (document.getElementById('sidebar')?.textContent.includes('Tickets') && !window.adminTranslatedAt) window.adminTranslatedAt = performance.now();
+                }).observe(document, {childList: true, subtree: true, characterData: true});
+            }, {token: entryToken, locale});
             page.on('pageerror', error => errors.push(error.message));
-            let releaseScript, releaseStyles;
-            const scriptGate = new Promise(resolve => { releaseScript = resolve; });
+            let releaseStyles, releaseAsset, notifyAsset, notifyLoader, notifyDictionary;
             const styleGate = new Promise(resolve => { releaseStyles = resolve; });
-            await page.route('**/assets/admin/security-loader.js*', async route => { await scriptGate; return route.continue(); });
+            const assetGate = new Promise(resolve => { releaseAsset = resolve; });
+            const assetRequested = new Promise(resolve => { notifyAsset = resolve; });
+            const loaderRequested = new Promise(resolve => { notifyLoader = resolve; });
+            const dictionaryRequested = new Promise(resolve => { notifyDictionary = resolve; });
+            await page.route('**/test', route => route.fulfill({contentType: 'text/html', body: htmlForEntry({security: security('support'), session: 'entry-fixture'})}));
+            await page.route('**/assets/admin/security-loader.js*', route => { notifyLoader(); return route.continue(); });
             await page.route('**/assets/admin/*.css*', async route => { await styleGate; return route.continue(); });
+            await page.route('**/assets/admin/i18n.en-US.js*', async route => { notifyDictionary(); await assetGate; return route.continue(); });
             await page.route('**/api/v1/test/**', async route => {
-                const endpoint = new URL(route.request().url()).pathname.replace('/api/v1/test', '');
-                if (endpoint === '/security/bootstrap') return route.fulfill({contentType: 'application/json', body: JSON.stringify({data: {role: 'support', version: 1, debug_exempt: true, landing: '/ticket', menus: roles.support[1].map(href => ({href, title: labels[href], type: 'item'}))}})});
-                if (endpoint === '/security/asset') return route.fulfill({contentType: 'application/javascript', body: fs.readFileSync(path.join(root, 'resources/admin/build/support.js'), 'utf8')});
+                const endpoint = new URL(route.request().url()).pathname.replace('/api/v1/test', ''); calls.push(endpoint);
+                if (endpoint === '/security/asset') {
+                    notifyAsset(); await assetGate;
+                    return route.fulfill({contentType: 'application/javascript', body: fs.readFileSync(path.join(root, 'resources/admin/build/support.js'), 'utf8')});
+                }
                 return route.fulfill({contentType: 'application/json', body: JSON.stringify({data: [], total: 0})});
             });
             await page.goto('http://127.0.0.1:' + server.address().port + '/test#/ticket', {waitUntil: 'commit'});
-            const startup = page.locator('#admin-startup');
-            await startup.waitFor();
-            assert.ok(await page.locator('.admin-startup__workspace').isVisible(), 'HTML shows the workspace before the loader or application CSS arrive');
-            assert.equal((await page.locator('.admin-startup__header').boundingBox()).height, 52, 'critical layout styles are already available');
-            assert.equal(await page.locator('#sidebar').count(), 0);
-            releaseScript();
-            await page.locator('#sidebar').waitFor({state: 'attached'});
-            assert.ok(await startup.isVisible(), 'initial layout remains until full application styles finish');
-            assert.equal(await page.locator('#root').getAttribute('aria-busy'), 'true');
-            releaseStyles();
-            await startup.waitFor({state: 'detached'});
-            assert.equal(await page.locator('#root').getAttribute('aria-busy'), null);
+            await Promise.all([assetRequested, loaderRequested, ...(locale === 'en-US' ? [dictionaryRequested] : [])]);
+            assert.ok(!calls.includes('/security/bootstrap'), 'the authenticated script starts with the loader and styles, without a permission waterfall');
+            assert.equal(await page.evaluate(() => performance.getEntriesByType('paint').length), 0, 'the browser waits for the real page before painting');
+            releaseStyles(); releaseAsset();
+            await page.locator('#sidebar').waitFor();
+            await page.waitForFunction(() => !document.getElementById('root').hasAttribute('aria-busy'));
+            await page.waitForFunction(() => performance.getEntriesByName('first-contentful-paint').length > 0);
+            const paint = await page.evaluate(() => ({rendered: window.adminRenderedAt, translated: window.adminTranslatedAt, first: performance.getEntriesByName('first-contentful-paint')[0].startTime}));
+            assert.ok(paint.first >= paint.rendered, 'the first painted frame contains the actual application');
+            if (locale === 'en-US') {
+                assert.ok(paint.translated && paint.first >= paint.translated, 'the selected language is ready in the first frame');
+                assert.equal(await page.locator('script[src*="i18n.en-US.js"]').count(), 1, 'the dictionary is downloaded once');
+            }
+            assert.equal(await page.locator('#admin-startup').count(), 0);
             assert.deepEqual(errors, []);
-            console.log('delayed-scripts-and-styles: browser passed');
+            console.log('authenticated-first-frame-and-parallel-assets (' + locale + '): browser passed');
             await context.close();
+          }
         }
         if (!process.env.ADMIN_TEST_ROLE) {
             cacheFixture = {authorized: true, role: 'support', version: 1};
             const context = await browser.newContext(), page = await context.newPage(), errors = [];
-            await page.addInitScript(() => localStorage.setItem('authorization', 'cache-fixture'));
+            await page.addInitScript(token => localStorage.setItem('authorization', token), entryToken);
             page.on('pageerror', error => errors.push(error.message));
             await page.goto('http://127.0.0.1:' + server.address().port + '/test#/ticket');
             await page.locator('#sidebar').waitFor();
-            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.locator('#admin-startup').count(), 0);
             await page.reload();
             await page.locator('#sidebar').waitFor();
-            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.locator('#admin-startup').count(), 0);
             assert.deepEqual(cacheRequests.map(request => request.status), [200, 304], 'refresh revalidates the cached script without downloading its body');
             assert.equal(cacheRequests[1].requestedEtag, cacheRequests[0].etag);
             cacheFixture.role = 'finance'; cacheFixture.version = 2;
             await page.reload();
             await page.locator('#sidebar').waitFor();
-            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.locator('#admin-startup').count(), 0);
             assert.equal(await page.evaluate(() => window.adminSecurity.role), 'finance');
             assert.equal(await page.evaluate(() => location.hash), '#/order');
             assert.deepEqual(cacheRequests.map(request => request.status), [200, 304, 200]);
@@ -435,7 +449,7 @@ const server = http.createServer((req, res) => {
             cacheFixture.authorized = false;
             await page.reload();
             await page.locator('input[type=password]').waitFor();
-            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.locator('#admin-startup').count(), 0);
             assert.equal(await page.evaluate(() => localStorage.getItem('authorization')), null);
             assert.equal(cacheRequests.length, 3, 'expired sessions do not execute cached role resources');
             assert.deepEqual(errors, []);

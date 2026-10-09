@@ -73,7 +73,7 @@ class AdminSecurityTest extends TestCase
             foreach (['private', 'no-cache', 'must-revalidate'] as $directive) {
                 $this->assertStringContainsString($directive, $asset->headers->get('Cache-Control'));
             }
-            $this->assertSame('Authorization', $asset->headers->get('Vary'));
+            $this->assertSame('Authorization, Cookie', $asset->headers->get('Vary'));
             $this->assertSame(file_get_contents(resource_path('admin/build/' . $role . '.js')), $asset->getContent());
             $etag = $asset->headers->get('ETag');
             $this->assertNotEmpty($etag);
@@ -101,6 +101,105 @@ class AdminSecurityTest extends TestCase
         $this->postJson('/api/v1/staff/notice/save', [], $this->headers(4))->assertForbidden();
         $this->getJson($this->base . '/security/bootstrap', $this->headers(6))->assertForbidden();
         $this->getJson($this->base . '/security/bootstrap', $this->headers(7))->assertForbidden();
+    }
+
+    public function testAdminPageUsesTheVerifiedSessionWithoutGrantingCookieBusinessAccess(): void
+    {
+        $headers = $this->headers(2);
+        $name = \App\Services\AdminEntryService::cookieName();
+        $bootstrap = $this->getJson($this->base . '/security/bootstrap', $headers)->assertOk();
+        $cookies = $bootstrap->headers->getCookies();
+        $this->assertCount(1, $cookies);
+        $this->assertSame($name, $cookies[0]->getName());
+        $this->assertSame($headers['Authorization'], $cookies[0]->getValue());
+        $this->assertTrue($cookies[0]->isHttpOnly());
+        $this->assertSame('strict', $cookies[0]->getSameSite());
+
+        $this->withUnencryptedCookie($name, $headers['Authorization']);
+        $page = $this->get(substr($this->base, strlen('/api/v1')))->assertOk();
+        $page->assertViewHas('admin_entry', function ($entry) {
+            return $entry['security']['role'] === 'operations' && $entry['security']['user_id'] === 2 && !empty($entry['session']);
+        });
+        $this->assertStringContainsString('no-store', $page->headers->get('Cache-Control'));
+        $page->assertHeader('Vary', 'Cookie');
+        $page->assertDontSee('admin-startup', false);
+        $this->get($this->base . '/security/asset')->assertOk();
+        $this->get($this->base . '/security/bootstrap')->assertForbidden();
+        $this->get($this->base . '/config/fetch')->assertForbidden();
+        $this->post($this->base . '/config/save', ['app_name' => 'cookie-csrf'])->assertForbidden();
+
+        $etag = $this->get($this->base . '/security/asset')->headers->get('ETag');
+        DB::table('v2_user')->where('id', 2)->update(['admin_role' => 'finance', 'admin_version' => 2]);
+        $this->get(substr($this->base, strlen('/api/v1')))->assertOk()->assertViewHas('admin_entry', null);
+        $this->get($this->base . '/security/asset', ['If-None-Match' => $etag])->assertForbidden();
+        $this->assertTrue(SecurityAuditService::verify()['valid']);
+    }
+
+    public function testSuccessfulAdminLoginSetsThePageCookieAndLogoutClearsIt(): void
+    {
+        config(['v2board.admin_2fa_force_enable' => 0]);
+        $this->installTwoFactorTables();
+        User::find(1)->update(['password' => password_hash('correct-password', PASSWORD_BCRYPT)]);
+        $login = $this->postJson($this->base . '/passport/auth/login', ['email' => 'founder@example.test', 'password' => 'correct-password'])->assertOk();
+        $cookies = $login->headers->getCookies();
+        $this->assertCount(1, $cookies);
+        $this->assertSame($login->json('data.auth_data'), $cookies[0]->getValue());
+        $logout = $this->postJson($this->base . '/security/logout', [], ['Authorization' => $login->json('data.auth_data')])->assertOk();
+        $this->assertLessThan(time(), $logout->headers->getCookies()[0]->getExpiresTime());
+    }
+
+    private function installTwoFactorTables(): void
+    {
+        Schema::create('v2_user_two_factor', function (Blueprint $table) {
+            $table->increments('id'); $table->integer('user_id');
+            $table->boolean('enabled')->default(false); $table->text('secret_encrypted')->nullable();
+            $table->text('pending_secret_encrypted')->nullable(); $table->text('recovery_codes')->nullable();
+            $table->integer('last_used_step')->nullable(); $table->integer('confirmed_at')->nullable();
+            $table->integer('created_at')->nullable(); $table->integer('updated_at')->nullable();
+        });
+        Schema::create('v2_two_factor_audit', function (Blueprint $table) {
+            $table->increments('id'); $table->integer('user_id'); $table->integer('actor_user_id')->nullable();
+            $table->string('action'); $table->string('ip')->nullable(); $table->text('user_agent')->nullable();
+            $table->text('metadata')->nullable(); $table->integer('created_at');
+        });
+    }
+
+    public function testPageCookieIsIssuedOnlyAfterTwoFactorLoginSucceeds(): void
+    {
+        $this->installTwoFactorTables();
+        User::find(1)->update(['password' => password_hash('correct-password', PASSWORD_BCRYPT)]);
+        $otp = new \PragmaRX\Google2FA\Google2FA();
+        $secret = $otp->generateSecretKey();
+        DB::table('v2_user_two_factor')->insert(['user_id' => 1, 'enabled' => 1,
+            'secret_encrypted' => \Illuminate\Support\Facades\Crypt::encryptString($secret)]);
+        $login = $this->postJson($this->base . '/passport/auth/login', ['email' => 'founder@example.test', 'password' => 'correct-password'])->assertOk();
+        $login->assertJsonPath('data.two_factor_required', true);
+        $this->assertCount(0, $login->headers->getCookies());
+        $invalid = $this->postJson($this->base . '/passport/auth/verify2fa', ['challenge' => $login->json('data.challenge'), 'code' => 'invalid']);
+        $this->assertNotSame(200, $invalid->getStatusCode());
+        $this->assertCount(0, $invalid->headers->getCookies());
+        $verified = $this->postJson($this->base . '/passport/auth/verify2fa', ['challenge' => $login->json('data.challenge'), 'code' => $otp->getCurrentOtp($secret)])->assertOk();
+        $this->assertSame($verified->json('data.auth_data'), $verified->headers->getCookies()[0]->getValue());
+        $this->withUnencryptedCookie(\App\Services\AdminEntryService::cookieName(), $verified->json('data.auth_data'));
+        $this->get($this->base . '/security/asset')->assertOk();
+    }
+
+    public function testPageCookieIsIssuedOnlyAfterRequiredTwoFactorSetupSucceeds(): void
+    {
+        $this->installTwoFactorTables();
+        config(['v2board.admin_2fa_force_enable' => 1]);
+        User::find(1)->update(['password' => password_hash('correct-password', PASSWORD_BCRYPT)]);
+        $login = $this->postJson($this->base . '/passport/auth/login', ['email' => 'founder@example.test', 'password' => 'correct-password'])->assertOk();
+        $login->assertJsonPath('data.two_factor_setup_required', true);
+        $this->assertCount(0, $login->headers->getCookies());
+        $setupToken = $login->json('data.challenge');
+        $setup = $this->postJson($this->base . '/passport/auth/2fa/setup', ['setup_token' => $setupToken])->assertOk();
+        $this->assertCount(0, $setup->headers->getCookies());
+        $otp = new \PragmaRX\Google2FA\Google2FA();
+        $confirmed = $this->postJson($this->base . '/passport/auth/2fa/confirm', ['setup_token' => $setupToken,
+            'code' => $otp->getCurrentOtp($setup->json('data.manual_key'))])->assertOk();
+        $this->assertSame($confirmed->json('data.auth_data'), $confirmed->headers->getCookies()[0]->getValue());
+        $this->assertCount(8, $confirmed->json('data.recovery_codes'));
     }
 
     public function testRoleAssignmentsAreSuperOnlyAndRevokeAlreadyIssuedSessions(): void

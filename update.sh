@@ -200,7 +200,6 @@ fi
 deploy_step deploy_schema_update
 deploy_step deploy_php artisan audit:backfill-summaries --chunk=1000
 deploy_step deploy_php artisan optimize:clear
-deploy_step deploy_php scripts/refresh-telegram-webhook.php
 deploy_step deploy_php artisan ip:clear-location-cache
 deploy_step deploy_php artisan ip:backfill-subscribe-locations --chunk=500
 # 上一条会清空 IP 归属缓存，也会把清洗网关那批冗余归属地一并重置；这里立刻补回来，
@@ -210,7 +209,14 @@ deploy_step deploy_php artisan access:locations --chunk=500
 # 真正的提醒交给每 15 分钟的调度，它本来就是「未处理就重复发」的。
 deploy_step deploy_php artisan risk:notify --refresh-only
 deploy_step deploy_php artisan horizon:terminate || true
+deploy_step deploy_chown
+# Existing sites may use a different public API host from app_url. Keep that
+# callback and refresh its secret/cache before starting workers.
+deploy_step deploy_php scripts/refresh-telegram-webhook.php
+# The CLI may have created configuration files as root.
+deploy_step deploy_chown
 deploy_step deploy_start_webman
+deploy_step deploy_php scripts/check-telegram-webhook.php
 # 升级也要跑：早于本次改动安装的站点从来没被写过这条 cron，而检查是幂等的 —— 运维手写的
 # 条目（或系统级 /etc/cron.d 条目）会被识别并原样保留，不会重复追加。
 deploy_step deploy_install_cron

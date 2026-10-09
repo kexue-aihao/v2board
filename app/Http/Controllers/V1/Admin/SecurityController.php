@@ -5,6 +5,7 @@ namespace App\Http\Controllers\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\AdminAccessService;
+use App\Services\AdminEntryService;
 use App\Services\AuthService;
 use App\Services\SecurityAuditService;
 use App\Services\SecurityAuditDescription;
@@ -15,13 +16,8 @@ class SecurityController extends Controller
 {
     public function bootstrap(Request $request)
     {
-        $role = $request->user['admin_role'];
-        return response(['data' => [
-            'role' => $role, 'role_label' => config('admin_security.roles')[$role],
-            'version' => $request->user['admin_version'], 'user_id' => $request->user['id'],
-            'menus' => AdminAccessService::menus($role), 'landing' => AdminAccessService::landing($role),
-            'debug_exempt' => app()->environment(['local', 'testing']) || (bool)config('admin_security.debug_exempt'),
-        ]])->header('Cache-Control', 'private, no-store');
+        $response = response(['data' => AdminEntryService::security($request->user)])->header('Cache-Control', 'private, no-store');
+        return AdminEntryService::remember($response, $request, (string)($request->input('auth_data') ?? $request->header('authorization')));
     }
 
     public function asset(Request $request)
@@ -34,7 +30,7 @@ class SecurityController extends Controller
         // shared caches must never store it or serve it without validation.
         $script = file_get_contents($path);
         $response = response($script, 200, ['Content-Type' => 'application/javascript; charset=utf-8',
-            'Cache-Control' => 'private, no-cache, max-age=0, must-revalidate', 'Vary' => 'Authorization', 'X-Content-Type-Options' => 'nosniff']);
+            'Cache-Control' => 'private, no-cache, max-age=0, must-revalidate', 'Vary' => 'Authorization, Cookie', 'X-Content-Type-Options' => 'nosniff']);
         $response->setEtag(hash('sha256', $role . ':' . $script));
         $response->isNotModified($request);
         return $response;
@@ -205,6 +201,6 @@ class SecurityController extends Controller
     public function logout(Request $request)
     {
         (new AuthService(User::findOrFail($request->user['id'])))->removeAllSession();
-        return response(['data' => true]);
+        return AdminEntryService::forget(response(['data' => true]), $request);
     }
 }
