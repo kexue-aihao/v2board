@@ -24,7 +24,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        //
+        $this->app->extend('command.config.cache', function ($command, $app) {
+            return new \App\Console\Commands\CacheConfiguration($app['files']);
+        });
     }
 
     /**

@@ -13,11 +13,11 @@ use App\Services\SiteStatusService;
 use App\Services\TelegramBindingService;
 use App\Services\TelegramService;
 use App\Services\PaymentReturnUrlService;
+use App\Services\WebmanRuntimeService;
 use App\Utils\Dict;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Cache;
 
 class ConfigController extends Controller
 {
@@ -65,22 +65,8 @@ class ConfigController extends Controller
     {
         $token = trim((string)$request->input('telegram_bot_token', config('v2board.telegram_bot_token')));
         $secretToken = bin2hex(random_bytes(32));
-        // 注册到「当前请求的域名」，也就是管理员此刻打开后台用的那个域名 —— 上游 v2board 的
-        // 原始行为（backup / master / release 三个分支都是这一行）。
-        //
-        // 这个域名从哪个来、要不要改成固定值，为它来回翻过两次，结论记在这里：
-        //
-        // 前台域名与后端域名指向同一个 vhost（同一个 root、同一套 webman）时，注册到其中
-        // 任何一个功能上等价，都能收到投递。那次真正的故障是配置缓存里的 webhook secret
-        // 落后一代导致的全量 401（见本方法结尾），跟域名无关 —— 别再把「机器人不回话」
-        // 往域名上归因。
-        //
-        // 唯一的实际约束：这个按钮必须在「对外可达、且 /api 能落到后端」的域名下点。若后台
-        // 域名只对内开放，从它注册上去才会真的静默失效。
-        //
-        // 若哪天要求 webhook 必须固定落在某个域名（不随点击位置变），把这一行换成
-        // `rtrim(config('v2board.app_url'), '/') . '/api/v1/guest/telegram/webhook'` 即可。
-        // 注意：那样一旦 app_url 指向的不是后端域名，就会重演「注册到一个到不了后端的域名」。
+        // Use the admin request's public host, as before. app_url can point to a
+        // separate frontend that does not forward Telegram's /api requests.
         $hookUrl = secure_url('/api/v1/guest/telegram/webhook');
         $telegramService = new TelegramService($token);
         $telegramService->getMe();
@@ -112,23 +98,20 @@ class ConfigController extends Controller
         \App\Services\SecurityAuditService::fileChanged('settings', 'Telegram 回调密钥',
             ['telegram_bot_token' => config('v2board.telegram_bot_token'), 'telegram_webhook_secret' => config('v2board.telegram_webhook_secret')],
             ['telegram_bot_token' => $token, 'telegram_webhook_secret' => $secretToken]);
-        Artisan::call('config:cache');
-
-        // 下面这段不能省，删了就是线上事故：webman 是常驻进程，config() 取的是启动快照。
-        // 把新 secret 写进 config/v2board.php 并重建 bootstrap/cache/config.php 之后，**已经
-        // 在服务的 worker 仍然拿着旧 secret**（TrafficRewardService::reloadWebman 的注释里
-        // 写过同一件事）。于是 Telegram 用 setWebhook 时登记的新 secret 投递、worker 用旧
-        // secret 比对 —— 每一条更新都 401，而 setWebhook 返回成功、getWebhookInfo 也只给一句
-        // "Wrong response from the webhook: 401 Unauthorized"，看上去像域名/网络问题，极难定位。
-        // 2026-10-03 的事故就是这里：配置缓存里的 secret 比文件里落后一代，投递连续 401、
-        // 积压 11 条，而 webhook 地址本身完全可达。
-        if (Cache::has('WEBMANPID')) {
-            $pid = Cache::get('WEBMANPID');
-            Cache::forget('WEBMANPID');
-            return response([
-                'data' => posix_kill($pid, 15)
-            ]);
+        // Update this worker immediately; reload the other workers after sending
+        // the response so they pick up the newly registered secret as well.
+        config(['v2board.telegram_bot_token' => $token, 'v2board.telegram_webhook_secret' => $secretToken]);
+        $cacheWarning = null;
+        try {
+            if (Artisan::call('config:cache') !== 0) $cacheWarning = 'config:cache returned a non-zero exit code';
+        } catch (\Throwable $exception) {
+            $cacheWarning = $exception->getMessage();
         }
+        if ($cacheWarning !== null) {
+            \Illuminate\Support\Facades\Log::error('Telegram webhook saved but configuration cache refresh failed.', ['error' => $cacheWarning]);
+            abort(500, 'Telegram 回调已注册，但配置缓存刷新失败，请检查 bootstrap/cache 写入权限并重试');
+        }
+        WebmanRuntimeService::scheduleRestart();
         return response([
             'data' => true
         ]);
@@ -433,6 +416,7 @@ class ConfigController extends Controller
             );
         }
         \App\Services\SecurityAuditService::fileChanged('settings', '系统配置', $previousConfig, $config);
+        config(['v2board' => $config]);
         if (function_exists('opcache_reset')) {
             if (opcache_reset() === false) {
                 abort(500, __('缓存清除失败，请卸载或检查opcache配置状态'));
@@ -444,13 +428,7 @@ class ConfigController extends Controller
         // Site status is consumed through SiteStatusService on every request,
         // so toggling maintenance mode must not stop a Webman process that may
         // not be managed by Supervisor and therefore would not restart itself.
-        if (!SiteStatusService::onlyStatusChanges($previousConfig, $config) && Cache::has('WEBMANPID')) {
-            $pid = Cache::get('WEBMANPID');
-            Cache::forget('WEBMANPID');
-            return response([
-                'data' => posix_kill($pid, 15)
-            ]);
-        }
+        if (!SiteStatusService::onlyStatusChanges($previousConfig, $config)) WebmanRuntimeService::scheduleRestart();
         return response([
             'data' => true
         ]);

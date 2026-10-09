@@ -49,6 +49,20 @@
             ,admin_asset_version: '{{$adminAssetVersion}}'
         }
     </script>
+    <script>
+        // Hide repeat startup animation before the body paints. The loader still
+        // verifies the current server role before executing protected resources.
+        try {
+            var cached = JSON.parse(sessionStorage.getItem('v2board.admin.security:' + window.settings.secure_path) || 'null');
+            var authorization = localStorage.getItem('authorization');
+            if (authorization && cached && cached.authorization === authorization
+                && cached.assetVersion === window.settings.admin_asset_version
+                && cached.security && cached.security.role && cached.security.role !== 'guest'
+                && Array.isArray(cached.security.menus)) {
+                document.documentElement.classList.add('admin-security-cached');
+            }
+        } catch (ignore) {}
+    </script>
 </head>
 
 <body>

@@ -32,6 +32,7 @@ $http_worker->onMessage = static function ($connection, $request) {
         Cache::forever("WEBMANPID", $pid);
     }
     $connection->send(run());
+    \App\Services\WebmanRuntimeService::afterResponseSent();
     if (++$request_count > MAX_REQUEST) {
         Worker::stopAll();
     }

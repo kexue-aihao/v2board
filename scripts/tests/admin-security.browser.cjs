@@ -20,7 +20,8 @@ const labels = {
     '/queue': '队列监控', '/security/account': '账号安全', '/security/audit': '安全审计',
 };
 const startupMarkup = fs.readFileSync(path.join(root, 'resources/views/admin.blade.php'), 'utf8').match(/<div id="admin-startup"[\s\S]*?<div id="root"[^>]*><\/div>/)[0];
-const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/admin/umi.css"><link rel="stylesheet" href="/assets/admin/components.chunk.css"><link rel="stylesheet" href="/assets/admin/custom.css"></head><body>' + startupMarkup + '<script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};</script><script src="/assets/admin/security-loader.js"></script></body></html>';
+const cacheScript = fs.readFileSync(path.join(root, 'resources/views/admin.blade.php'), 'utf8').match(/<script>\s*\/\/ Hide repeat startup animation[\s\S]*?<\/script>/)[0];
+const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/assets/admin/umi.css"><link rel="stylesheet" href="/assets/admin/components.chunk.css"><link rel="stylesheet" href="/assets/admin/custom.css"><script>window.routerBase="/";window.settings={secure_path:"test",title:"4A Test",version:"test",theme:{sidebar:"dark",header:"light"},admin_asset_version:"test"};</script>' + cacheScript + '</head><body>' + startupMarkup + '<script src="/assets/admin/security-loader.js"></script></body></html>';
 const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/test') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); return res.end(html); }
@@ -30,17 +31,21 @@ const server = http.createServer((req, res) => {
 });
 (async () => {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const browser = await chromium.launch({headless: true});
+    const browser = await chromium.launch({headless: true, executablePath: process.env.ADMIN_BROWSER_EXECUTABLE || undefined});
     try {
         for (const role of (process.env.ADMIN_TEST_ROLE ? [process.env.ADMIN_TEST_ROLE] : ['guest', 'guest2fa', ...Object.keys(roles)])) {
             const isGuest = role === 'guest' || role === 'guest2fa';
             const context = await browser.newContext({viewport: {width: role === 'support' ? 390 : 1440, height: 1000}, reducedMotion: role === 'support' ? 'reduce' : 'no-preference'});
             const page = await context.newPage(), errors = [], calls = [];
             let releaseBootstrap, releaseAsset, notifyBootstrap, notifyAsset;
-            const bootstrapGate = new Promise(resolve => { releaseBootstrap = resolve; });
-            const assetGate = new Promise(resolve => { releaseAsset = resolve; });
-            const bootstrapRequested = new Promise(resolve => { notifyBootstrap = resolve; });
-            const assetRequested = new Promise(resolve => { notifyAsset = resolve; });
+            let bootstrapGate, assetGate, bootstrapRequested, assetRequested;
+            function resetGates() {
+                bootstrapGate = new Promise(resolve => { releaseBootstrap = resolve; });
+                assetGate = new Promise(resolve => { releaseAsset = resolve; });
+                bootstrapRequested = new Promise(resolve => { notifyBootstrap = resolve; });
+                assetRequested = new Promise(resolve => { notifyAsset = resolve; });
+            }
+            resetGates();
             const edits = [], userDefaults = {transfer_enable: 107374182400, u: 0, d: 0, total_used: 0, balance: 0, commission_balance: 0, device_limit: 6, expired_at: null, plan_id: null, banned: 0, commission_type: 0, commission_rate: null, discount: null, speed_limit: null, is_staff: 0, admin_version: 1, created_at: 1700000000, updated_at: 1700000000, alive_ip: 0, subscribe_url: 'https://example.test/subscribe', remarks: ''};
             const users = [Object.assign({}, userDefaults, {id: 6, email: 'member@example.test', is_admin: 0, admin_role: null}), Object.assign({}, userDefaults, {id: 1, email: 'founder@example.test', is_admin: 1, admin_role: null})];
             const auditBusiness = {version: 1, module: 'users', module_label: '用户管理', action_label: '修改用户资料', stage: 'finish', state: 'success', channel: '后台', actor: {id: 1, email: 'founder@example.test'}, batch_id: 'b'.repeat(32), criteria: [{label: '用户编号', value: 6}]};
@@ -127,6 +132,21 @@ const server = http.createServer((req, res) => {
             await page.locator('#sidebar').waitFor();
             await startup.waitFor({state: 'detached'});
             assert.equal(await page.locator('#root').getAttribute('aria-busy'), null);
+            const bootstrapCount = calls.filter(endpoint => endpoint === '/security/bootstrap').length;
+            const assetCount = calls.filter(endpoint => endpoint === '/security/asset').length;
+            resetGates();
+            await page.reload();
+            await bootstrapRequested;
+            assert.equal(await startup.evaluate(el => getComputedStyle(el).display), 'none', 'same-tab refresh hides the cover before permissions resolve');
+            assert.equal(await page.locator('#sidebar').count(), 0, 'cached role never bypasses server validation');
+            assert.equal(calls.filter(endpoint => endpoint === '/security/asset').length, assetCount);
+            releaseBootstrap();
+            await assetRequested;
+            assert.equal(await startup.evaluate(el => getComputedStyle(el).display), 'none', 'refresh also hides the asset-loading animation');
+            releaseAsset();
+            await page.locator('#sidebar').waitFor();
+            await startup.waitFor({state: 'detached'});
+            assert.equal(calls.filter(endpoint => endpoint === '/security/bootstrap').length, bootstrapCount + 1, 'refresh checks the current server permissions');
             if (!isGuest) {
                 const links = await page.locator('#sidebar .nav-main-link-name').allTextContents();
                 assert.deepEqual(links, roles[role][1].map(href => labels[href] || href), role + ' menus');
@@ -262,6 +282,7 @@ const server = http.createServer((req, res) => {
         if (!process.env.ADMIN_TEST_ROLE) for (const scenario of ['bootstrap-failure', 'asset-failure', 'expired-session']) {
             const context = await browser.newContext(), page = await context.newPage(), calls = [], errors = [];
             await page.addInitScript(() => localStorage.setItem('authorization', 'fixture'));
+            if (scenario === 'expired-session') await page.addInitScript(() => sessionStorage.setItem('v2board.admin.security:test', JSON.stringify({authorization: 'fixture', assetVersion: 'test', security: {role: 'super', version: 1, menus: [], landing: '/dashboard'}})));
             page.on('pageerror', error => errors.push(error.message));
             await page.route('**/api/v1/test/**', async route => {
                 const endpoint = new URL(route.request().url()).pathname.replace('/api/v1/test', ''); calls.push(endpoint);
@@ -275,6 +296,7 @@ const server = http.createServer((req, res) => {
             if (scenario === 'expired-session') {
                 await page.locator('input[type=password]').waitFor();
                 assert.equal(await page.evaluate(() => localStorage.getItem('authorization')), null);
+                assert.equal(await page.evaluate(() => sessionStorage.getItem('v2board.admin.security:test')), null);
                 assert.ok(!calls.includes('/security/asset'), 'expired session does not load role resources');
             } else {
                 await page.getByRole('alert').waitFor();
@@ -284,6 +306,42 @@ const server = http.createServer((req, res) => {
             await page.locator('#admin-startup').waitFor({state: 'detached'});
             assert.equal(await page.locator('#root').getAttribute('aria-busy'), null);
             assert.deepEqual(errors, [], scenario + ' browser errors');
+            console.log(scenario + ': browser passed');
+            await context.close();
+        }
+        if (!process.env.ADMIN_TEST_ROLE) for (const scenario of ['cached-role-change', 'cached-token-change', 'cached-asset-change']) {
+            const context = await browser.newContext(), page = await context.newPage(), errors = [], assetRoles = [];
+            page.on('pageerror', error => errors.push(error.message));
+            await page.addInitScript(scenario => {
+                localStorage.setItem('authorization', scenario === 'cached-token-change' ? 'new-fixture' : 'fixture');
+                sessionStorage.setItem('v2board.admin.security:test', JSON.stringify({authorization: 'fixture', assetVersion: scenario === 'cached-asset-change' ? 'old' : 'test', security: {role: 'super', version: 1, menus: [{href: '/user'}], landing: '/user'}}));
+            }, scenario);
+            let releaseBootstrap, notifyBootstrap;
+            const gate = new Promise(resolve => { releaseBootstrap = resolve; });
+            const requested = new Promise(resolve => { notifyBootstrap = resolve; });
+            await page.route('**/api/v1/test/**', async route => {
+                const endpoint = new URL(route.request().url()).pathname.replace('/api/v1/test', '');
+                if (endpoint === '/security/bootstrap') {
+                    notifyBootstrap(); await gate;
+                    return route.fulfill({contentType: 'application/json', body: JSON.stringify({data: {role: 'operations', version: 2, debug_exempt: true, landing: roles.operations[0], menus: roles.operations[1].map(href => ({href, title: labels[href], type: 'item'}))}})});
+                }
+                if (endpoint === '/security/asset') {
+                    assetRoles.push(await page.evaluate(() => window.adminSecurity.role));
+                    return route.fulfill({contentType: 'application/javascript', body: fs.readFileSync(path.join(root, 'resources/admin/build/operations.js'), 'utf8')});
+                }
+                return route.fulfill({contentType: 'application/json', body: JSON.stringify({data: [], total: 0})});
+            });
+            await page.goto('http://127.0.0.1:' + server.address().port + '/test#/user');
+            await requested;
+            assert.equal(await page.locator('#admin-startup').evaluate(el => getComputedStyle(el).display === 'none'), scenario === 'cached-role-change');
+            assert.deepEqual(assetRoles, [], 'no role asset executes before validation');
+            releaseBootstrap();
+            await page.locator('#sidebar').waitFor();
+            await page.locator('#admin-startup').waitFor({state: 'detached'});
+            assert.equal(await page.evaluate(() => location.hash), '#' + roles.operations[0]);
+            assert.deepEqual(assetRoles, ['operations'], 'the current server role replaces the cached role');
+            assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('v2board.admin.security:test')).security.version), 2);
+            assert.deepEqual(errors, []);
             console.log(scenario + ': browser passed');
             await context.close();
         }

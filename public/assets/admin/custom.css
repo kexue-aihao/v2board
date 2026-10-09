@@ -65,6 +65,12 @@
   pointer-events: none;
 }
 
+/* Applied in the head before the startup cover can paint. Permission checks
+   still run before loading any role resources. */
+.admin-security-cached .admin-startup {
+  display: none;
+}
+
 .admin-startup__indicator {
   position: relative;
   display: flex;

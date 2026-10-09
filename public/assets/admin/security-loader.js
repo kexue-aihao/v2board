@@ -6,6 +6,27 @@
     var root = document.getElementById('root');
     var startup = document.getElementById('admin-startup');
     var startupObserver;
+    var securityCacheKey = 'v2board.admin.security:' + window.settings.secure_path;
+    var cachedSecurity = null;
+    try {
+        var cached = JSON.parse(sessionStorage.getItem(securityCacheKey) || 'null');
+        if (initialAuthorization && cached && cached.authorization === initialAuthorization
+            && cached.assetVersion === window.settings.admin_asset_version
+            && cached.security && cached.security.role && cached.security.role !== 'guest'
+            && Array.isArray(cached.security.menus)) {
+            cachedSecurity = cached.security;
+        }
+    } catch (ignore) {}
+    if (!cachedSecurity) document.documentElement.classList.remove('admin-security-cached');
+    function cacheSecurity(security) {
+        try {
+            sessionStorage.setItem(securityCacheKey, JSON.stringify({
+                authorization: initialAuthorization,
+                assetVersion: window.settings.admin_asset_version,
+                security: security
+            }));
+        } catch (ignore) {}
+    }
     function progress(title, message) {
         if (!startup) return;
         document.getElementById('admin-startup-title').textContent = title;
@@ -71,6 +92,8 @@
     }
     function guest() {
         progress('正在加载登录页面', '请稍候，即将进入登录界面');
+        try { sessionStorage.removeItem(securityCacheKey); } catch (ignore) {}
+        document.documentElement.classList.remove('admin-security-cached');
         localStorage.removeItem('authorization'); initialAuthorization = null;
         window.adminSecurity = {role: 'guest', menus: [], landing: '/login', version: 0};
         guard();
@@ -79,9 +102,10 @@
     }
     function start() {
         if (!initialAuthorization) return guest();
-        progress('正在加载权限', '正在确认您的后台访问权限');
+        if (!cachedSecurity) progress('正在加载权限', '正在确认您的后台访问权限');
         return request('/security/bootstrap').then(function (security) {
             window.adminSecurity = security;
+            cacheSecurity(security);
             guard();
             // This is a deterrent only. It never disables authorization or auditing.
             if (!security.debug_exempt) document.addEventListener('keydown', function (event) {
@@ -99,9 +123,11 @@
     function refreshRole() {
         if (!window.adminSecurity || window.adminSecurity.role === 'guest' || loading || window.adminSecurityRecoveryPending) return;
         request('/security/bootstrap').then(function (security) {
+            cacheSecurity(security);
             if (security.role !== window.adminSecurity.role || security.version !== window.adminSecurity.version) location.reload();
         }).catch(function (error) {
             if (error.status === 401 || error.status === 403) {
+                try { sessionStorage.removeItem(securityCacheKey); } catch (ignore) {}
                 localStorage.removeItem('authorization'); location.reload();
             }
         });
