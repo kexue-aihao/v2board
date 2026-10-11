@@ -37829,7 +37829,8 @@
                 getPaymentForm(e) {
                     var t = e.complete
                       , n = e.payment
-                      , r = e.id;
+                      , r = e.id
+                      , s = e.failure;
                     return a().mark(function e() {
                         var i;
                         return a().wrap(function(e) {
@@ -37847,6 +37848,7 @@
                                         e.next = 5;
                                         break
                                     }
+                                    "function" === typeof s && s(i);
                                     return e.abrupt("return");
                                 case 5:
                                     t(i.data);
@@ -75184,16 +75186,20 @@
         class w extends d.a.Component {
             constructor(e) {
                 super(e),
+                this.paymentFormRequest = 0,
                 this.state = {
                     submit: b()({}, this.props.record),
                     visible: !1,
                     paymentMethods: [],
-                    selectPaymentMethod: void 0,
+                    selectPaymentMethod: this.props.record && this.props.record.payment,
                     form: {},
-                    config: this.props.record && this.props.record.config || {}
+                    formLoading: !1,
+                    formReady: !1,
+                    config: b()({}, this.props.record && this.props.record.config)
                 }
             }
             save() {
+                if (this.state.formLoading || !this.state.formReady) return;
                 var e = this.state
                   , t = e.config
                   , n = e.selectPaymentMethod
@@ -75213,27 +75219,55 @@
                 this.props.dispatch({
                     type: "payment/getPaymentMethods",
                     complete: e=>{
+                        var t = this.props.record || {}
+                          , n = t.payment || e[0];
                         this.setState({
                             visible: !0,
-                            paymentMethods: e,
-                            selectPaymentMethod: this.state.selectPaymentMethod || e[0]
+                            submit: b()({}, t),
+                            config: b()({}, t.config),
+                            form: {},
+                            formReady: !1,
+                            paymentMethods: t.payment && !e.includes(t.payment) ? e.concat(t.payment) : e,
+                            selectPaymentMethod: n
                         }, ()=>{
-                            this.onSelectPaymentMethod(this.state.selectPaymentMethod || e[0])
+                            this.onSelectPaymentMethod(n)
                         }
                         )
                     }
                 })
             }
             onSelectPaymentMethod(e) {
+                var n = ++this.paymentFormRequest
+                  , r = this.state.selectPaymentMethod
+                  , i = this.state.config;
+                this.setState({
+                    selectPaymentMethod: e,
+                    form: {},
+                    config: {},
+                    formLoading: !0,
+                    formReady: !1
+                });
                 this.props.dispatch({
                     type: "payment/getPaymentForm",
                     payment: e,
                     id: this.state.submit.id,
                     complete: t=>{
+                        if (n !== this.paymentFormRequest || !this.state.visible) return;
+                        var o = {};
+                        Object.keys(t).forEach(n=>{
+                            if (e === r && Object.prototype.hasOwnProperty.call(i, n)) o[n] = i[n];
+                            else if (void 0 !== t[n].value) o[n] = t[n].value;
+                        });
                         this.setState({
                             form: t,
-                            selectPaymentMethod: e
+                            config: o,
+                            formLoading: !1,
+                            formReady: !0
                         })
+                    },
+                    failure: ()=>{
+                        if (n !== this.paymentFormRequest || !this.state.visible) return;
+                        this.setState({formLoading: !1})
                     }
                 })
             }
@@ -75264,13 +75298,15 @@
                 }), d.a.createElement(s["a"], {
                     title: this.state.submit.id ? "\u7f16\u8f91\u652f\u4ed8\u65b9\u5f0f" : "\u6dfb\u52a0\u652f\u4ed8\u65b9\u5f0f",
                     visible: this.state.visible,
+                    destroyOnClose: !0,
                     onCancel: ()=>this.setState({
                         visible: !1
                     }),
                     onOk: ()=>this.save(),
                     okText: this.state.submit.id ? "\u4fdd\u5b58" : "\u6dfb\u52a0",
                     okButtonProps: {
-                        loading: e
+                        loading: e || this.state.formLoading,
+                        disabled: this.state.formLoading || !this.state.formReady
                     },
                     cancelText: "\u53d6\u6d88"
                 }, d.a.createElement("div", null, d.a.createElement("div", {
@@ -75330,7 +75366,7 @@
                     style: {
                         width: "100%"
                     },
-                    defaultValue: r,
+                    value: r,
                     onChange: e=>this.onSelectPaymentMethod(e)
                 }, n.map(e=>{
                     return d.a.createElement(g["a"].Option, {
@@ -75339,12 +75375,13 @@
                 }
                 )))), Object.keys(i).map(e=>{
                     return d.a.createElement("div", {
+                        key: r + ":" + e,
                         className: "form-group"
                     }, d.a.createElement("label", {
                         for: "example-text-input-alt"
                     }, i[e].label), ("input" === i[e].type || "text" === i[e].type || "string" === i[e].type || !i[e].type) && d.a.createElement(v["a"], {
                         placeholder: i[e].description,
-                        defaultValue: o[e] || i[e].value,
+                        value: null == o[e] ? "" : o[e],
                         onChange: t=>this.configOnChange(e, t.target.value)
                     }))
                 }

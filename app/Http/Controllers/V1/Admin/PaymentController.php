@@ -46,18 +46,21 @@ class PaymentController extends Controller
     {
         $paymentId = (int)$request->input('id');
         $driver = (string)$request->input('payment');
+        $configId = null;
         if ($paymentId) {
             $payment = Payment::find($paymentId);
             if (!$payment) abort(404, __('支付方式不存在'));
-            $driver = (string)$payment->payment;
+            if ($driver === '') $driver = (string)$payment->payment;
+            // Only prefill the saved configuration when editing the same driver.
+            if ($driver === (string)$payment->payment) $configId = $paymentId;
         }
         if (!PaymentAttemptService::isInstalledDriver($driver)) {
             abort(422, 'Payment driver is not installed');
         }
-        if (!$paymentId && !PaymentAttemptService::isDriverAvailable($driver)) {
+        if ($configId === null && !PaymentAttemptService::isDriverAvailable($driver)) {
             abort(422, 'This payment driver is not allowlisted');
         }
-        $paymentService = new PaymentService($driver, $paymentId ?: null);
+        $paymentService = new PaymentService($driver, $configId);
         return response([
             'data' => $paymentService->form()
         ]);
